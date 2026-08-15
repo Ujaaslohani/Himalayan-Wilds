@@ -1,0 +1,127 @@
+#include "Animals/HSAnimalActor.h"
+
+#include "Animals/HSAnimalDefinition.h"
+#include "Components/BoxComponent.h"
+#include "Core/HSGameplayTags.h"
+#include "Core/HSLogCategories.h"
+
+#define LOCTEXT_NAMESPACE "HSAnimalActor"
+
+AHSAnimalActor::AHSAnimalActor()
+	: FallbackDisplayName(LOCTEXT("DefaultDeerName", "Deer"))
+	, CurrentHealth(1.0f)
+	, RuntimeState(EHSAnimalRuntimeState::Idle)
+	, bHarvested(false)
+{
+	PrimaryActorTick.bCanEverTick = false;
+
+	InteractionBounds = CreateDefaultSubobject<UBoxComponent>(TEXT("InteractionBounds"));
+	RootComponent = InteractionBounds;
+	InteractionBounds->SetBoxExtent(FVector(55.0f, 35.0f, 70.0f));
+	InteractionBounds->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	InteractionBounds->SetCollisionResponseToAllChannels(ECR_Ignore);
+	InteractionBounds->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+}
+
+void AHSAnimalActor::SetAnimalDefinition(UHSAnimalDefinition* NewAnimalDefinition)
+{
+	AnimalDefinition = NewAnimalDefinition;
+	ResetRuntimeStateFromDefinition();
+}
+
+FText AHSAnimalActor::GetDisplayName() const
+{
+	return AnimalDefinition && !AnimalDefinition->DisplayName.IsEmpty() ? AnimalDefinition->DisplayName : FallbackDisplayName;
+}
+
+FGameplayTag AHSAnimalActor::GetSpeciesTag() const
+{
+	return AnimalDefinition ? AnimalDefinition->SpeciesTag : FGameplayTag();
+}
+
+float AHSAnimalActor::ApplyHuntingDamage(float DamageAmount, AActor* DamageInstigator)
+{
+	if (DamageAmount <= 0.0f || IsDead())
+	{
+		return 0.0f;
+	}
+
+	const float PreviousHealth = CurrentHealth;
+	CurrentHealth = FMath::Max(0.0f, CurrentHealth - DamageAmount);
+	const float AppliedDamage = PreviousHealth - CurrentHealth;
+
+	if (CurrentHealth <= 0.0f)
+	{
+		RuntimeState = EHSAnimalRuntimeState::Dead;
+		UE_LOG(LogHSAI, Log, TEXT("%s killed %s."), *GetNameSafe(DamageInstigator), *GetNameSafe(this));
+	}
+
+	return AppliedDamage;
+}
+
+bool AHSAnimalActor::TryHarvest(AActor* Harvester, TArray<FHSItemStack>& OutDrops)
+{
+	OutDrops.Reset();
+	if (!IsDead() || bHarvested || !AnimalDefinition)
+	{
+		return false;
+	}
+
+	HarvestedDrops = AnimalDefinition->HarvestDrops;
+	OutDrops = HarvestedDrops;
+	bHarvested = true;
+
+	UE_LOG(
+		LogHSInteraction,
+		Log,
+		TEXT("%s harvested %s and received %d drop stack(s)."),
+		*GetNameSafe(Harvester),
+		*GetNameSafe(this),
+		OutDrops.Num());
+	return true;
+}
+
+FText AHSAnimalActor::GetInteractionPrompt_Implementation(const AActor* Interactor) const
+{
+	if (IsDead() && !bHarvested)
+	{
+		FFormatNamedArguments Arguments;
+		Arguments.Add(TEXT("Name"), GetDisplayName());
+		return FText::Format(LOCTEXT("HarvestAnimalPrompt", "Harvest {Name}"), Arguments);
+	}
+
+	if (IsDead())
+	{
+		return LOCTEXT("AnimalHarvestedPrompt", "Harvested");
+	}
+
+	FFormatNamedArguments Arguments;
+	Arguments.Add(TEXT("Name"), GetDisplayName());
+	return FText::Format(LOCTEXT("ObserveAnimalPrompt", "Observe {Name}"), Arguments);
+}
+
+bool AHSAnimalActor::CanInteract_Implementation(const AActor* Interactor) const
+{
+	return IsDead() && !bHarvested && AnimalDefinition;
+}
+
+void AHSAnimalActor::Interact_Implementation(AActor* Interactor)
+{
+	TArray<FHSItemStack> Drops;
+	TryHarvest(Interactor, Drops);
+}
+
+void AHSAnimalActor::ResetRuntimeStateFromDefinition()
+{
+	CurrentHealth = GetMaxHealth();
+	RuntimeState = EHSAnimalRuntimeState::Idle;
+	bHarvested = false;
+	HarvestedDrops.Reset();
+}
+
+float AHSAnimalActor::GetMaxHealth() const
+{
+	return AnimalDefinition ? FMath::Max(1.0f, AnimalDefinition->MaxHealth) : 1.0f;
+}
+
+#undef LOCTEXT_NAMESPACE

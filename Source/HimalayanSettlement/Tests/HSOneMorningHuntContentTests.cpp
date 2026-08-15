@@ -1,8 +1,10 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Animals/HSAnimalActor.h"
 #include "Animals/HSAnimalDefinition.h"
 #include "Building/HSBuildingDefinition.h"
+#include "Core/HSGameplayTags.h"
 #include "Engine/World.h"
 #include "Interaction/HSInteractionTarget.h"
 #include "NPC/HSNPCActor.h"
@@ -62,6 +64,7 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 
 	bool bFoundHunter = false;
 	bool bFoundHunterQuestHandoff = false;
+	bool bFoundConfiguredDeer = false;
 	bool bFoundInteractionTarget = false;
 	if (World && World->PersistentLevel)
 	{
@@ -75,12 +78,19 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 					&& Handoff->GetQuestDefinition()
 					&& Handoff->GetHandoffState() == EHSQuestHandoffState::Available;
 			}
+			if (const AHSAnimalActor* Deer = Cast<AHSAnimalActor>(Actor))
+			{
+				bFoundConfiguredDeer |= Deer->GetAnimalDefinition()
+					&& Deer->GetSpeciesTag() == TAG_HS_Animal_Deer
+					&& Deer->GetRuntimeState() == EHSAnimalRuntimeState::Idle;
+			}
 			bFoundInteractionTarget |= Actor && Actor->IsA<AHSInteractionTarget>();
 		}
 	}
 
 	TestTrue(TEXT("One Morning Hunt map should contain a native NPC actor."), bFoundHunter);
 	TestTrue(TEXT("One Morning Hunt hunter should offer the first quest handoff."), bFoundHunterQuestHandoff);
+	TestTrue(TEXT("One Morning Hunt map should contain a configured native deer actor."), bFoundConfiguredDeer);
 	TestTrue(TEXT("One Morning Hunt map should contain a native interaction target."), bFoundInteractionTarget);
 
 	return true;

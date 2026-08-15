@@ -1,6 +1,7 @@
 #include "HSBootstrapOneMorningHuntCommandlet.h"
 
 #include "Animals/HSAnimalDefinition.h"
+#include "Animals/HSAnimalActor.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Building/HSBuildingDefinition.h"
 #include "Components/StaticMeshComponent.h"
@@ -233,6 +234,12 @@ void CreateMap()
 	if (UHSQuestDefinition* QuestDefinition = LoadObject<UHSQuestDefinition>(nullptr, TEXT("/Game/Data/Quests/DA_Quest_OneMorningHunt.DA_Quest_OneMorningHunt")))
 	{
 		Hunter->SetOfferedQuest(QuestDefinition);
+	}
+
+	AHSAnimalActor* Deer = SpawnNamedActor<AHSAnimalActor>(World, TEXT("Animal_Deer_Prototype"), FVector(650.0f, -180.0f, 70.0f), FRotator(0.0f, -35.0f, 0.0f));
+	if (UHSAnimalDefinition* DeerDefinition = LoadObject<UHSAnimalDefinition>(nullptr, TEXT("/Game/Data/Animals/DA_Animal_Deer.DA_Animal_Deer")))
+	{
+		Deer->SetAnimalDefinition(DeerDefinition);
 	}
 
 	SpawnNamedActor<AHSInteractionTarget>(World, TEXT("Interaction_Target_Practice"), FVector(200.0f, 160.0f, 90.0f), FRotator(0.0f, 180.0f, 0.0f));

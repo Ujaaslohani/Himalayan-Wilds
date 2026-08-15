@@ -59,6 +59,10 @@ Interactable actors expose prompts and use actions through the native `IHSIntera
 
 The first quest handoff is intentionally small: `UHSQuestHandoffComponent` references one `UHSQuestDefinition`, tracks whether it is available or accepted, and does not tick. It does not yet own quest completion, inventory turn-in, rewards, or persistence.
 
+## Animal Runtime
+
+`AHSAnimalActor` is the first native runtime animal shell. It references a `UHSAnimalDefinition`, tracks health and dead state, and exposes one-shot harvesting of configured drop stacks. It does not yet own wildlife AI, tracking clues, animation, inventory insertion, or projectile handling.
+
 ## Performance Rules
 
 - Avoid per-frame `Tick` unless the behavior genuinely requires frame-level updates.
