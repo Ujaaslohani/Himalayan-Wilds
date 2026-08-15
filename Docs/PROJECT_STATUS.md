@@ -28,6 +28,7 @@ Unreal Engine 5.5.4.
 - All five `HimalayanSettlement.DataDefinitions` automation tests pass.
 - Native first-person player foundation added.
 - Native interaction interface, on-demand interaction sensor, and placeholder interaction target added.
+- Native NPC actor interaction stub added for the first hunter conversation.
 
 ## In Progress
 
@@ -52,5 +53,5 @@ Unreal Engine 5.5.4.
 ## Next Tasks
 
 1. Create first data asset instances in `/Game/Data`.
-2. Add the first hunter NPC interaction stub.
-3. Create the minimal `L_OneMorningHunt` test map.
+2. Create the minimal `L_OneMorningHunt` test map.
+3. Place a native-backed hunter NPC and interaction target in the test map.
