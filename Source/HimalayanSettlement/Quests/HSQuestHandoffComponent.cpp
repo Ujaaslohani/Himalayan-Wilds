@@ -1,6 +1,7 @@
 #include "Quests/HSQuestHandoffComponent.h"
 
 #include "Core/HSLogCategories.h"
+#include "Progression/HSPlayerProgressComponent.h"
 #include "Quests/HSQuestDefinition.h"
 #include "Resources/HSResourceCarryComponent.h"
 
@@ -110,6 +111,10 @@ bool UHSQuestHandoffComponent::TryCompleteQuest(AActor* Interactor)
 	bCompleted = true;
 	GrantedKnowledgeTags = QuestDefinition->RewardKnowledgeTags;
 	GrantedUnlockTags = QuestDefinition->RewardUnlockTags;
+	if (UHSPlayerProgressComponent* ProgressComponent = Interactor ? Interactor->FindComponentByClass<UHSPlayerProgressComponent>() : nullptr)
+	{
+		ProgressComponent->MarkMilestoneCompleted(QuestDefinition->QuestTag);
+	}
 	UE_LOG(
 		LogHSQuest,
 		Log,

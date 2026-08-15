@@ -6,6 +6,7 @@
 #include "Interaction/HSInteractable.h"
 #include "NPC/HSNPCActor.h"
 #include "Player/HSPlayerCharacter.h"
+#include "Progression/HSPlayerProgressComponent.h"
 #include "Quests/HSQuestDefinition.h"
 #include "Quests/HSQuestHandoffComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
@@ -91,6 +92,7 @@ bool FHSQuestHandoffCompletesWithResourcesTest::RunTest(const FString& Parameter
 	TestEqual(TEXT("Completed handoff should report completed state."), Handoff->GetHandoffState(), EHSQuestHandoffState::Completed);
 	TestTrue(TEXT("Completion should grant knowledge reward tags."), Handoff->GetGrantedKnowledgeTags().HasTagExact(TAG_HS_Knowledge_Settlement_BasicCrafting));
 	TestTrue(TEXT("Completion should grant unlock reward tags."), Handoff->GetGrantedUnlockTags().HasTagExact(TAG_HS_Building_BasicDryingRack));
+	TestTrue(TEXT("Completion should mark the player milestone tag."), Interactor->GetPlayerProgressComponent()->HasCompletedMilestone(TAG_HS_Quest_OneMorningHunt));
 	TestFalse(TEXT("Completed quest should not complete twice."), Handoff->TryCompleteQuest(Interactor));
 
 	return true;

@@ -7,6 +7,7 @@
 class UCameraComponent;
 class UHSHuntingComponent;
 class UHSInteractionSensorComponent;
+class UHSPlayerProgressComponent;
 class UHSResourceCarryComponent;
 class UInputAction;
 class UInputMappingContext;
@@ -26,6 +27,7 @@ public:
 	UCameraComponent* GetFirstPersonCamera() const { return FirstPersonCamera; }
 	UHSInteractionSensorComponent* GetInteractionSensor() const { return InteractionSensor; }
 	UHSHuntingComponent* GetHuntingComponent() const { return HuntingComponent; }
+	UHSPlayerProgressComponent* GetPlayerProgressComponent() const { return PlayerProgressComponent; }
 	UHSResourceCarryComponent* GetResourceCarryComponent() const { return ResourceCarryComponent; }
 
 private:
@@ -43,6 +45,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSHuntingComponent> HuntingComponent;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player")
+	TObjectPtr<UHSPlayerProgressComponent> PlayerProgressComponent;
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSResourceCarryComponent> ResourceCarryComponent;

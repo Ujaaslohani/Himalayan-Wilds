@@ -77,6 +77,10 @@ The first quest handoff is intentionally small: `UHSQuestHandoffComponent` refer
 
 `UHSResourceCarryComponent` is the first lightweight resource state on the player. It stores harvested `FHSItemStack` values merged by gameplay tag so quest return logic can query carried resources. It is not yet a full inventory, container, weight, equipment, UI, or persistence system.
 
+## Player Progress
+
+`UHSPlayerProgressComponent` is the first lightweight milestone signal on the player. It records completed milestone tags once and broadcasts a completion delegate. The hunter quest handoff marks the quest tag complete when returned resources satisfy the handoff. It is not yet save/load, achievements, a quest journal, or broad progression logic.
+
 ## Performance Rules
 
 - Avoid per-frame `Tick` unless the behavior genuinely requires frame-level updates.
