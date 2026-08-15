@@ -43,16 +43,16 @@ Unreal Engine 5.5.4.
 - Native prototype visual mesh markers added for hunter, deer, and practice interaction target.
 - Native settlement unlock component added; completed hunter quest now unlocks the basic drying rack tag on the player.
 - Native HUD completion message added for completed player progress milestones.
+- Native camp rest point added as the gated end-of-day marker for the One Morning Hunt loop.
 - Concise One Morning Hunt playtest checklist added.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
-- All 33 `HimalayanSettlement` automation tests pass.
+- All 34 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
-- One Morning Hunt prototype architecture.
-- First playable One Morning Hunt systems.
+- Hands-on editor/manual smoke pass for the playable One Morning Hunt map.
 
 ## Known Blockers
 
@@ -72,4 +72,4 @@ Unreal Engine 5.5.4.
 ## Next Tasks
 
 1. Run a hands-on editor/manual smoke pass on the playable map.
-2. Decide whether first milestone should stop here or add a tiny end-of-day marker.
+2. Decide whether to mark One Morning Hunt complete or polish any issues found during the hands-on pass.

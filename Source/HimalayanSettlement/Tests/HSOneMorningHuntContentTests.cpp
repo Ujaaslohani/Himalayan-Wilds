@@ -12,6 +12,7 @@
 #include "Quests/HSQuestDefinition.h"
 #include "Quests/HSQuestHandoffComponent.h"
 #include "Resources/HSItemDefinition.h"
+#include "Settlement/HSRestPointActor.h"
 
 namespace
 {
@@ -66,6 +67,7 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	bool bFoundHunterQuestHandoff = false;
 	bool bFoundConfiguredDeer = false;
 	bool bFoundInteractionTarget = false;
+	bool bFoundRestPoint = false;
 	if (World && World->PersistentLevel)
 	{
 		for (const AActor* Actor : World->PersistentLevel->Actors)
@@ -85,6 +87,7 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 					&& Deer->GetRuntimeState() == EHSAnimalRuntimeState::Idle;
 			}
 			bFoundInteractionTarget |= Actor && Actor->IsA<AHSInteractionTarget>();
+			bFoundRestPoint |= Actor && Actor->IsA<AHSRestPointActor>();
 		}
 	}
 
@@ -92,6 +95,7 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("One Morning Hunt hunter should offer the first quest handoff."), bFoundHunterQuestHandoff);
 	TestTrue(TEXT("One Morning Hunt map should contain a configured native deer actor."), bFoundConfiguredDeer);
 	TestTrue(TEXT("One Morning Hunt map should contain a native interaction target."), bFoundInteractionTarget);
+	TestTrue(TEXT("One Morning Hunt map should contain a native end-of-day rest point."), bFoundRestPoint);
 
 	return true;
 }

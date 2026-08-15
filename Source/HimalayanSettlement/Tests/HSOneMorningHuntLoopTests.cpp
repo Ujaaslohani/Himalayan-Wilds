@@ -13,6 +13,7 @@
 #include "Quests/HSQuestDefinition.h"
 #include "Quests/HSQuestHandoffComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
+#include "Settlement/HSRestPointActor.h"
 #include "Settlement/HSSettlementUnlockComponent.h"
 
 namespace
@@ -65,11 +66,13 @@ bool FHSOneMorningHuntNativeLoopTest::RunTest(const FString& Parameters)
 	AHSPlayerCharacter* Player = World->SpawnActor<AHSPlayerCharacter>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
 	AHSNPCActor* Hunter = World->SpawnActor<AHSNPCActor>(FVector(200.0f, 0.0f, 0.0f), FRotator::ZeroRotator, SpawnParameters);
 	AHSAnimalActor* Deer = World->SpawnActor<AHSAnimalActor>(FVector(500.0f, 0.0f, 0.0f), FRotator::ZeroRotator, SpawnParameters);
+	AHSRestPointActor* RestPoint = World->SpawnActor<AHSRestPointActor>(FVector(-100.0f, 150.0f, 0.0f), FRotator::ZeroRotator, SpawnParameters);
 
 	TestNotNull(TEXT("Player should spawn in the transient test world."), Player);
 	TestNotNull(TEXT("Hunter should spawn in the transient test world."), Hunter);
 	TestNotNull(TEXT("Deer should spawn in the transient test world."), Deer);
-	if (!Player || !Hunter || !Deer)
+	TestNotNull(TEXT("Rest point should spawn in the transient test world."), RestPoint);
+	if (!Player || !Hunter || !Deer || !RestPoint)
 	{
 		World->DestroyWorld(false);
 		return false;
@@ -113,6 +116,10 @@ bool FHSOneMorningHuntNativeLoopTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Completed turn-in should consume carried deer meat."), Carry ? Carry->GetQuantityForTag(TAG_HS_Resource_Meat_Deer) : -1, 0);
 	TestEqual(TEXT("Completed turn-in should consume carried deer hide."), Carry ? Carry->GetQuantityForTag(TAG_HS_Resource_Hide_Deer) : -1, 0);
 	TestEqual(TEXT("Native loop should require exactly two hunter interactions."), Hunter->GetInteractionCount(), 2);
+
+	TestTrue(TEXT("Completed hunt should unlock the rest endpoint."), RestPoint->IsReadyToRest(Player));
+	HSInteraction::Interact(RestPoint, Player);
+	TestTrue(TEXT("Rest endpoint should mark the end-of-day milestone."), Progress && Progress->HasCompletedMilestone(TAG_HS_Milestone_OneMorningHunt_DayEnded));
 
 	World->DestroyWorld(false);
 	return true;

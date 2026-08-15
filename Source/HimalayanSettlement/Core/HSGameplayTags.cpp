@@ -13,6 +13,7 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Item_Arrow_Basic, "Item.Arrow.Basic");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Item_Bow_Basic, "Item.Bow.Basic");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Knowledge_Hunting_Basic, "Knowledge.Hunting.Basic");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Knowledge_Settlement_BasicCrafting, "Knowledge.Settlement.BasicCrafting");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Milestone_OneMorningHunt_DayEnded, "Milestone.OneMorningHunt.DayEnded");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_NPC_Profession_Hunter, "NPC.Profession.Hunter");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Quest_OneMorningHunt, "Quest.OneMorningHunt");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Resource_Hide_Deer, "Resource.Hide.Deer");

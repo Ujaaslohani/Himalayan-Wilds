@@ -8,6 +8,9 @@
 #include "Interaction/HSInteractionTarget.h"
 #include "NPC/HSNPCActor.h"
 #include "Player/HSGameMode.h"
+#include "Player/HSPlayerCharacter.h"
+#include "Progression/HSPlayerProgressComponent.h"
+#include "Settlement/HSRestPointActor.h"
 #include "UI/HSHUD.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
@@ -64,6 +67,35 @@ bool FHSInteractionTargetVisualDefaultsTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Interaction target should have a prototype visual mesh component."), Target ? Target->GetPrototypeMesh() : nullptr);
 	TestNotNull(TEXT("Interaction target prototype visual should have a mesh asset."), Target && Target->GetPrototypeMesh() && Target->GetPrototypeMesh()->GetStaticMesh() ? Target->GetPrototypeMesh()->GetStaticMesh().Get() : nullptr);
 	TestEqual(TEXT("Interaction target prototype visual should not handle collision."), Target && Target->GetPrototypeMesh() ? Target->GetPrototypeMesh()->GetCollisionEnabled() : ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::NoCollision);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSRestPointMilestoneGateTest,
+	"HimalayanSettlement.Interaction.RestPointRequiresHuntMilestone",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSRestPointMilestoneGateTest::RunTest(const FString& Parameters)
+{
+	AHSPlayerCharacter* Player = NewObject<AHSPlayerCharacter>();
+	AHSRestPointActor* RestPoint = NewObject<AHSRestPointActor>();
+	UHSPlayerProgressComponent* Progress = Player->GetPlayerProgressComponent();
+
+	TestNotNull(TEXT("Rest point should be constructible."), RestPoint);
+	TestFalse(TEXT("Rest point should not tick by default."), RestPoint ? RestPoint->PrimaryActorTick.bCanEverTick : true);
+	TestTrue(TEXT("Rest point should remain interactable so blocked prompts can be shown."), HSInteraction::CanInteract(RestPoint, Player));
+	TestFalse(TEXT("Player should not be ready to rest before completing the hunt."), RestPoint && RestPoint->IsReadyToRest(Player));
+
+	HSInteraction::Interact(RestPoint, Player);
+	TestFalse(TEXT("Blocked rest should not mark the end-of-day milestone."), Progress && Progress->HasCompletedMilestone(TAG_HS_Milestone_OneMorningHunt_DayEnded));
+
+	Progress->MarkMilestoneCompleted(TAG_HS_Quest_OneMorningHunt);
+	TestTrue(TEXT("Completed hunt should allow the player to rest."), RestPoint && RestPoint->IsReadyToRest(Player));
+
+	HSInteraction::Interact(RestPoint, Player);
+	TestTrue(TEXT("Rest should mark the end-of-day milestone."), Progress && Progress->HasCompletedMilestone(TAG_HS_Milestone_OneMorningHunt_DayEnded));
+	TestTrue(TEXT("Rest point should report rested state after completion."), RestPoint && RestPoint->HasRested(Player));
 
 	return true;
 }

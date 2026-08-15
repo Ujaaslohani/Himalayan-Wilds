@@ -21,6 +21,7 @@
 #include "NPC/HSNPCDefinition.h"
 #include "Quests/HSQuestDefinition.h"
 #include "Resources/HSItemDefinition.h"
+#include "Settlement/HSRestPointActor.h"
 #include "UObject/SavePackage.h"
 
 namespace
@@ -243,6 +244,7 @@ void CreateMap()
 	}
 
 	SpawnNamedActor<AHSInteractionTarget>(World, TEXT("Interaction_Target_Practice"), FVector(200.0f, 160.0f, 90.0f), FRotator(0.0f, 180.0f, 0.0f));
+	SpawnNamedActor<AHSRestPointActor>(World, TEXT("Camp_RestPoint_EndMorning"), FVector(-80.0f, 220.0f, 45.0f), FRotator::ZeroRotator);
 
 	World->MarkPackageDirty();
 	SaveMapPackage(World);

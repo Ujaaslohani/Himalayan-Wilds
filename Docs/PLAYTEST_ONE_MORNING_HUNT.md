@@ -4,7 +4,7 @@
 
 - Open `L_OneMorningHunt`.
 - Start play-in-editor with the native `AHSPlayerCharacter`.
-- Confirm the map contains the hunter marker, deer marker, practice target marker, ground, player start, sun, and skylight.
+- Confirm the map contains the hunter marker, deer marker, practice target marker, camp rest point marker, ground, player start, sun, and skylight.
 
 ## Expected Loop
 
@@ -19,16 +19,22 @@
 9. Confirm the HUD shows `Return One Morning Hunt`.
 10. Press `E` to complete the quest.
 11. Confirm a short HUD completion message appears.
+12. Move to the camp rest point marker.
+13. Confirm the HUD shows `Rest until evening`.
+14. Press `E` to end the morning.
+15. Confirm a short HUD completion message appears.
 
 ## Current Expected State Changes
 
 - The player receives deer meat and deer hide in native carry state after harvest.
 - The hunter quest handoff enters completed state after return.
+- Required deer meat and deer hide are consumed on quest turn-in.
 - The player progress component marks `Quest.OneMorningHunt` complete.
+- The camp rest point marks `Milestone.OneMorningHunt.DayEnded` complete.
 - The player settlement unlock component grants `Building.BasicDryingRack`.
 
 ## Current Non-Goals
 
 - No bow mesh, projectile, ammo, animation, or animal AI.
-- No inventory UI, quest log UI, save/load, building placement, or resource consumption.
+- No inventory UI, quest log UI, save/load, building placement, time simulation, or sleep/rest system.
 - No historical art pass beyond native prototype markers.
