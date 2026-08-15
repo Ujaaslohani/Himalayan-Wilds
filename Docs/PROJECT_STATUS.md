@@ -6,14 +6,17 @@ One Morning Hunt.
 
 ## Engine Version
 
-Unresolved locally. No Unreal Editor installation or existing `.uproject` was found in the workspace, on PATH, or under the standard Epic Games install path during initial setup.
+Unreal Engine 5.5.4.
 
-Do not lock engine-specific assumptions or generate IDE/project files until the exact Unreal Engine version is selected. Current documentation references were checked against Epic's UE 5.8 documentation.
+- Install path: `C:\Program Files\Epic Games\UE_5.5`
+- Changelist: `40574608`
+- Compatible changelist: `37670630`
+- Branch: `++UE5+Release-5.5`
 
 ## Completed Systems
 
 - Git repository initialized.
-- Minimal Unreal project descriptor added without `EngineAssociation`.
+- Minimal Unreal project descriptor added with `EngineAssociation` set to `5.5`.
 - C++ module skeleton added.
 - Initial Gameplay Tags config added.
 - Initial Primary Data Asset classes added for items, animals, NPCs, buildings, and quests.
@@ -28,8 +31,7 @@ Do not lock engine-specific assumptions or generate IDE/project files until the 
 
 ## Known Blockers
 
-- Exact Unreal Engine version is not confirmed locally.
-- Compilation cannot be run until Unreal Editor/UnrealBuildTool is available.
+- Visual Studio 2022 17.8+ / MSVC v143 C++ build tools are not available to UnrealBuildTool.
 - No content assets or maps exist yet.
 
 ## Known Technical Debt
@@ -40,7 +42,7 @@ Do not lock engine-specific assumptions or generate IDE/project files until the 
 
 ## Next Tasks
 
-1. Confirm Unreal Engine version and install path.
+1. Install/repair Visual Studio 2022 C++ toolchain for UE 5.5.4.
 2. Generate project files.
 3. Compile the C++ module.
 4. Create first data asset instances in `/Game/Data`.

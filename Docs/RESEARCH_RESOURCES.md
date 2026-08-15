@@ -53,11 +53,22 @@ Relevant documentation areas:
 
 ## Current Local Engine Status
 
-No local Unreal Engine installation was found during initial inspection:
+Unreal Engine 5.5.4 was found during follow-up inspection:
 
-- no existing `.uproject`
-- no `UnrealEditor` on PATH
-- no standard `C:\Program Files\Epic Games` engine installation detected
-- no Epic Launcher installation manifest found at the standard path
+- Install path: `C:\Program Files\Epic Games\UE_5.5`
+- Editor: `C:\Program Files\Epic Games\UE_5.5\Engine\Binaries\Win64\UnrealEditor.exe`
+- UnrealBuildTool: `C:\Program Files\Epic Games\UE_5.5\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.exe`
+- Changelist: `40574608`
+- Branch: `++UE5+Release-5.5`
 
-The exact engine version must be selected before generating project files, compiling, or creating engine-authored assets.
+The project now uses `EngineAssociation` value `5.5`.
+
+## Current Local Toolchain Status
+
+UnrealBuildTool runs, but Win64 project-file generation is blocked because no valid Visual C++ toolchain was found.
+
+Required by UnrealBuildTool:
+
+- Visual Studio 2022 17.8 or later
+- MSVC v143 C++ x64/x86 build tools, version 14.38.33130 or compatible
+- Windows SDK selected through Visual Studio Installer
