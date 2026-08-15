@@ -59,7 +59,7 @@ Interactable actors expose prompts and use actions through the native `IHSIntera
 
 `UHSInteractionSensorComponent` owns focused interactable detection and caches the current prompt on a short timer. HUD code should read the cached prompt instead of tracing every frame.
 
-The first quest handoff is intentionally small: `UHSQuestHandoffComponent` references one `UHSQuestDefinition`, tracks whether it is available or accepted, and does not tick. It does not yet own quest completion, inventory turn-in, rewards, or persistence.
+The first quest handoff is intentionally small: `UHSQuestHandoffComponent` references one `UHSQuestDefinition`, tracks whether it is available, accepted, or completed, and does not tick. Completion checks the player's carried resource stacks and records reward knowledge/unlock tags. It does not yet own resource consumption, quest-log UI, building placement, or persistence.
 
 ## HUD
 

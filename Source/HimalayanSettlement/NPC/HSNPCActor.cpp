@@ -52,7 +52,7 @@ FText AHSNPCActor::GetInteractionPrompt_Implementation(const AActor* Interactor)
 {
 	if (QuestHandoffComponent)
 	{
-		const FText QuestPrompt = QuestHandoffComponent->GetInteractionPrompt();
+		const FText QuestPrompt = QuestHandoffComponent->GetInteractionPrompt(Interactor);
 		if (!QuestPrompt.IsEmpty())
 		{
 			return QuestPrompt;
@@ -72,14 +72,14 @@ bool AHSNPCActor::CanInteract_Implementation(const AActor* Interactor) const
 void AHSNPCActor::Interact_Implementation(AActor* Interactor)
 {
 	++InteractionCount;
-	const bool bOfferedQuest = QuestHandoffComponent && QuestHandoffComponent->TryOfferQuest(Interactor);
+	const bool bAdvancedQuest = QuestHandoffComponent && QuestHandoffComponent->TryAdvanceQuest(Interactor);
 	UE_LOG(
 		LogHSInteraction,
 		Log,
-		TEXT("%s started conversation with %s. Quest offered: %s. Interaction count: %d."),
+		TEXT("%s started conversation with %s. Quest advanced: %s. Interaction count: %d."),
 		*GetNameSafe(Interactor),
 		*GetNameSafe(this),
-		bOfferedQuest ? TEXT("true") : TEXT("false"),
+		bAdvancedQuest ? TEXT("true") : TEXT("false"),
 		InteractionCount);
 }
 

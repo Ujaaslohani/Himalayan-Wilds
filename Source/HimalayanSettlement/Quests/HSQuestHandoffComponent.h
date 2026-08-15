@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "GameplayTagContainer.h"
 #include "HSQuestHandoffComponent.generated.h"
 
 class UHSQuestDefinition;
@@ -11,7 +12,8 @@ enum class EHSQuestHandoffState : uint8
 {
 	Unavailable,
 	Available,
-	Accepted
+	Accepted,
+	Completed
 };
 
 UCLASS(ClassGroup = (HimalayanSettlement), meta = (BlueprintSpawnableComponent))
@@ -35,15 +37,41 @@ public:
 	bool HasAcceptedQuest() const { return bAccepted; }
 
 	UFUNCTION(BlueprintPure, Category = "Quest")
-	FText GetInteractionPrompt() const;
+	bool HasCompletedQuest() const { return bCompleted; }
+
+	UFUNCTION(BlueprintPure, Category = "Quest")
+	const FGameplayTagContainer& GetGrantedKnowledgeTags() const { return GrantedKnowledgeTags; }
+
+	UFUNCTION(BlueprintPure, Category = "Quest")
+	const FGameplayTagContainer& GetGrantedUnlockTags() const { return GrantedUnlockTags; }
+
+	UFUNCTION(BlueprintPure, Category = "Quest")
+	FText GetInteractionPrompt(const AActor* Interactor) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Quest")
 	bool TryOfferQuest(AActor* Interactor);
 
+	UFUNCTION(BlueprintCallable, Category = "Quest")
+	bool TryCompleteQuest(AActor* Interactor);
+
+	UFUNCTION(BlueprintCallable, Category = "Quest")
+	bool TryAdvanceQuest(AActor* Interactor);
+
 private:
+	bool CanInteractorCompleteQuest(const AActor* Interactor) const;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Quest", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UHSQuestDefinition> QuestDefinition;
 
 	UPROPERTY(VisibleAnywhere, Category = "Quest")
 	bool bAccepted;
+
+	UPROPERTY(VisibleAnywhere, Category = "Quest")
+	bool bCompleted;
+
+	UPROPERTY(VisibleAnywhere, Category = "Quest")
+	FGameplayTagContainer GrantedKnowledgeTags;
+
+	UPROPERTY(VisibleAnywhere, Category = "Quest")
+	FGameplayTagContainer GrantedUnlockTags;
 };

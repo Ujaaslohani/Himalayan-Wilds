@@ -37,7 +37,8 @@ Unreal Engine 5.5.4.
 - Native HUD interaction prompt feedback added through cached interaction sensor focus.
 - Native player hunting component added and bound to left mouse / right trigger.
 - Native resource carry component added and deer harvest now transfers drops to the player.
-- All 21 `HimalayanSettlement` automation tests pass.
+- Hunter quest handoff can now complete after the player carries required deer resources and records reward tags.
+- All 23 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
@@ -61,6 +62,6 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Add the minimal quest return/reward handoff after harvest exists.
+1. Add a lightweight milestone completion signal once the hunter accepts the returned resources.
 2. Add a visible prototype mesh or marker treatment for native placeholder actors.
-3. Add a lightweight milestone completion signal once the hunter accepts the returned resources.
+3. Add minimal resource consumption or settlement unlock state for the completed quest.

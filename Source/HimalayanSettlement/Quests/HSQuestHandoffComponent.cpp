@@ -2,11 +2,13 @@
 
 #include "Core/HSLogCategories.h"
 #include "Quests/HSQuestDefinition.h"
+#include "Resources/HSResourceCarryComponent.h"
 
 #define LOCTEXT_NAMESPACE "HSQuestHandoffComponent"
 
 UHSQuestHandoffComponent::UHSQuestHandoffComponent()
 	: bAccepted(false)
+	, bCompleted(false)
 {
 	PrimaryComponentTick.bCanEverTick = false;
 }
@@ -15,6 +17,9 @@ void UHSQuestHandoffComponent::SetQuestDefinition(UHSQuestDefinition* NewQuestDe
 {
 	QuestDefinition = NewQuestDefinition;
 	bAccepted = false;
+	bCompleted = false;
+	GrantedKnowledgeTags.Reset();
+	GrantedUnlockTags.Reset();
 }
 
 EHSQuestHandoffState UHSQuestHandoffComponent::GetHandoffState() const
@@ -24,14 +29,33 @@ EHSQuestHandoffState UHSQuestHandoffComponent::GetHandoffState() const
 		return EHSQuestHandoffState::Unavailable;
 	}
 
+	if (bCompleted)
+	{
+		return EHSQuestHandoffState::Completed;
+	}
+
 	return bAccepted ? EHSQuestHandoffState::Accepted : EHSQuestHandoffState::Available;
 }
 
-FText UHSQuestHandoffComponent::GetInteractionPrompt() const
+FText UHSQuestHandoffComponent::GetInteractionPrompt(const AActor* Interactor) const
 {
 	if (!QuestDefinition)
 	{
 		return FText::GetEmpty();
+	}
+
+	if (bCompleted)
+	{
+		FFormatNamedArguments Arguments;
+		Arguments.Add(TEXT("QuestName"), QuestDefinition->DisplayName);
+		return FText::Format(LOCTEXT("CompletedQuestPrompt", "Completed {QuestName}"), Arguments);
+	}
+
+	if (bAccepted && CanInteractorCompleteQuest(Interactor))
+	{
+		FFormatNamedArguments Arguments;
+		Arguments.Add(TEXT("QuestName"), QuestDefinition->DisplayName);
+		return FText::Format(LOCTEXT("ReturnQuestPrompt", "Return {QuestName}"), Arguments);
 	}
 
 	if (bAccepted)
@@ -48,7 +72,7 @@ FText UHSQuestHandoffComponent::GetInteractionPrompt() const
 
 bool UHSQuestHandoffComponent::TryOfferQuest(AActor* Interactor)
 {
-	if (!QuestDefinition)
+	if (!QuestDefinition || bCompleted)
 	{
 		return false;
 	}
@@ -73,6 +97,60 @@ bool UHSQuestHandoffComponent::TryOfferQuest(AActor* Interactor)
 		*GetNameSafe(Interactor),
 		*GetNameSafe(QuestDefinition),
 		*GetNameSafe(GetOwner()));
+	return true;
+}
+
+bool UHSQuestHandoffComponent::TryCompleteQuest(AActor* Interactor)
+{
+	if (!QuestDefinition || !bAccepted || bCompleted || !CanInteractorCompleteQuest(Interactor))
+	{
+		return false;
+	}
+
+	bCompleted = true;
+	GrantedKnowledgeTags = QuestDefinition->RewardKnowledgeTags;
+	GrantedUnlockTags = QuestDefinition->RewardUnlockTags;
+	UE_LOG(
+		LogHSQuest,
+		Log,
+		TEXT("%s completed quest %s with %s."),
+		*GetNameSafe(Interactor),
+		*GetNameSafe(QuestDefinition),
+		*GetNameSafe(GetOwner()));
+	return true;
+}
+
+bool UHSQuestHandoffComponent::TryAdvanceQuest(AActor* Interactor)
+{
+	if (TryCompleteQuest(Interactor))
+	{
+		return true;
+	}
+
+	return TryOfferQuest(Interactor);
+}
+
+bool UHSQuestHandoffComponent::CanInteractorCompleteQuest(const AActor* Interactor) const
+{
+	if (!QuestDefinition || !Interactor)
+	{
+		return false;
+	}
+
+	const UHSResourceCarryComponent* CarryComponent = Interactor->FindComponentByClass<UHSResourceCarryComponent>();
+	if (!CarryComponent)
+	{
+		return false;
+	}
+
+	for (const FHSItemStack& RequiredStack : QuestDefinition->TurnInRequirement.RequiredItems)
+	{
+		if (!CarryComponent->HasAtLeast(RequiredStack))
+		{
+			return false;
+		}
+	}
+
 	return true;
 }
 
