@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Components/StaticMeshComponent.h"
+#include "Core/HSGameplayTags.h"
 #include "Interaction/HSInteractionSensorComponent.h"
 #include "Interaction/HSInteractable.h"
 #include "Interaction/HSInteractionTarget.h"
@@ -78,6 +79,27 @@ bool FHSHUDConfiguredByGameModeTest::RunTest(const FString& Parameters)
 
 	TestNotNull(TEXT("Game mode class should have a valid default object."), GameMode);
 	TestEqual(TEXT("Game mode should use the native prompt HUD."), GameMode->HUDClass.Get(), AHSHUD::StaticClass());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSHUDCompletionMessageDefaultsTest,
+	"HimalayanSettlement.Interaction.HUDCompletionMessageDefaults",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSHUDCompletionMessageDefaultsTest::RunTest(const FString& Parameters)
+{
+	AHSHUD* HUD = NewObject<AHSHUD>();
+
+	TestNotNull(TEXT("HUD should be constructible."), HUD);
+	TestEqual(TEXT("HUD completion message duration should be short."), HUD->GetCompletionMessageDuration(), 4.0f);
+	TestFalse(TEXT("HUD should start without an active completion message."), HUD->HasActiveCompletionMessage());
+
+	HUD->HandleMilestoneCompleted(TAG_HS_Quest_OneMorningHunt);
+
+	TestTrue(TEXT("HUD should activate completion messages for valid milestone tags."), HUD->HasActiveCompletionMessage());
+	TestFalse(TEXT("HUD completion message should be player-facing."), HUD->GetCompletionMessage().IsEmpty());
 
 	return true;
 }

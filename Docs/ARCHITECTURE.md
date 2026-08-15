@@ -63,7 +63,7 @@ The first quest handoff is intentionally small: `UHSQuestHandoffComponent` refer
 
 ## HUD
 
-`AHSHUD` is the first native HUD layer. It draws a minimal interaction prompt from the player interaction sensor cache. It is intentionally not a broader inventory, dialogue, quest log, or survival HUD.
+`AHSHUD` is the first native HUD layer. It draws a minimal interaction prompt from the player interaction sensor cache and a short completion message when player progress reports a completed milestone. It is intentionally not a broader inventory, dialogue, quest log, or survival HUD.
 
 ## Prototype Visual Markers
 
