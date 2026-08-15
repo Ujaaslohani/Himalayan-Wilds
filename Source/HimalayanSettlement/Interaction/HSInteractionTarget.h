@@ -16,6 +16,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interaction")
 	class UBoxComponent* GetInteractionBounds() const { return InteractionBounds; }
 
+	UFUNCTION(BlueprintPure, Category = "Visual")
+	class UStaticMeshComponent* GetPrototypeMesh() const { return PrototypeMesh; }
+
 	UFUNCTION(BlueprintPure, Category = "Interaction")
 	int32 GetInteractionCount() const { return InteractionCount; }
 
@@ -34,6 +37,9 @@ public:
 private:
 	UPROPERTY(VisibleAnywhere, Category = "Interaction")
 	TObjectPtr<class UBoxComponent> InteractionBounds;
+
+	UPROPERTY(VisibleAnywhere, Category = "Visual")
+	TObjectPtr<class UStaticMeshComponent> PrototypeMesh;
 
 	UPROPERTY(EditAnywhere, Category = "Interaction")
 	FText InteractionPrompt;

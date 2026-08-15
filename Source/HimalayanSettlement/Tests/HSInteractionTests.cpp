@@ -1,8 +1,10 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Components/StaticMeshComponent.h"
 #include "Interaction/HSInteractionSensorComponent.h"
 #include "Interaction/HSInteractable.h"
+#include "Interaction/HSInteractionTarget.h"
 #include "NPC/HSNPCActor.h"
 #include "Player/HSGameMode.h"
 #include "UI/HSHUD.h"
@@ -41,6 +43,26 @@ bool FHSNPCActorDefaultsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Default NPC should be interactable."), HSInteraction::CanInteract(NPC, nullptr));
 	TestFalse(TEXT("Default NPC prompt should be usable without authored data."), HSInteraction::GetInteractionPrompt(NPC, nullptr).IsEmpty());
 	TestEqual(TEXT("Default NPC starts without recorded interactions."), NPC->GetInteractionCount(), 0);
+	TestNotNull(TEXT("Default NPC should have a prototype visual mesh component."), NPC->GetPrototypeMesh());
+	TestNotNull(TEXT("Default NPC prototype visual should have a mesh asset."), NPC->GetPrototypeMesh() && NPC->GetPrototypeMesh()->GetStaticMesh() ? NPC->GetPrototypeMesh()->GetStaticMesh().Get() : nullptr);
+	TestEqual(TEXT("Default NPC prototype visual should not handle collision."), NPC->GetPrototypeMesh() ? NPC->GetPrototypeMesh()->GetCollisionEnabled() : ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::NoCollision);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSInteractionTargetVisualDefaultsTest,
+	"HimalayanSettlement.Interaction.TargetVisualMarkerDefaults",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSInteractionTargetVisualDefaultsTest::RunTest(const FString& Parameters)
+{
+	const AHSInteractionTarget* Target = GetDefault<AHSInteractionTarget>();
+
+	TestNotNull(TEXT("Interaction target class should have a valid default object."), Target);
+	TestNotNull(TEXT("Interaction target should have a prototype visual mesh component."), Target ? Target->GetPrototypeMesh() : nullptr);
+	TestNotNull(TEXT("Interaction target prototype visual should have a mesh asset."), Target && Target->GetPrototypeMesh() && Target->GetPrototypeMesh()->GetStaticMesh() ? Target->GetPrototypeMesh()->GetStaticMesh().Get() : nullptr);
+	TestEqual(TEXT("Interaction target prototype visual should not handle collision."), Target && Target->GetPrototypeMesh() ? Target->GetPrototypeMesh()->GetCollisionEnabled() : ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::NoCollision);
 
 	return true;
 }

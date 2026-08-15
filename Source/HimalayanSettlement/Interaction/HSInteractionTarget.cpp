@@ -1,7 +1,9 @@
 #include "Interaction/HSInteractionTarget.h"
 
 #include "Components/BoxComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Core/HSLogCategories.h"
+#include "UObject/ConstructorHelpers.h"
 
 #define LOCTEXT_NAMESPACE "HSInteractionTarget"
 
@@ -18,6 +20,16 @@ AHSInteractionTarget::AHSInteractionTarget()
 	InteractionBounds->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	InteractionBounds->SetCollisionResponseToAllChannels(ECR_Ignore);
 	InteractionBounds->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+
+	PrototypeMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PrototypeMesh"));
+	PrototypeMesh->SetupAttachment(InteractionBounds);
+	PrototypeMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PrototypeMesh->SetRelativeScale3D(FVector(0.65f));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	if (SphereMesh.Succeeded())
+	{
+		PrototypeMesh->SetStaticMesh(SphereMesh.Object);
+	}
 }
 
 FText AHSInteractionTarget::GetInteractionPrompt_Implementation(const AActor* Interactor) const

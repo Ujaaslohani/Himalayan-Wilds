@@ -9,6 +9,7 @@
 class UHSNPCDefinition;
 class UHSQuestDefinition;
 class UHSQuestHandoffComponent;
+class UStaticMeshComponent;
 
 UCLASS()
 class HIMALAYANSETTLEMENT_API AHSNPCActor : public AActor, public IHSInteractable
@@ -20,6 +21,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Interaction")
 	class UBoxComponent* GetInteractionBounds() const { return InteractionBounds; }
+
+	UFUNCTION(BlueprintPure, Category = "Visual")
+	UStaticMeshComponent* GetPrototypeMesh() const { return PrototypeMesh; }
 
 	UFUNCTION(BlueprintPure, Category = "NPC")
 	const UHSNPCDefinition* GetNPCDefinition() const { return NPCDefinition; }
@@ -57,6 +61,9 @@ public:
 private:
 	UPROPERTY(VisibleAnywhere, Category = "Interaction")
 	TObjectPtr<class UBoxComponent> InteractionBounds;
+
+	UPROPERTY(VisibleAnywhere, Category = "Visual")
+	TObjectPtr<UStaticMeshComponent> PrototypeMesh;
 
 	UPROPERTY(VisibleAnywhere, Category = "Quest")
 	TObjectPtr<UHSQuestHandoffComponent> QuestHandoffComponent;

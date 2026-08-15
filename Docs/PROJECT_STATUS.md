@@ -39,7 +39,8 @@ Unreal Engine 5.5.4.
 - Native resource carry component added and deer harvest now transfers drops to the player.
 - Hunter quest handoff can now complete after the player carries required deer resources and records reward tags.
 - Native player progress component added; completed hunter quest now marks the One Morning Hunt quest tag complete on the player.
-- All 26 `HimalayanSettlement` automation tests pass.
+- Native prototype visual mesh markers added for hunter, deer, and practice interaction target.
+- All 27 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
@@ -63,6 +64,6 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Add a visible prototype mesh or marker treatment for native placeholder actors.
-2. Add minimal resource consumption or settlement unlock state for the completed quest.
-3. Add a small HUD completion message hooked to player progress.
+1. Add minimal resource consumption or settlement unlock state for the completed quest.
+2. Add a small HUD completion message hooked to player progress.
+3. Add a concise playtest checklist for the current One Morning Hunt loop.

@@ -65,6 +65,10 @@ The first quest handoff is intentionally small: `UHSQuestHandoffComponent` refer
 
 `AHSHUD` is the first native HUD layer. It draws a minimal interaction prompt from the player interaction sensor cache. It is intentionally not a broader inventory, dialogue, quest log, or survival HUD.
 
+## Prototype Visual Markers
+
+Native placeholder actors own simple non-colliding static mesh components using engine basic shapes. These markers make the current test map readable while real art, animation, and Blueprint visual setup remain out of scope for this milestone slice.
+
 ## Animal Runtime
 
 `AHSAnimalActor` is the first native runtime animal shell. It references a `UHSAnimalDefinition`, tracks health and dead state, and exposes one-shot harvesting of configured drop stacks. It does not yet own wildlife AI, tracking clues, animation, inventory insertion, or projectile handling.

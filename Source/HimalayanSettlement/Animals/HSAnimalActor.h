@@ -9,6 +9,7 @@
 
 class UBoxComponent;
 class UHSAnimalDefinition;
+class UStaticMeshComponent;
 
 UENUM(BlueprintType)
 enum class EHSAnimalRuntimeState : uint8
@@ -27,6 +28,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Interaction")
 	UBoxComponent* GetInteractionBounds() const { return InteractionBounds; }
+
+	UFUNCTION(BlueprintPure, Category = "Visual")
+	UStaticMeshComponent* GetPrototypeMesh() const { return PrototypeMesh; }
 
 	UFUNCTION(BlueprintPure, Category = "Animal")
 	const UHSAnimalDefinition* GetAnimalDefinition() const { return AnimalDefinition; }
@@ -79,6 +83,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Interaction")
 	TObjectPtr<UBoxComponent> InteractionBounds;
+
+	UPROPERTY(VisibleAnywhere, Category = "Visual")
+	TObjectPtr<UStaticMeshComponent> PrototypeMesh;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animal", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UHSAnimalDefinition> AnimalDefinition;

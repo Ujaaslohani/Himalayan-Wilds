@@ -2,9 +2,11 @@
 
 #include "Animals/HSAnimalDefinition.h"
 #include "Components/BoxComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Core/HSGameplayTags.h"
 #include "Core/HSLogCategories.h"
 #include "Resources/HSResourceCarryComponent.h"
+#include "UObject/ConstructorHelpers.h"
 
 #define LOCTEXT_NAMESPACE "HSAnimalActor"
 
@@ -22,6 +24,17 @@ AHSAnimalActor::AHSAnimalActor()
 	InteractionBounds->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	InteractionBounds->SetCollisionResponseToAllChannels(ECR_Ignore);
 	InteractionBounds->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+
+	PrototypeMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PrototypeMesh"));
+	PrototypeMesh->SetupAttachment(InteractionBounds);
+	PrototypeMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PrototypeMesh->SetRelativeLocation(FVector(0.0f, 0.0f, -10.0f));
+	PrototypeMesh->SetRelativeScale3D(FVector(1.1f, 0.65f, 0.55f));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (CubeMesh.Succeeded())
+	{
+		PrototypeMesh->SetStaticMesh(CubeMesh.Object);
+	}
 }
 
 void AHSAnimalActor::SetAnimalDefinition(UHSAnimalDefinition* NewAnimalDefinition)

@@ -1,9 +1,11 @@
 #include "NPC/HSNPCActor.h"
 
 #include "Components/BoxComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Core/HSLogCategories.h"
 #include "NPC/HSNPCDefinition.h"
 #include "Quests/HSQuestHandoffComponent.h"
+#include "UObject/ConstructorHelpers.h"
 
 #define LOCTEXT_NAMESPACE "HSNPCActor"
 
@@ -21,6 +23,16 @@ AHSNPCActor::AHSNPCActor()
 	InteractionBounds->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	InteractionBounds->SetCollisionResponseToAllChannels(ECR_Ignore);
 	InteractionBounds->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+
+	PrototypeMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PrototypeMesh"));
+	PrototypeMesh->SetupAttachment(InteractionBounds);
+	PrototypeMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PrototypeMesh->SetRelativeScale3D(FVector(0.55f, 0.55f, 1.8f));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	if (CylinderMesh.Succeeded())
+	{
+		PrototypeMesh->SetStaticMesh(CylinderMesh.Object);
+	}
 
 	QuestHandoffComponent = CreateDefaultSubobject<UHSQuestHandoffComponent>(TEXT("QuestHandoff"));
 }

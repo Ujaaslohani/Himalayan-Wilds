@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "Animals/HSAnimalActor.h"
 #include "Animals/HSAnimalDefinition.h"
+#include "Components/StaticMeshComponent.h"
 #include "Core/HSGameplayTags.h"
 #include "Interaction/HSInteractable.h"
 
@@ -35,6 +36,9 @@ bool FHSAnimalActorDefaultsTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Animal actors should not tick by default."), Animal->PrimaryActorTick.bCanEverTick);
 	TestFalse(TEXT("Live animal without authored data should not be harvestable."), HSInteraction::CanInteract(Animal, nullptr));
 	TestEqual(TEXT("Animal should begin idle."), Animal->GetRuntimeState(), EHSAnimalRuntimeState::Idle);
+	TestNotNull(TEXT("Animal should have a prototype visual mesh component."), Animal->GetPrototypeMesh());
+	TestNotNull(TEXT("Animal prototype visual should have a mesh asset."), Animal->GetPrototypeMesh() && Animal->GetPrototypeMesh()->GetStaticMesh() ? Animal->GetPrototypeMesh()->GetStaticMesh().Get() : nullptr);
+	TestEqual(TEXT("Animal prototype visual should not handle collision."), Animal->GetPrototypeMesh() ? Animal->GetPrototypeMesh()->GetCollisionEnabled() : ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::NoCollision);
 
 	return true;
 }
