@@ -24,6 +24,8 @@ Unreal Engine 5.5.4.
 - Automation-test skeleton added for definition validation.
 - Architecture and ADR documentation started.
 - `HimalayanSettlement` Win64 Development game target compiles with UE 5.5.4.
+- `HimalayanSettlementEditor` Win64 Development target compiles with UE 5.5.4.
+- All five `HimalayanSettlement.DataDefinitions` automation tests pass.
 
 ## In Progress
 
@@ -32,7 +34,6 @@ Unreal Engine 5.5.4.
 
 ## Known Blockers
 
-- `HimalayanSettlementEditor` build is blocked by missing .NET Framework SDK 4.6.0+ used by UE's `SwarmInterface` dependency chain.
 - No content assets or maps exist yet.
 
 ## Known Warnings
@@ -47,8 +48,5 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Install .NET Framework SDK 4.6.0+ so the editor target can compile.
-2. Compile `HimalayanSettlementEditor`.
-3. Run automation tests.
-4. Create first data asset instances in `/Game/Data`.
-5. Implement first-person player and interaction foundation.
+1. Create first data asset instances in `/Game/Data`.
+2. Implement first-person player and interaction foundation.
