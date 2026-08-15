@@ -36,7 +36,8 @@ Unreal Engine 5.5.4.
 - One Morning Hunt map now contains a configured native deer actor.
 - Native HUD interaction prompt feedback added through cached interaction sensor focus.
 - Native player hunting component added and bound to left mouse / right trigger.
-- All 18 `HimalayanSettlement` automation tests pass.
+- Native resource carry component added and deer harvest now transfers drops to the player.
+- All 21 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
@@ -60,6 +61,6 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Add first lightweight resource carry state for harvested drops.
-2. Add the minimal quest return/reward handoff after harvest exists.
-3. Add a visible prototype mesh or marker treatment for native placeholder actors.
+1. Add the minimal quest return/reward handoff after harvest exists.
+2. Add a visible prototype mesh or marker treatment for native placeholder actors.
+3. Add a lightweight milestone completion signal once the hunter accepts the returned resources.

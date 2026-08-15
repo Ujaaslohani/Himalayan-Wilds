@@ -4,6 +4,7 @@
 #include "Components/BoxComponent.h"
 #include "Core/HSGameplayTags.h"
 #include "Core/HSLogCategories.h"
+#include "Resources/HSResourceCarryComponent.h"
 
 #define LOCTEXT_NAMESPACE "HSAnimalActor"
 
@@ -108,7 +109,13 @@ bool AHSAnimalActor::CanInteract_Implementation(const AActor* Interactor) const
 void AHSAnimalActor::Interact_Implementation(AActor* Interactor)
 {
 	TArray<FHSItemStack> Drops;
-	TryHarvest(Interactor, Drops);
+	if (TryHarvest(Interactor, Drops))
+	{
+		if (UHSResourceCarryComponent* CarryComponent = Interactor ? Interactor->FindComponentByClass<UHSResourceCarryComponent>() : nullptr)
+		{
+			CarryComponent->AddStacks(Drops);
+		}
+	}
 }
 
 void AHSAnimalActor::ResetRuntimeStateFromDefinition()

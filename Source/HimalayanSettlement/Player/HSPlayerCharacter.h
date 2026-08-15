@@ -7,6 +7,7 @@
 class UCameraComponent;
 class UHSHuntingComponent;
 class UHSInteractionSensorComponent;
+class UHSResourceCarryComponent;
 class UInputAction;
 class UInputMappingContext;
 struct FInputActionValue;
@@ -25,6 +26,7 @@ public:
 	UCameraComponent* GetFirstPersonCamera() const { return FirstPersonCamera; }
 	UHSInteractionSensorComponent* GetInteractionSensor() const { return InteractionSensor; }
 	UHSHuntingComponent* GetHuntingComponent() const { return HuntingComponent; }
+	UHSResourceCarryComponent* GetResourceCarryComponent() const { return ResourceCarryComponent; }
 
 private:
 	void Move(const FInputActionValue& InputValue);
@@ -41,6 +43,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSHuntingComponent> HuntingComponent;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player")
+	TObjectPtr<UHSResourceCarryComponent> ResourceCarryComponent;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputMappingContext> PlayerMappingContext;

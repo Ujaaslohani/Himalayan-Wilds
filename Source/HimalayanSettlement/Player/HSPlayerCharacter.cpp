@@ -14,6 +14,7 @@
 #include "InputCoreTypes.h"
 #include "Hunting/HSHuntingComponent.h"
 #include "Interaction/HSInteractionSensorComponent.h"
+#include "Resources/HSResourceCarryComponent.h"
 
 AHSPlayerCharacter::AHSPlayerCharacter()
 {
@@ -31,6 +32,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 
 	InteractionSensor = CreateDefaultSubobject<UHSInteractionSensorComponent>(TEXT("InteractionSensor"));
 	HuntingComponent = CreateDefaultSubobject<UHSHuntingComponent>(TEXT("HuntingComponent"));
+	ResourceCarryComponent = CreateDefaultSubobject<UHSResourceCarryComponent>(TEXT("ResourceCarryComponent"));
 
 	PlayerMappingContext = CreateDefaultSubobject<UInputMappingContext>(TEXT("PlayerMappingContext"));
 

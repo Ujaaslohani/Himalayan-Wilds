@@ -73,6 +73,10 @@ The first quest handoff is intentionally small: `UHSQuestHandoffComponent` refer
 
 `UHSHuntingComponent` is the first player hunting action. It performs an on-demand camera visibility trace and applies prototype hunting damage to a live `AHSAnimalActor`. It is not yet a bow, arrow, projectile, ammo, animation, skill, or equipment system.
 
+## Resource Carry State
+
+`UHSResourceCarryComponent` is the first lightweight resource state on the player. It stores harvested `FHSItemStack` values merged by gameplay tag so quest return logic can query carried resources. It is not yet a full inventory, container, weight, equipment, UI, or persistence system.
+
 ## Performance Rules
 
 - Avoid per-frame `Tick` unless the behavior genuinely requires frame-level updates.
