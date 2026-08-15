@@ -16,8 +16,14 @@ class HIMALAYANSETTLEMENT_API AHSNPCActor : public AActor, public IHSInteractabl
 public:
 	AHSNPCActor();
 
+	UFUNCTION(BlueprintPure, Category = "Interaction")
+	class UBoxComponent* GetInteractionBounds() const { return InteractionBounds; }
+
 	UFUNCTION(BlueprintPure, Category = "NPC")
 	const UHSNPCDefinition* GetNPCDefinition() const { return NPCDefinition; }
+
+	UFUNCTION(BlueprintCallable, Category = "NPC")
+	void SetNPCDefinition(UHSNPCDefinition* NewNPCDefinition);
 
 	UFUNCTION(BlueprintPure, Category = "NPC")
 	FText GetDisplayName() const;
@@ -33,6 +39,9 @@ public:
 	virtual void Interact_Implementation(AActor* Interactor) override;
 
 private:
+	UPROPERTY(VisibleAnywhere, Category = "Interaction")
+	TObjectPtr<class UBoxComponent> InteractionBounds;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NPC", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UHSNPCDefinition> NPCDefinition;
 

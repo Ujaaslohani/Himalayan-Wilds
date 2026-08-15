@@ -9,5 +9,6 @@ public class HimalayanSettlementEditorTarget : TargetRules
 		DefaultBuildSettings = BuildSettingsVersion.V5;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
 		ExtraModuleNames.Add("HimalayanSettlement");
+		ExtraModuleNames.Add("HimalayanSettlementEditor");
 	}
 }

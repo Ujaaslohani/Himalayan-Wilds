@@ -1,5 +1,6 @@
 #include "Interaction/HSInteractionTarget.h"
 
+#include "Components/BoxComponent.h"
 #include "Core/HSLogCategories.h"
 
 #define LOCTEXT_NAMESPACE "HSInteractionTarget"
@@ -10,6 +11,13 @@ AHSInteractionTarget::AHSInteractionTarget()
 	, InteractionCount(0)
 {
 	PrimaryActorTick.bCanEverTick = false;
+
+	InteractionBounds = CreateDefaultSubobject<UBoxComponent>(TEXT("InteractionBounds"));
+	RootComponent = InteractionBounds;
+	InteractionBounds->SetBoxExtent(FVector(45.0f, 45.0f, 60.0f));
+	InteractionBounds->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	InteractionBounds->SetCollisionResponseToAllChannels(ECR_Ignore);
+	InteractionBounds->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 }
 
 FText AHSInteractionTarget::GetInteractionPrompt_Implementation(const AActor* Interactor) const

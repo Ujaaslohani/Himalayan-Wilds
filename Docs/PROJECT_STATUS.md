@@ -19,6 +19,7 @@ Unreal Engine 5.5.4.
 - Minimal Unreal project descriptor added with `EngineAssociation` set to `5.5`.
 - C++ module skeleton added.
 - Initial Gameplay Tags config added.
+- Foundational milestone Gameplay Tags are also registered natively for commandlet/runtime reliability.
 - Initial Primary Data Asset classes added for items, animals, NPCs, buildings, and quests.
 - Logging categories added.
 - Automation-test skeleton added for definition validation.
@@ -29,6 +30,7 @@ Unreal Engine 5.5.4.
 - Native first-person player foundation added.
 - Native interaction interface, on-demand interaction sensor, and placeholder interaction target added.
 - Native NPC actor interaction stub added for the first hunter conversation.
+- Minimal One Morning Hunt data assets and test map generated through an editor-only C++ commandlet.
 
 ## In Progress
 
@@ -37,7 +39,7 @@ Unreal Engine 5.5.4.
 
 ## Known Blockers
 
-- No content assets or maps exist yet.
+- No current blockers.
 
 ## Known Warnings
 
@@ -47,11 +49,11 @@ Unreal Engine 5.5.4.
 
 - Project name is provisional: `HimalayanSettlement`.
 - Gameplay Tags are intentionally minimal and should be expanded only when milestone features require them.
-- Data definitions currently provide structure but no authored `.uasset` instances.
+- Data assets are prototype-authored and should stay narrow until each milestone system needs more fields.
 - Input config is intentionally minimal because gameplay input mappings are created in native C++.
 
 ## Next Tasks
 
-1. Create first data asset instances in `/Game/Data`.
-2. Create the minimal `L_OneMorningHunt` test map.
-3. Place a native-backed hunter NPC and interaction target in the test map.
+1. Add the first quest handoff state to the hunter interaction.
+2. Add the first deer placeholder actor and hunting/harvest interaction.
+3. Add simple in-game feedback for interaction prompts.

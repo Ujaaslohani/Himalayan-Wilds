@@ -1,5 +1,6 @@
 #include "NPC/HSNPCActor.h"
 
+#include "Components/BoxComponent.h"
 #include "Core/HSLogCategories.h"
 #include "NPC/HSNPCDefinition.h"
 
@@ -12,11 +13,23 @@ AHSNPCActor::AHSNPCActor()
 	, InteractionCount(0)
 {
 	PrimaryActorTick.bCanEverTick = false;
+
+	InteractionBounds = CreateDefaultSubobject<UBoxComponent>(TEXT("InteractionBounds"));
+	RootComponent = InteractionBounds;
+	InteractionBounds->SetBoxExtent(FVector(40.0f, 40.0f, 90.0f));
+	InteractionBounds->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	InteractionBounds->SetCollisionResponseToAllChannels(ECR_Ignore);
+	InteractionBounds->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 }
 
 FText AHSNPCActor::GetDisplayName() const
 {
 	return NPCDefinition && !NPCDefinition->DisplayName.IsEmpty() ? NPCDefinition->DisplayName : FallbackDisplayName;
+}
+
+void AHSNPCActor::SetNPCDefinition(UHSNPCDefinition* NewNPCDefinition)
+{
+	NPCDefinition = NewNPCDefinition;
 }
 
 FGameplayTag AHSNPCActor::GetProfessionTag() const

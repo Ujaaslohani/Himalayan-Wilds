@@ -14,6 +14,9 @@ public:
 	AHSInteractionTarget();
 
 	UFUNCTION(BlueprintPure, Category = "Interaction")
+	class UBoxComponent* GetInteractionBounds() const { return InteractionBounds; }
+
+	UFUNCTION(BlueprintPure, Category = "Interaction")
 	int32 GetInteractionCount() const { return InteractionCount; }
 
 	virtual FText GetInteractionPrompt_Implementation(const AActor* Interactor) const override;
@@ -21,6 +24,9 @@ public:
 	virtual void Interact_Implementation(AActor* Interactor) override;
 
 private:
+	UPROPERTY(VisibleAnywhere, Category = "Interaction")
+	TObjectPtr<class UBoxComponent> InteractionBounds;
+
 	UPROPERTY(EditAnywhere, Category = "Interaction")
 	FText InteractionPrompt;
 

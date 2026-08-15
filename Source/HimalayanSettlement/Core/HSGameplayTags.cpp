@@ -1,0 +1,20 @@
+#include "Core/HSGameplayTags.h"
+
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Animal_Deer, "Animal.Deer");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Animal_State_Alert, "Animal.State.Alert");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Animal_State_Dead, "Animal.State.Dead");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Animal_State_Feeding, "Animal.State.Feeding");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Animal_State_Fleeing, "Animal.State.Fleeing");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Animal_State_Idle, "Animal.State.Idle");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Building_BasicDryingRack, "Building.BasicDryingRack");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Interaction_Harvest, "Interaction.Harvest");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Interaction_Talk, "Interaction.Talk");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Item_Arrow_Basic, "Item.Arrow.Basic");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Item_Bow_Basic, "Item.Bow.Basic");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Knowledge_Hunting_Basic, "Knowledge.Hunting.Basic");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Knowledge_Settlement_BasicCrafting, "Knowledge.Settlement.BasicCrafting");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_NPC_Profession_Hunter, "NPC.Profession.Hunter");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Quest_OneMorningHunt, "Quest.OneMorningHunt");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Resource_Hide_Deer, "Resource.Hide.Deer");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Resource_Meat_Deer, "Resource.Meat.Deer");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Settlement_Stage_Camp, "Settlement.Stage.Camp");
