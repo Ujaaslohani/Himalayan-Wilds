@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-One Morning Hunt: complete.
+Milestone 2: Temporary Shelter And Sleep: complete.
 
 ## Engine Version
 
@@ -44,6 +44,8 @@ Unreal Engine 5.5.4.
 - Native settlement unlock component added; completed hunter quest now unlocks the basic drying rack tag on the player.
 - Native HUD completion message added for completed player progress milestones.
 - Native camp rest point added as the gated end-of-day marker for the One Morning Hunt loop.
+- Native world time state added with day/night phase and half-day advancement.
+- Native temporary shelter marker added; sleeping flips day/night and expires the shelter.
 - Concise One Morning Hunt playtest checklist added.
 - Hands-on One Morning Hunt playtest results sheet added for milestone closeout.
 - Full milestone roadmap added in `Docs/MILESTONES.md`.
@@ -53,11 +55,12 @@ Unreal Engine 5.5.4.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
 - Hands-on editor playtest passed with the visible `Morning hunt completed` confirmation.
-- All 34 `HimalayanSettlement` automation tests pass.
+- Hands-on temporary shelter playtest passed and Milestone 2 was confirmed complete.
+- All 37 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
-- Revised milestone and design-direction review.
+- Low-end performance baseline planning.
 
 ## Known Blockers
 
@@ -77,6 +80,6 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Review and approve the milestone roadmap.
-2. Define Milestone 2 implementation scope in more detail.
-3. Start Milestone 2 only after approval.
+1. Run a low-end performance baseline pass before adding denser forest/village content.
+2. Define Milestone 3 implementation scope: settlement claim and house schema.
+3. Start Milestone 3 only after the performance baseline and scope are clear.

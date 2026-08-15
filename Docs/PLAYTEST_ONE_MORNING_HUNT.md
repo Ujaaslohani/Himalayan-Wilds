@@ -4,7 +4,8 @@
 
 - Open `L_OneMorningHunt`.
 - Start play-in-editor with the native `AHSPlayerCharacter`.
-- Confirm the map contains the hunter marker, deer marker, practice target marker, camp rest point marker, ground, player start, sun, and skylight.
+- Confirm the map contains the hunter marker, deer marker, practice target marker, camp rest point marker, temporary shelter marker, ground, player start, sun, and skylight.
+- Confirm the HUD shows the current time phase.
 
 ## Expected Loop
 
@@ -23,6 +24,11 @@
 13. Confirm the HUD shows `Rest until evening`.
 14. Press `E` to end the morning.
 15. Confirm a short HUD completion message appears.
+16. Move to the temporary shelter marker.
+17. Confirm the HUD shows `Sleep until night` or `Sleep until day`.
+18. Press `E` to sleep.
+19. Confirm the HUD time phase flips between day and night.
+20. Focus the shelter again and confirm it is expired.
 
 ## Current Expected State Changes
 
@@ -31,10 +37,12 @@
 - Required deer meat and deer hide are consumed on quest turn-in.
 - The player progress component marks `Quest.OneMorningHunt` complete.
 - The camp rest point marks `Milestone.OneMorningHunt.DayEnded` complete.
+- Temporary shelter sleep flips the world time phase and marks `Milestone.TemporaryShelter.Slept`.
+- Temporary shelter expires after its sleep use.
 - The player settlement unlock component grants `Building.BasicDryingRack`.
 
 ## Current Non-Goals
 
 - No bow mesh, projectile, ammo, animation, or animal AI.
-- No inventory UI, quest log UI, save/load, building placement, time simulation, or sleep/rest system.
+- No inventory UI, quest log UI, save/load, permanent building placement, construction jobs, or long-term camp system.
 - No historical art pass beyond native prototype markers.

@@ -12,6 +12,7 @@
 #include "Progression/HSPlayerProgressComponent.h"
 #include "Settlement/HSRestPointActor.h"
 #include "UI/HSHUD.h"
+#include "World/HSGameState.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHSInteractionSensorDefaultsTest,
@@ -111,6 +112,7 @@ bool FHSHUDConfiguredByGameModeTest::RunTest(const FString& Parameters)
 
 	TestNotNull(TEXT("Game mode class should have a valid default object."), GameMode);
 	TestEqual(TEXT("Game mode should use the native prompt HUD."), GameMode->HUDClass.Get(), AHSHUD::StaticClass());
+	TestEqual(TEXT("Game mode should use the native world-time game state."), GameMode->GameStateClass.Get(), AHSGameState::StaticClass());
 
 	return true;
 }

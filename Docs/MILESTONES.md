@@ -21,16 +21,20 @@ Complete when:
 
 ## Milestone 2: Temporary Shelter And Sleep
 
-Player experience: The player can create or use a very basic temporary shelter marker. It exists to make sleep possible, not to become the center of long-term progression.
+Status: Complete.
+
+Player experience: The player can use a very basic temporary shelter marker. It exists to make sleep possible, like a short survival shelter, not to become the center of long-term progression.
 
 Scope:
 
 - One temporary shelter/camp marker.
 - Sleep interaction unlocked by shelter.
 - Sleep flips time state: day to night or night to day.
-- Temporary shelter expires or becomes invalid after its short use window.
+- Temporary shelter expires after use.
+- Time state is owned by a reusable native world-time system so builders and daily NPC services can use it later.
 - No camp upgrade tree.
 - No permanent camp economy.
+- No personal log-hauling/build-the-camp loop.
 
 Complete when:
 
@@ -38,6 +42,7 @@ Complete when:
 - Sleep changes the current time phase.
 - Time phase is visible enough for testing.
 - Shelter does not behave like a permanent house.
+- Expired shelter cannot be used for another sleep.
 - Automation and manual playtest pass.
 
 ## Milestone 3: Settlement Claim And House Schema

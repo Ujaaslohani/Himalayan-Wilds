@@ -13,6 +13,7 @@
 #include "Quests/HSQuestHandoffComponent.h"
 #include "Resources/HSItemDefinition.h"
 #include "Settlement/HSRestPointActor.h"
+#include "Settlement/HSTemporaryShelterActor.h"
 
 namespace
 {
@@ -68,6 +69,7 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	bool bFoundConfiguredDeer = false;
 	bool bFoundInteractionTarget = false;
 	bool bFoundRestPoint = false;
+	bool bFoundTemporaryShelter = false;
 	if (World && World->PersistentLevel)
 	{
 		for (const AActor* Actor : World->PersistentLevel->Actors)
@@ -88,6 +90,7 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 			}
 			bFoundInteractionTarget |= Actor && Actor->IsA<AHSInteractionTarget>();
 			bFoundRestPoint |= Actor && Actor->IsA<AHSRestPointActor>();
+			bFoundTemporaryShelter |= Actor && Actor->IsA<AHSTemporaryShelterActor>();
 		}
 	}
 
@@ -96,6 +99,7 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("One Morning Hunt map should contain a configured native deer actor."), bFoundConfiguredDeer);
 	TestTrue(TEXT("One Morning Hunt map should contain a native interaction target."), bFoundInteractionTarget);
 	TestTrue(TEXT("One Morning Hunt map should contain a native end-of-day rest point."), bFoundRestPoint);
+	TestTrue(TEXT("One Morning Hunt map should contain a native temporary shelter marker."), bFoundTemporaryShelter);
 
 	return true;
 }

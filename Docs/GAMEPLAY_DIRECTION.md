@@ -18,12 +18,14 @@ Player-facing purpose:
 - Gives a place to sleep.
 - Lets the player flip time from day to night or night to day.
 - Supports short-term survival and early tutorials.
+- Expires after its intended short use.
 
 Boundaries:
 
 - It should not become a deep upgrade tree.
 - It should not last more than its intended short window.
 - It should not replace the need for a permanent house/settlement.
+- It should feel closer to a temporary survival shelter than a permanent base.
 
 ## House And Schema Building
 

@@ -17,12 +17,14 @@
 - Completion HUD message appears for `Quest.OneMorningHunt`.
 - Camp rest point is blocked before turn-in and available after turn-in.
 - Rest point marks `Milestone.OneMorningHunt.DayEnded`.
+- Temporary shelter flips day/night time and expires after sleeping.
 - No crash, blocked input, missing prompt, or impossible navigation during the loop.
 
 ## Result
 
 - Overall: Passed.
 - Player-visible confirmation: `Morning hunt completed` message appeared during the hands-on pass.
+- Milestone 2 confirmation: temporary shelter sleep milestone completed during the hands-on pass.
 - Issues:
   - None reported.
 

@@ -4,6 +4,8 @@
 #include "GameFramework/PlayerController.h"
 #include "Interaction/HSInteractionSensorComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
+#include "World/HSGameState.h"
+#include "World/HSWorldTimeComponent.h"
 
 AHSHUD::AHSHUD()
 	: PromptVerticalOffset(120.0f)
@@ -23,6 +25,15 @@ void AHSHUD::DrawHUD()
 	}
 
 	BindProgressComponent();
+
+	if (const AHSGameState* GameState = GetWorld() ? GetWorld()->GetGameState<AHSGameState>() : nullptr)
+	{
+		if (const UHSWorldTimeComponent* WorldTime = GameState->GetWorldTimeComponent())
+		{
+			const FString TimeText = FString::Printf(TEXT("Time: %s"), *WorldTime->GetTimePhaseText().ToString());
+			DrawCenteredTextLine(TimeText, 28.0f, 1.0f, FLinearColor(0.85f, 0.92f, 1.0f, 1.0f));
+		}
+	}
 
 	const APawn* Pawn = PlayerOwner->GetPawn();
 	const UHSInteractionSensorComponent* Sensor = Pawn ? Pawn->FindComponentByClass<UHSInteractionSensorComponent>() : nullptr;
