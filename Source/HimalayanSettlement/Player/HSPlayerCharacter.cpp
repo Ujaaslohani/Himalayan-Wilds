@@ -12,6 +12,7 @@
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
 #include "InputCoreTypes.h"
+#include "Interaction/HSInteractionSensorComponent.h"
 
 AHSPlayerCharacter::AHSPlayerCharacter()
 {
@@ -27,6 +28,8 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	FirstPersonCamera->SetRelativeLocation(FVector(0.0f, 0.0f, BaseEyeHeight));
 	FirstPersonCamera->bUsePawnControlRotation = true;
 
+	InteractionSensor = CreateDefaultSubobject<UHSInteractionSensorComponent>(TEXT("InteractionSensor"));
+
 	PlayerMappingContext = CreateDefaultSubobject<UInputMappingContext>(TEXT("PlayerMappingContext"));
 
 	MoveAction = CreateDefaultSubobject<UInputAction>(TEXT("MoveAction"));
@@ -37,7 +40,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	BackwardMapping.Modifiers.Add(NewObject<UInputModifierNegate>(PlayerMappingContext));
 	FEnhancedActionKeyMapping& LeftMapping = PlayerMappingContext->MapKey(MoveAction, EKeys::A);
 	LeftMapping.Modifiers.Add(NewObject<UInputModifierNegate>(PlayerMappingContext));
-	PlayerMappingContext->MapKey(MoveAction, EKeys::D).Modifiers.Add(NewObject<UInputModifierSwizzleAxis>(PlayerMappingContext));
+	PlayerMappingContext->MapKey(MoveAction, EKeys::D);
 	PlayerMappingContext->MapKey(MoveAction, EKeys::Gamepad_Left2D);
 
 	LookAction = CreateDefaultSubobject<UInputAction>(TEXT("LookAction"));
@@ -86,7 +89,14 @@ void AHSPlayerCharacter::Look(const FInputActionValue& InputValue)
 
 void AHSPlayerCharacter::Interact(const FInputActionValue& InputValue)
 {
-	UE_LOG(LogHSInteraction, Verbose, TEXT("Interaction requested by %s."), *GetNameSafe(this));
+	if (InteractionSensor)
+	{
+		InteractionSensor->TryInteract();
+	}
+	else
+	{
+		UE_LOG(LogHSInteraction, Warning, TEXT("%s has no interaction sensor."), *GetNameSafe(this));
+	}
 }
 
 void AHSPlayerCharacter::ApplyInputMappingContext()

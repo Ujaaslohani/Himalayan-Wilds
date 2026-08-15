@@ -26,11 +26,13 @@ Unreal Engine 5.5.4.
 - `HimalayanSettlement` Win64 Development game target compiles with UE 5.5.4.
 - `HimalayanSettlementEditor` Win64 Development target compiles with UE 5.5.4.
 - All five `HimalayanSettlement.DataDefinitions` automation tests pass.
+- Native first-person player foundation added.
+- Native interaction interface, on-demand interaction sensor, and placeholder interaction target added.
 
 ## In Progress
 
-- Project foundation.
 - One Morning Hunt prototype architecture.
+- First playable One Morning Hunt systems.
 
 ## Known Blockers
 
@@ -45,8 +47,10 @@ Unreal Engine 5.5.4.
 - Project name is provisional: `HimalayanSettlement`.
 - Gameplay Tags are intentionally minimal and should be expanded only when milestone features require them.
 - Data definitions currently provide structure but no authored `.uasset` instances.
+- Input config is intentionally minimal because gameplay input mappings are created in native C++.
 
 ## Next Tasks
 
 1. Create first data asset instances in `/Game/Data`.
-2. Implement first-person player and interaction foundation.
+2. Add the first hunter NPC interaction stub.
+3. Create the minimal `L_OneMorningHunt` test map.

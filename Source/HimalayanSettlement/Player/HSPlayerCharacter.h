@@ -5,6 +5,7 @@
 #include "HSPlayerCharacter.generated.h"
 
 class UCameraComponent;
+class UHSInteractionSensorComponent;
 class UInputAction;
 class UInputMappingContext;
 struct FInputActionValue;
@@ -21,6 +22,7 @@ public:
 	virtual void PawnClientRestart() override;
 
 	UCameraComponent* GetFirstPersonCamera() const { return FirstPersonCamera; }
+	UHSInteractionSensorComponent* GetInteractionSensor() const { return InteractionSensor; }
 
 private:
 	void Move(const FInputActionValue& InputValue);
@@ -30,6 +32,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UCameraComponent> FirstPersonCamera;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player")
+	TObjectPtr<UHSInteractionSensorComponent> InteractionSensor;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputMappingContext> PlayerMappingContext;
