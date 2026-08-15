@@ -43,7 +43,8 @@ Unreal Engine 5.5.4.
 - Native settlement unlock component added; completed hunter quest now unlocks the basic drying rack tag on the player.
 - Native HUD completion message added for completed player progress milestones.
 - Concise One Morning Hunt playtest checklist added.
-- All 31 `HimalayanSettlement` automation tests pass.
+- Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
+- All 32 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
