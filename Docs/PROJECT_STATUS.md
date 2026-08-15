@@ -46,6 +46,7 @@ Unreal Engine 5.5.4.
 - Native camp rest point added as the gated end-of-day marker for the One Morning Hunt loop.
 - Concise One Morning Hunt playtest checklist added.
 - Hands-on One Morning Hunt playtest results sheet added for milestone closeout.
+- Full milestone roadmap added in `Docs/MILESTONES.md`.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
@@ -54,7 +55,7 @@ Unreal Engine 5.5.4.
 
 ## In Progress
 
-- Milestone 2 planning.
+- Milestone roadmap review.
 
 ## Known Blockers
 
@@ -73,6 +74,6 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Define Milestone 2 scope in docs before coding.
-2. Recommended next milestone: First Camp Craft.
-3. Add minimal native objective/resource HUD feedback if needed for continued testing.
+1. Review and approve the milestone roadmap.
+2. Define Milestone 2 implementation scope in more detail.
+3. Start Milestone 2 only after approval.
