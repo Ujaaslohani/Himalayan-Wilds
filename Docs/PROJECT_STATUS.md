@@ -42,6 +42,7 @@ Unreal Engine 5.5.4.
 - Native prototype visual mesh markers added for hunter, deer, and practice interaction target.
 - Native settlement unlock component added; completed hunter quest now unlocks the basic drying rack tag on the player.
 - Native HUD completion message added for completed player progress milestones.
+- Concise One Morning Hunt playtest checklist added.
 - All 31 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
@@ -66,6 +67,6 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Add a concise playtest checklist for the current One Morning Hunt loop.
+1. Run an editor/manual smoke pass on the playable map.
 2. Add minimal resource consumption for quest turn-in or building placement, pending approval.
-3. Run an editor/manual smoke pass on the playable map.
+3. Decide whether first milestone should stop here or add a tiny end-of-day marker.
