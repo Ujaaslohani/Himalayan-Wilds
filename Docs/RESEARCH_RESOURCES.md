@@ -65,10 +65,18 @@ The project now uses `EngineAssociation` value `5.5`.
 
 ## Current Local Toolchain Status
 
-UnrealBuildTool runs, but Win64 project-file generation is blocked because no valid Visual C++ toolchain was found.
+UnrealBuildTool runs and the Win64 Development game target compiles.
 
-Required by UnrealBuildTool:
+Installed/discovered:
 
-- Visual Studio 2022 17.8 or later
-- MSVC v143 C++ x64/x86 build tools, version 14.38.33130 or compatible
-- Windows SDK selected through Visual Studio Installer
+- Visual Studio 2022 Build Tools: `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools`
+- MSVC v143 C++ x64/x86 build tools: `14.44.35207` / compiler `14.44.35228`
+- Windows SDK: `10.0.26100.0`
+
+Remaining editor-build dependency:
+
+- .NET Framework SDK 4.6.0 or later. Without it, `HimalayanSettlementEditor` fails while instantiating UE's `SwarmInterface` module.
+
+Warning:
+
+- UE 5.5.4 accepts the installed compiler but warns that the preferred MSVC version is `14.38.33130`.

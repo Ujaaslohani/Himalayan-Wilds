@@ -23,6 +23,7 @@ Unreal Engine 5.5.4.
 - Logging categories added.
 - Automation-test skeleton added for definition validation.
 - Architecture and ADR documentation started.
+- `HimalayanSettlement` Win64 Development game target compiles with UE 5.5.4.
 
 ## In Progress
 
@@ -31,8 +32,12 @@ Unreal Engine 5.5.4.
 
 ## Known Blockers
 
-- Visual Studio 2022 17.8+ / MSVC v143 C++ build tools are not available to UnrealBuildTool.
+- `HimalayanSettlementEditor` build is blocked by missing .NET Framework SDK 4.6.0+ used by UE's `SwarmInterface` dependency chain.
 - No content assets or maps exist yet.
+
+## Known Warnings
+
+- UnrealBuildTool accepts MSVC 14.44.35228 but warns that UE 5.5 prefers compiler version 14.38.33130.
 
 ## Known Technical Debt
 
@@ -42,8 +47,8 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Install/repair Visual Studio 2022 C++ toolchain for UE 5.5.4.
-2. Generate project files.
-3. Compile the C++ module.
+1. Install .NET Framework SDK 4.6.0+ so the editor target can compile.
+2. Compile `HimalayanSettlementEditor`.
+3. Run automation tests.
 4. Create first data asset instances in `/Game/Data`.
 5. Implement first-person player and interaction foundation.
