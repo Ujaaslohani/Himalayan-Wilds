@@ -34,7 +34,8 @@ Unreal Engine 5.5.4.
 - Native quest handoff component added and wired to the hunter in `L_OneMorningHunt`.
 - Native deer runtime actor added with health, death state, and one-shot harvest drops.
 - One Morning Hunt map now contains a configured native deer actor.
-- All 14 `HimalayanSettlement` automation tests pass.
+- Native HUD interaction prompt feedback added through cached interaction sensor focus.
+- All 15 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
@@ -58,6 +59,6 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Add simple in-game feedback for interaction prompts.
-2. Add a minimal player hunting action that applies damage to the deer.
-3. Add the minimal quest return/reward handoff after harvest exists.
+1. Add a minimal player hunting action that applies damage to the deer.
+2. Add the minimal quest return/reward handoff after harvest exists.
+3. Add first lightweight resource carry state for harvested drops.

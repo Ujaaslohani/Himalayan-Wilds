@@ -57,7 +57,13 @@ Gameplay Tags identify categories, knowledge, resources, quest IDs, animal state
 
 Interactable actors expose prompts and use actions through the native `IHSInteractable` contract. Runtime C++ systems should call the `HSInteraction` helper functions so native actors use direct C++ dispatch, while non-native Blueprint implementers remain a fallback path.
 
+`UHSInteractionSensorComponent` owns focused interactable detection and caches the current prompt on a short timer. HUD code should read the cached prompt instead of tracing every frame.
+
 The first quest handoff is intentionally small: `UHSQuestHandoffComponent` references one `UHSQuestDefinition`, tracks whether it is available or accepted, and does not tick. It does not yet own quest completion, inventory turn-in, rewards, or persistence.
+
+## HUD
+
+`AHSHUD` is the first native HUD layer. It draws a minimal interaction prompt from the player interaction sensor cache. It is intentionally not a broader inventory, dialogue, quest log, or survival HUD.
 
 ## Animal Runtime
 

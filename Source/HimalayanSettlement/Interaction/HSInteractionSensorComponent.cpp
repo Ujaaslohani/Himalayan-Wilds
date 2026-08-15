@@ -5,18 +5,42 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Interaction/HSInteractable.h"
+#include "TimerManager.h"
 
 UHSInteractionSensorComponent::UHSInteractionSensorComponent()
 	: InteractionDistance(300.0f)
 	, TraceChannel(ECC_Visibility)
+	, FocusRefreshInterval(0.1f)
 {
 	PrimaryComponentTick.bCanEverTick = false;
 }
 
+void UHSInteractionSensorComponent::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(FocusRefreshTimerHandle, this, &UHSInteractionSensorComponent::RefreshFocus, FocusRefreshInterval, true);
+	}
+}
+
+void UHSInteractionSensorComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(FocusRefreshTimerHandle);
+	}
+
+	ClearFocus();
+	Super::EndPlay(EndPlayReason);
+}
+
 bool UHSInteractionSensorComponent::TryInteract()
 {
-	FHitResult Hit;
-	AActor* InteractableActor = FindInteractable(Hit);
+	RefreshFocus();
+
+	AActor* InteractableActor = FocusedInteractable.Get();
 	if (!InteractableActor)
 	{
 		UE_LOG(LogHSInteraction, Verbose, TEXT("%s found no interactable target."), *GetNameSafe(GetOwner()));
@@ -25,6 +49,7 @@ bool UHSInteractionSensorComponent::TryInteract()
 
 	UE_LOG(LogHSInteraction, Verbose, TEXT("%s interacted with %s."), *GetNameSafe(GetOwner()), *GetNameSafe(InteractableActor));
 	HSInteraction::Interact(InteractableActor, GetOwner());
+	RefreshFocus();
 	return true;
 }
 
@@ -61,6 +86,20 @@ AActor* UHSInteractionSensorComponent::FindInteractable(FHitResult& OutHit) cons
 	return HSInteraction::CanInteract(HitActor, GetOwner()) ? HitActor : nullptr;
 }
 
+void UHSInteractionSensorComponent::RefreshFocus()
+{
+	FHitResult Hit;
+	AActor* InteractableActor = FindInteractable(Hit);
+	if (!InteractableActor)
+	{
+		ClearFocus();
+		return;
+	}
+
+	FocusedInteractable = InteractableActor;
+	FocusedInteractionPrompt = HSInteraction::GetInteractionPrompt(InteractableActor, GetOwner());
+}
+
 bool UHSInteractionSensorComponent::ResolveTraceView(FVector& OutStart, FVector& OutDirection) const
 {
 	const AActor* Owner = GetOwner();
@@ -80,4 +119,10 @@ bool UHSInteractionSensorComponent::ResolveTraceView(FVector& OutStart, FVector&
 	Owner->GetActorEyesViewPoint(OutStart, ViewRotation);
 	OutDirection = ViewRotation.Vector();
 	return true;
+}
+
+void UHSInteractionSensorComponent::ClearFocus()
+{
+	FocusedInteractable.Reset();
+	FocusedInteractionPrompt = FText::GetEmpty();
 }
