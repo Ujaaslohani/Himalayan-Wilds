@@ -20,6 +20,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Resources")
 	void AddStacks(const TArray<FHSItemStack>& Stacks);
 
+	UFUNCTION(BlueprintCallable, Category = "Resources")
+	bool TryConsumeStack(const FHSItemStack& Stack);
+
+	UFUNCTION(BlueprintCallable, Category = "Resources")
+	bool TryConsumeStacks(const TArray<FHSItemStack>& Stacks);
+
 	UFUNCTION(BlueprintPure, Category = "Resources")
 	int32 GetQuantityForTag(FGameplayTag ItemTag) const;
 

@@ -95,6 +95,8 @@ bool FHSQuestHandoffCompletesWithResourcesTest::RunTest(const FString& Parameter
 	TestTrue(TEXT("Completion should grant unlock reward tags."), Handoff->GetGrantedUnlockTags().HasTagExact(TAG_HS_Building_BasicDryingRack));
 	TestTrue(TEXT("Completion should mark the player milestone tag."), Interactor->GetPlayerProgressComponent()->HasCompletedMilestone(TAG_HS_Quest_OneMorningHunt));
 	TestTrue(TEXT("Completion should grant the player settlement unlock tag."), Interactor->GetSettlementUnlockComponent()->HasUnlock(TAG_HS_Building_BasicDryingRack));
+	TestEqual(TEXT("Quest completion should consume required deer meat."), Carry ? Carry->GetQuantityForTag(TAG_HS_Resource_Meat_Deer) : -1, 0);
+	TestEqual(TEXT("Quest completion should consume required deer hide."), Carry ? Carry->GetQuantityForTag(TAG_HS_Resource_Hide_Deer) : -1, 0);
 	TestFalse(TEXT("Completed quest should not complete twice."), Handoff->TryCompleteQuest(Interactor));
 
 	return true;
@@ -118,6 +120,7 @@ bool FHSQuestHandoffBlocksMissingResourcesTest::RunTest(const FString& Parameter
 	TestTrue(TEXT("Quest should accept before missing-resource completion check."), Handoff->TryOfferQuest(Interactor));
 	TestFalse(TEXT("Accepted quest should not complete without all required resources."), Handoff->TryCompleteQuest(Interactor));
 	TestEqual(TEXT("Missing resources should leave quest accepted."), Handoff->GetHandoffState(), EHSQuestHandoffState::Accepted);
+	TestEqual(TEXT("Missing-resource turn-in should not consume carried meat."), Carry ? Carry->GetQuantityForTag(TAG_HS_Resource_Meat_Deer) : -1, 2);
 	TestTrue(TEXT("Missing resources should keep discussion prompt."), Handoff->GetInteractionPrompt(Interactor).ToString().Contains(TEXT("Discuss")));
 
 	return true;

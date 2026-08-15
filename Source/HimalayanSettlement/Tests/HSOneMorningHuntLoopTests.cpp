@@ -110,6 +110,8 @@ bool FHSOneMorningHuntNativeLoopTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Quest completion should mark the player milestone."), Progress && Progress->HasCompletedMilestone(TAG_HS_Quest_OneMorningHunt));
 	TestTrue(TEXT("Quest completion should grant basic crafting knowledge."), Handoff && Handoff->GetGrantedKnowledgeTags().HasTagExact(TAG_HS_Knowledge_Settlement_BasicCrafting));
 	TestTrue(TEXT("Quest completion should unlock the basic drying rack."), Unlocks && Unlocks->HasUnlock(TAG_HS_Building_BasicDryingRack));
+	TestEqual(TEXT("Completed turn-in should consume carried deer meat."), Carry ? Carry->GetQuantityForTag(TAG_HS_Resource_Meat_Deer) : -1, 0);
+	TestEqual(TEXT("Completed turn-in should consume carried deer hide."), Carry ? Carry->GetQuantityForTag(TAG_HS_Resource_Hide_Deer) : -1, 0);
 	TestEqual(TEXT("Native loop should require exactly two hunter interactions."), Hunter->GetInteractionCount(), 2);
 
 	World->DestroyWorld(false);

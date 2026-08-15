@@ -38,6 +38,7 @@ Unreal Engine 5.5.4.
 - Native player hunting component added and bound to left mouse / right trigger.
 - Native resource carry component added and deer harvest now transfers drops to the player.
 - Hunter quest handoff can now complete after the player carries required deer resources and records reward tags.
+- Hunter quest turn-in now consumes required deer resources atomically on completion.
 - Native player progress component added; completed hunter quest now marks the One Morning Hunt quest tag complete on the player.
 - Native prototype visual mesh markers added for hunter, deer, and practice interaction target.
 - Native settlement unlock component added; completed hunter quest now unlocks the basic drying rack tag on the player.
@@ -46,7 +47,7 @@ Unreal Engine 5.5.4.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
-- All 32 `HimalayanSettlement` automation tests pass.
+- All 33 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
@@ -71,5 +72,4 @@ Unreal Engine 5.5.4.
 ## Next Tasks
 
 1. Run a hands-on editor/manual smoke pass on the playable map.
-2. Add minimal resource consumption for quest turn-in or building placement, pending approval.
-3. Decide whether first milestone should stop here or add a tiny end-of-day marker.
+2. Decide whether first milestone should stop here or add a tiny end-of-day marker.

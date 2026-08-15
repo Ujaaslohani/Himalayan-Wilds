@@ -65,6 +65,40 @@ bool FHSResourceCarryMergesStacksTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSResourceCarryConsumesStacksAtomicallyTest,
+	"HimalayanSettlement.Resources.CarryConsumesStacksAtomically",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSResourceCarryConsumesStacksAtomicallyTest::RunTest(const FString& Parameters)
+{
+	UHSResourceCarryComponent* Carry = NewObject<UHSResourceCarryComponent>();
+
+	Carry->AddStack(FHSItemStack{ TAG_HS_Resource_Meat_Deer, 3 });
+	Carry->AddStack(FHSItemStack{ TAG_HS_Resource_Hide_Deer, 1 });
+
+	TestFalse(
+		TEXT("Missing stack in a multi-stack consume should fail before removing anything."),
+		Carry->TryConsumeStacks({
+			FHSItemStack{ TAG_HS_Resource_Meat_Deer, 2 },
+			FHSItemStack{ TAG_HS_Resource_Hide_Deer, 2 }
+		}));
+	TestEqual(TEXT("Failed consume should leave meat untouched."), Carry->GetQuantityForTag(TAG_HS_Resource_Meat_Deer), 3);
+	TestEqual(TEXT("Failed consume should leave hide untouched."), Carry->GetQuantityForTag(TAG_HS_Resource_Hide_Deer), 1);
+
+	TestTrue(
+		TEXT("Valid multi-stack consume should remove the requested quantities."),
+		Carry->TryConsumeStacks({
+			FHSItemStack{ TAG_HS_Resource_Meat_Deer, 2 },
+			FHSItemStack{ TAG_HS_Resource_Hide_Deer, 1 }
+		}));
+	TestEqual(TEXT("Partial remaining meat should stay carried."), Carry->GetQuantityForTag(TAG_HS_Resource_Meat_Deer), 1);
+	TestEqual(TEXT("Fully consumed hide stack should be removed."), Carry->GetQuantityForTag(TAG_HS_Resource_Hide_Deer), 0);
+	TestEqual(TEXT("Only the remaining meat stack should stay in carry state."), Carry->GetCarriedItems().Num(), 1);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHSAnimalHarvestTransfersToPlayerCarryTest,
 	"HimalayanSettlement.Resources.HarvestTransfersDropsToPlayerCarry",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

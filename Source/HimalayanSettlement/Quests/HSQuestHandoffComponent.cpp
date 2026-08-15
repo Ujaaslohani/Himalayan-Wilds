@@ -109,6 +109,12 @@ bool UHSQuestHandoffComponent::TryCompleteQuest(AActor* Interactor)
 		return false;
 	}
 
+	UHSResourceCarryComponent* CarryComponent = Interactor ? Interactor->FindComponentByClass<UHSResourceCarryComponent>() : nullptr;
+	if (!CarryComponent || !CarryComponent->TryConsumeStacks(QuestDefinition->TurnInRequirement.RequiredItems))
+	{
+		return false;
+	}
+
 	bCompleted = true;
 	GrantedKnowledgeTags = QuestDefinition->RewardKnowledgeTags;
 	GrantedUnlockTags = QuestDefinition->RewardUnlockTags;

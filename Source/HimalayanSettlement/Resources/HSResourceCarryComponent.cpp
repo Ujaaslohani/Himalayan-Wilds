@@ -32,6 +32,51 @@ void UHSResourceCarryComponent::AddStacks(const TArray<FHSItemStack>& Stacks)
 	}
 }
 
+bool UHSResourceCarryComponent::TryConsumeStack(const FHSItemStack& Stack)
+{
+	if (!HasAtLeast(Stack))
+	{
+		return false;
+	}
+
+	for (int32 StackIndex = 0; StackIndex < CarriedItems.Num(); ++StackIndex)
+	{
+		FHSItemStack& ExistingStack = CarriedItems[StackIndex];
+		if (ExistingStack.ItemTag == Stack.ItemTag)
+		{
+			ExistingStack.Quantity -= Stack.Quantity;
+			if (ExistingStack.Quantity <= 0)
+			{
+				CarriedItems.RemoveAt(StackIndex);
+			}
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool UHSResourceCarryComponent::TryConsumeStacks(const TArray<FHSItemStack>& Stacks)
+{
+	for (const FHSItemStack& Stack : Stacks)
+	{
+		if (!HasAtLeast(Stack))
+		{
+			return false;
+		}
+	}
+
+	for (const FHSItemStack& Stack : Stacks)
+	{
+		if (!TryConsumeStack(Stack))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
 int32 UHSResourceCarryComponent::GetQuantityForTag(FGameplayTag ItemTag) const
 {
 	if (!ItemTag.IsValid())
