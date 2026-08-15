@@ -45,6 +45,7 @@ Unreal Engine 5.5.4.
 - Native HUD completion message added for completed player progress milestones.
 - Native camp rest point added as the gated end-of-day marker for the One Morning Hunt loop.
 - Concise One Morning Hunt playtest checklist added.
+- Hands-on One Morning Hunt playtest results sheet added for milestone closeout.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
