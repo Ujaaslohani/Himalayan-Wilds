@@ -8,6 +8,7 @@
 #include "NPC/HSNPCActor.h"
 #include "NPC/HSNPCDefinition.h"
 #include "Quests/HSQuestDefinition.h"
+#include "Quests/HSQuestHandoffComponent.h"
 #include "Resources/HSItemDefinition.h"
 
 namespace
@@ -60,17 +61,26 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("One Morning Hunt map should have a persistent level."), World ? World->PersistentLevel.Get() : nullptr);
 
 	bool bFoundHunter = false;
+	bool bFoundHunterQuestHandoff = false;
 	bool bFoundInteractionTarget = false;
 	if (World && World->PersistentLevel)
 	{
 		for (const AActor* Actor : World->PersistentLevel->Actors)
 		{
-			bFoundHunter |= Actor && Actor->IsA<AHSNPCActor>();
+			if (const AHSNPCActor* Hunter = Cast<AHSNPCActor>(Actor))
+			{
+				bFoundHunter = true;
+				const UHSQuestHandoffComponent* Handoff = Hunter->GetQuestHandoffComponent();
+				bFoundHunterQuestHandoff |= Handoff
+					&& Handoff->GetQuestDefinition()
+					&& Handoff->GetHandoffState() == EHSQuestHandoffState::Available;
+			}
 			bFoundInteractionTarget |= Actor && Actor->IsA<AHSInteractionTarget>();
 		}
 	}
 
 	TestTrue(TEXT("One Morning Hunt map should contain a native NPC actor."), bFoundHunter);
+	TestTrue(TEXT("One Morning Hunt hunter should offer the first quest handoff."), bFoundHunterQuestHandoff);
 	TestTrue(TEXT("One Morning Hunt map should contain a native interaction target."), bFoundInteractionTarget);
 
 	return true;

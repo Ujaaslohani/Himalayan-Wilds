@@ -35,3 +35,52 @@ public:
 	{
 	}
 };
+
+namespace HSInteraction
+{
+inline FText GetInteractionPrompt(const UObject* Object, const AActor* Interactor)
+{
+	if (!Object || !Object->GetClass()->ImplementsInterface(UHSInteractable::StaticClass()))
+	{
+		return FText::GetEmpty();
+	}
+
+	if (const IHSInteractable* NativeInteractable = Cast<IHSInteractable>(Object))
+	{
+		return NativeInteractable->GetInteractionPrompt_Implementation(Interactor);
+	}
+
+	return IHSInteractable::Execute_GetInteractionPrompt(Object, Interactor);
+}
+
+inline bool CanInteract(const UObject* Object, const AActor* Interactor)
+{
+	if (!Object || !Object->GetClass()->ImplementsInterface(UHSInteractable::StaticClass()))
+	{
+		return false;
+	}
+
+	if (const IHSInteractable* NativeInteractable = Cast<IHSInteractable>(Object))
+	{
+		return NativeInteractable->CanInteract_Implementation(Interactor);
+	}
+
+	return IHSInteractable::Execute_CanInteract(Object, Interactor);
+}
+
+inline void Interact(UObject* Object, AActor* Interactor)
+{
+	if (!Object || !Object->GetClass()->ImplementsInterface(UHSInteractable::StaticClass()))
+	{
+		return;
+	}
+
+	if (IHSInteractable* NativeInteractable = Cast<IHSInteractable>(Object))
+	{
+		NativeInteractable->Interact_Implementation(Interactor);
+		return;
+	}
+
+	IHSInteractable::Execute_Interact(Object, Interactor);
+}
+}

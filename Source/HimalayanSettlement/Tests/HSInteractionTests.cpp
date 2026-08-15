@@ -33,8 +33,8 @@ bool FHSNPCActorDefaultsTest::RunTest(const FString& Parameters)
 
 	TestNotNull(TEXT("NPC actor class should have a valid default object."), NPC);
 	TestFalse(TEXT("NPC actors should not tick by default."), NPC->PrimaryActorTick.bCanEverTick);
-	TestTrue(TEXT("Default NPC should be interactable."), IHSInteractable::Execute_CanInteract(NPC, nullptr));
-	TestFalse(TEXT("Default NPC prompt should be usable without authored data."), IHSInteractable::Execute_GetInteractionPrompt(NPC, nullptr).IsEmpty());
+	TestTrue(TEXT("Default NPC should be interactable."), HSInteraction::CanInteract(NPC, nullptr));
+	TestFalse(TEXT("Default NPC prompt should be usable without authored data."), HSInteraction::GetInteractionPrompt(NPC, nullptr).IsEmpty());
 	TestEqual(TEXT("Default NPC starts without recorded interactions."), NPC->GetInteractionCount(), 0);
 
 	return true;

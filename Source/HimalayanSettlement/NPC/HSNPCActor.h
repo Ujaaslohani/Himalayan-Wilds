@@ -7,6 +7,8 @@
 #include "HSNPCActor.generated.h"
 
 class UHSNPCDefinition;
+class UHSQuestDefinition;
+class UHSQuestHandoffComponent;
 
 UCLASS()
 class HIMALAYANSETTLEMENT_API AHSNPCActor : public AActor, public IHSInteractable
@@ -34,13 +36,30 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interaction")
 	int32 GetInteractionCount() const { return InteractionCount; }
 
+	UFUNCTION(BlueprintPure, Category = "Quest")
+	UHSQuestHandoffComponent* GetQuestHandoffComponent() const { return QuestHandoffComponent; }
+
+	UFUNCTION(BlueprintCallable, Category = "Quest")
+	void SetOfferedQuest(UHSQuestDefinition* NewQuestDefinition);
+
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
+	FText GetInteractionPrompt(const AActor* Interactor) const;
 	virtual FText GetInteractionPrompt_Implementation(const AActor* Interactor) const override;
+
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
+	bool CanInteract(const AActor* Interactor) const;
 	virtual bool CanInteract_Implementation(const AActor* Interactor) const override;
+
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
+	void Interact(AActor* Interactor);
 	virtual void Interact_Implementation(AActor* Interactor) override;
 
 private:
 	UPROPERTY(VisibleAnywhere, Category = "Interaction")
 	TObjectPtr<class UBoxComponent> InteractionBounds;
+
+	UPROPERTY(VisibleAnywhere, Category = "Quest")
+	TObjectPtr<UHSQuestHandoffComponent> QuestHandoffComponent;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NPC", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UHSNPCDefinition> NPCDefinition;

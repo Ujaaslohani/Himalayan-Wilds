@@ -31,6 +31,8 @@ Unreal Engine 5.5.4.
 - Native interaction interface, on-demand interaction sensor, and placeholder interaction target added.
 - Native NPC actor interaction stub added for the first hunter conversation.
 - Minimal One Morning Hunt data assets and test map generated through an editor-only C++ commandlet.
+- Native quest handoff component added and wired to the hunter in `L_OneMorningHunt`.
+- All 12 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
@@ -54,6 +56,6 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Add the first quest handoff state to the hunter interaction.
-2. Add the first deer placeholder actor and hunting/harvest interaction.
-3. Add simple in-game feedback for interaction prompts.
+1. Add the first deer placeholder actor and hunting/harvest interaction.
+2. Add simple in-game feedback for interaction prompts.
+3. Add the minimal quest return/reward handoff after harvest exists.

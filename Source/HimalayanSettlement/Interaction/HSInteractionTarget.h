@@ -19,8 +19,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interaction")
 	int32 GetInteractionCount() const { return InteractionCount; }
 
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
+	FText GetInteractionPrompt(const AActor* Interactor) const;
 	virtual FText GetInteractionPrompt_Implementation(const AActor* Interactor) const override;
+
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
+	bool CanInteract(const AActor* Interactor) const;
 	virtual bool CanInteract_Implementation(const AActor* Interactor) const override;
+
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Interaction")
+	void Interact(AActor* Interactor);
 	virtual void Interact_Implementation(AActor* Interactor) override;
 
 private:

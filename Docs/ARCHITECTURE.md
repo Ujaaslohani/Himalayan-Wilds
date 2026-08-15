@@ -53,6 +53,12 @@ Initial definition types:
 
 Gameplay Tags identify categories, knowledge, resources, quest IDs, animal states, professions, and building unlocks.
 
+## Interaction And Quest Handoff
+
+Interactable actors expose prompts and use actions through the native `IHSInteractable` contract. Runtime C++ systems should call the `HSInteraction` helper functions so native actors use direct C++ dispatch, while non-native Blueprint implementers remain a fallback path.
+
+The first quest handoff is intentionally small: `UHSQuestHandoffComponent` references one `UHSQuestDefinition`, tracks whether it is available or accepted, and does not tick. It does not yet own quest completion, inventory turn-in, rewards, or persistence.
+
 ## Performance Rules
 
 - Avoid per-frame `Tick` unless the behavior genuinely requires frame-level updates.

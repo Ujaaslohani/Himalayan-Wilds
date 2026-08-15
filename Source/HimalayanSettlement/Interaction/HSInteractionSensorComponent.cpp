@@ -24,7 +24,7 @@ bool UHSInteractionSensorComponent::TryInteract()
 	}
 
 	UE_LOG(LogHSInteraction, Verbose, TEXT("%s interacted with %s."), *GetNameSafe(GetOwner()), *GetNameSafe(InteractableActor));
-	IHSInteractable::Execute_Interact(InteractableActor, GetOwner());
+	HSInteraction::Interact(InteractableActor, GetOwner());
 	return true;
 }
 
@@ -58,7 +58,7 @@ AActor* UHSInteractionSensorComponent::FindInteractable(FHitResult& OutHit) cons
 		return nullptr;
 	}
 
-	return IHSInteractable::Execute_CanInteract(HitActor, GetOwner()) ? HitActor : nullptr;
+	return HSInteraction::CanInteract(HitActor, GetOwner()) ? HitActor : nullptr;
 }
 
 bool UHSInteractionSensorComponent::ResolveTraceView(FVector& OutStart, FVector& OutDirection) const

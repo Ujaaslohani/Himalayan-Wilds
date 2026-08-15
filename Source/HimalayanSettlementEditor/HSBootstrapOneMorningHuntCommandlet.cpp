@@ -230,6 +230,10 @@ void CreateMap()
 	{
 		Hunter->SetNPCDefinition(HunterDefinition);
 	}
+	if (UHSQuestDefinition* QuestDefinition = LoadObject<UHSQuestDefinition>(nullptr, TEXT("/Game/Data/Quests/DA_Quest_OneMorningHunt.DA_Quest_OneMorningHunt")))
+	{
+		Hunter->SetOfferedQuest(QuestDefinition);
+	}
 
 	SpawnNamedActor<AHSInteractionTarget>(World, TEXT("Interaction_Target_Practice"), FVector(200.0f, 160.0f, 90.0f), FRotator(0.0f, 180.0f, 0.0f));
 
