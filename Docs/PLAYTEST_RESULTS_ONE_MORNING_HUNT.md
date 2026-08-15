@@ -5,7 +5,7 @@
 - Date: 2026-08-15
 - Engine: Unreal Engine 5.5.4
 - Map: `L_OneMorningHunt`
-- Status: Pending hands-on pass
+- Status: Passed hands-on pass
 
 ## Pass Criteria
 
@@ -21,11 +21,12 @@
 
 ## Result
 
-- Overall: Not yet recorded.
+- Overall: Passed.
+- Player-visible confirmation: `Morning hunt completed` message appeared during the hands-on pass.
 - Issues:
-  - None recorded yet.
+  - None reported.
 
 ## Notes
 
 - Automation already covers the native loop and content presence.
-- This file is for hands-on editor feedback only.
+- Hands-on pass confirmed by the project owner in-editor.

@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-One Morning Hunt.
+One Morning Hunt: complete.
 
 ## Engine Version
 
@@ -49,11 +49,12 @@ Unreal Engine 5.5.4.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
+- Hands-on editor playtest passed with the visible `Morning hunt completed` confirmation.
 - All 34 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
-- Hands-on editor/manual smoke pass for the playable One Morning Hunt map.
+- Milestone 2 planning.
 
 ## Known Blockers
 
@@ -72,5 +73,6 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Run a hands-on editor/manual smoke pass on the playable map.
-2. Decide whether to mark One Morning Hunt complete or polish any issues found during the hands-on pass.
+1. Define Milestone 2 scope in docs before coding.
+2. Recommended next milestone: First Camp Craft.
+3. Add minimal native objective/resource HUD feedback if needed for continued testing.
