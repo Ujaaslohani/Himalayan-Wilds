@@ -12,6 +12,7 @@
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
 #include "InputCoreTypes.h"
+#include "Hunting/HSHuntingComponent.h"
 #include "Interaction/HSInteractionSensorComponent.h"
 
 AHSPlayerCharacter::AHSPlayerCharacter()
@@ -29,6 +30,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	FirstPersonCamera->bUsePawnControlRotation = true;
 
 	InteractionSensor = CreateDefaultSubobject<UHSInteractionSensorComponent>(TEXT("InteractionSensor"));
+	HuntingComponent = CreateDefaultSubobject<UHSHuntingComponent>(TEXT("HuntingComponent"));
 
 	PlayerMappingContext = CreateDefaultSubobject<UInputMappingContext>(TEXT("PlayerMappingContext"));
 
@@ -52,6 +54,11 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	InteractAction->ValueType = EInputActionValueType::Boolean;
 	PlayerMappingContext->MapKey(InteractAction, EKeys::E);
 	PlayerMappingContext->MapKey(InteractAction, EKeys::Gamepad_FaceButton_Bottom);
+
+	HuntAction = CreateDefaultSubobject<UInputAction>(TEXT("HuntAction"));
+	HuntAction->ValueType = EInputActionValueType::Boolean;
+	PlayerMappingContext->MapKey(HuntAction, EKeys::LeftMouseButton);
+	PlayerMappingContext->MapKey(HuntAction, EKeys::Gamepad_RightTrigger);
 }
 
 void AHSPlayerCharacter::PawnClientRestart()
@@ -68,6 +75,7 @@ void AHSPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AHSPlayerCharacter::Move);
 	EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AHSPlayerCharacter::Look);
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::Interact);
+	EnhancedInputComponent->BindAction(HuntAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::Hunt);
 }
 
 void AHSPlayerCharacter::Move(const FInputActionValue& InputValue)
@@ -96,6 +104,18 @@ void AHSPlayerCharacter::Interact(const FInputActionValue& InputValue)
 	else
 	{
 		UE_LOG(LogHSInteraction, Warning, TEXT("%s has no interaction sensor."), *GetNameSafe(this));
+	}
+}
+
+void AHSPlayerCharacter::Hunt(const FInputActionValue& InputValue)
+{
+	if (HuntingComponent)
+	{
+		HuntingComponent->TryHunt();
+	}
+	else
+	{
+		UE_LOG(LogHSAI, Warning, TEXT("%s has no hunting component."), *GetNameSafe(this));
 	}
 }
 

@@ -5,6 +5,7 @@
 #include "HSPlayerCharacter.generated.h"
 
 class UCameraComponent;
+class UHSHuntingComponent;
 class UHSInteractionSensorComponent;
 class UInputAction;
 class UInputMappingContext;
@@ -23,11 +24,13 @@ public:
 
 	UCameraComponent* GetFirstPersonCamera() const { return FirstPersonCamera; }
 	UHSInteractionSensorComponent* GetInteractionSensor() const { return InteractionSensor; }
+	UHSHuntingComponent* GetHuntingComponent() const { return HuntingComponent; }
 
 private:
 	void Move(const FInputActionValue& InputValue);
 	void Look(const FInputActionValue& InputValue);
 	void Interact(const FInputActionValue& InputValue);
+	void Hunt(const FInputActionValue& InputValue);
 	void ApplyInputMappingContext();
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
@@ -35,6 +38,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSInteractionSensorComponent> InteractionSensor;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player")
+	TObjectPtr<UHSHuntingComponent> HuntingComponent;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputMappingContext> PlayerMappingContext;
@@ -47,4 +53,7 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> InteractAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> HuntAction;
 };

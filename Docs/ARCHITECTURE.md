@@ -69,6 +69,10 @@ The first quest handoff is intentionally small: `UHSQuestHandoffComponent` refer
 
 `AHSAnimalActor` is the first native runtime animal shell. It references a `UHSAnimalDefinition`, tracks health and dead state, and exposes one-shot harvesting of configured drop stacks. It does not yet own wildlife AI, tracking clues, animation, inventory insertion, or projectile handling.
 
+## Hunting
+
+`UHSHuntingComponent` is the first player hunting action. It performs an on-demand camera visibility trace and applies prototype hunting damage to a live `AHSAnimalActor`. It is not yet a bow, arrow, projectile, ammo, animation, skill, or equipment system.
+
 ## Performance Rules
 
 - Avoid per-frame `Tick` unless the behavior genuinely requires frame-level updates.
