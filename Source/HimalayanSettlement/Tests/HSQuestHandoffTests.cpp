@@ -10,6 +10,7 @@
 #include "Quests/HSQuestDefinition.h"
 #include "Quests/HSQuestHandoffComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
+#include "Settlement/HSSettlementUnlockComponent.h"
 
 namespace
 {
@@ -93,6 +94,7 @@ bool FHSQuestHandoffCompletesWithResourcesTest::RunTest(const FString& Parameter
 	TestTrue(TEXT("Completion should grant knowledge reward tags."), Handoff->GetGrantedKnowledgeTags().HasTagExact(TAG_HS_Knowledge_Settlement_BasicCrafting));
 	TestTrue(TEXT("Completion should grant unlock reward tags."), Handoff->GetGrantedUnlockTags().HasTagExact(TAG_HS_Building_BasicDryingRack));
 	TestTrue(TEXT("Completion should mark the player milestone tag."), Interactor->GetPlayerProgressComponent()->HasCompletedMilestone(TAG_HS_Quest_OneMorningHunt));
+	TestTrue(TEXT("Completion should grant the player settlement unlock tag."), Interactor->GetSettlementUnlockComponent()->HasUnlock(TAG_HS_Building_BasicDryingRack));
 	TestFalse(TEXT("Completed quest should not complete twice."), Handoff->TryCompleteQuest(Interactor));
 
 	return true;

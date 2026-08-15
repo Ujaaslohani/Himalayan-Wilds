@@ -40,7 +40,8 @@ Unreal Engine 5.5.4.
 - Hunter quest handoff can now complete after the player carries required deer resources and records reward tags.
 - Native player progress component added; completed hunter quest now marks the One Morning Hunt quest tag complete on the player.
 - Native prototype visual mesh markers added for hunter, deer, and practice interaction target.
-- All 27 `HimalayanSettlement` automation tests pass.
+- Native settlement unlock component added; completed hunter quest now unlocks the basic drying rack tag on the player.
+- All 30 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
@@ -64,6 +65,6 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Add minimal resource consumption or settlement unlock state for the completed quest.
-2. Add a small HUD completion message hooked to player progress.
-3. Add a concise playtest checklist for the current One Morning Hunt loop.
+1. Add a small HUD completion message hooked to player progress.
+2. Add a concise playtest checklist for the current One Morning Hunt loop.
+3. Add minimal resource consumption for quest turn-in or building placement, pending approval.

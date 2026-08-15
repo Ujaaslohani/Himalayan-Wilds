@@ -85,6 +85,10 @@ Native placeholder actors own simple non-colliding static mesh components using 
 
 `UHSPlayerProgressComponent` is the first lightweight milestone signal on the player. It records completed milestone tags once and broadcasts a completion delegate. The hunter quest handoff marks the quest tag complete when returned resources satisfy the handoff. It is not yet save/load, achievements, a quest journal, or broad progression logic.
 
+## Settlement Unlock State
+
+`UHSSettlementUnlockComponent` is the first lightweight settlement unlock state on the player. Quest reward unlock tags are granted once and can be queried by later building/placeable systems. It is not yet building placement, construction, resource spending, UI, settlement storage, or persistence.
+
 ## Performance Rules
 
 - Avoid per-frame `Tick` unless the behavior genuinely requires frame-level updates.

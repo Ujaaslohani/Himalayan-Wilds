@@ -9,6 +9,7 @@ class UHSHuntingComponent;
 class UHSInteractionSensorComponent;
 class UHSPlayerProgressComponent;
 class UHSResourceCarryComponent;
+class UHSSettlementUnlockComponent;
 class UInputAction;
 class UInputMappingContext;
 struct FInputActionValue;
@@ -29,6 +30,7 @@ public:
 	UHSHuntingComponent* GetHuntingComponent() const { return HuntingComponent; }
 	UHSPlayerProgressComponent* GetPlayerProgressComponent() const { return PlayerProgressComponent; }
 	UHSResourceCarryComponent* GetResourceCarryComponent() const { return ResourceCarryComponent; }
+	UHSSettlementUnlockComponent* GetSettlementUnlockComponent() const { return SettlementUnlockComponent; }
 
 private:
 	void Move(const FInputActionValue& InputValue);
@@ -51,6 +53,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSResourceCarryComponent> ResourceCarryComponent;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player")
+	TObjectPtr<UHSSettlementUnlockComponent> SettlementUnlockComponent;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputMappingContext> PlayerMappingContext;

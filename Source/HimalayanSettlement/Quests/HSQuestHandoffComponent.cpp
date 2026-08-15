@@ -4,6 +4,7 @@
 #include "Progression/HSPlayerProgressComponent.h"
 #include "Quests/HSQuestDefinition.h"
 #include "Resources/HSResourceCarryComponent.h"
+#include "Settlement/HSSettlementUnlockComponent.h"
 
 #define LOCTEXT_NAMESPACE "HSQuestHandoffComponent"
 
@@ -114,6 +115,10 @@ bool UHSQuestHandoffComponent::TryCompleteQuest(AActor* Interactor)
 	if (UHSPlayerProgressComponent* ProgressComponent = Interactor ? Interactor->FindComponentByClass<UHSPlayerProgressComponent>() : nullptr)
 	{
 		ProgressComponent->MarkMilestoneCompleted(QuestDefinition->QuestTag);
+	}
+	if (UHSSettlementUnlockComponent* UnlockComponent = Interactor ? Interactor->FindComponentByClass<UHSSettlementUnlockComponent>() : nullptr)
+	{
+		UnlockComponent->GrantUnlocks(GrantedUnlockTags);
 	}
 	UE_LOG(
 		LogHSQuest,
