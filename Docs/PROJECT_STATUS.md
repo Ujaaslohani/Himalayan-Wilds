@@ -47,6 +47,8 @@ Unreal Engine 5.5.4.
 - Concise One Morning Hunt playtest checklist added.
 - Hands-on One Morning Hunt playtest results sheet added for milestone closeout.
 - Full milestone roadmap added in `Docs/MILESTONES.md`.
+- Gameplay direction documented for temporary camps, schema building, construction time, and NPC role services.
+- Performance strategy documented after low-FPS editor playtest feedback.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
@@ -55,7 +57,7 @@ Unreal Engine 5.5.4.
 
 ## In Progress
 
-- Milestone roadmap review.
+- Revised milestone and design-direction review.
 
 ## Known Blockers
 
@@ -71,6 +73,7 @@ Unreal Engine 5.5.4.
 - Gameplay Tags are intentionally minimal and should be expanded only when milestone features require them.
 - Data assets are prototype-authored and should stay narrow until each milestone system needs more fields.
 - Input config is intentionally minimal because gameplay input mappings are created in native C++.
+- Rendering/scalability settings need a dedicated low-end profile pass before forest density increases.
 
 ## Next Tasks
 
