@@ -51,6 +51,7 @@ Unreal Engine 5.5.4.
 - Full milestone roadmap added in `Docs/MILESTONES.md`.
 - Gameplay direction documented for temporary camps, schema building, construction time, and NPC role services.
 - Performance strategy documented after low-FPS editor playtest feedback.
+- Low-end performance baseline preset added for renderer defaults, game user settings, no-shadow prototype lights, and VS Code profiling launch.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
@@ -60,7 +61,7 @@ Unreal Engine 5.5.4.
 
 ## In Progress
 
-- Low-end performance baseline planning.
+- Core player movement polish: jump, crouch, and prone.
 
 ## Known Blockers
 
@@ -76,10 +77,10 @@ Unreal Engine 5.5.4.
 - Gameplay Tags are intentionally minimal and should be expanded only when milestone features require them.
 - Data assets are prototype-authored and should stay narrow until each milestone system needs more fields.
 - Input config is intentionally minimal because gameplay input mappings are created in native C++.
-- Rendering/scalability settings need a dedicated low-end profile pass before forest density increases.
+- Low-end renderer/scalability baseline is configured and confirmed working; numeric FPS readings should still be captured before forest density increases.
 
 ## Next Tasks
 
-1. Run a low-end performance baseline pass before adding denser forest/village content.
-2. Define Milestone 3 implementation scope: settlement claim and house schema.
-3. Start Milestone 3 only after the performance baseline and scope are clear.
+1. Add native jump, crouch, and prone controls.
+2. Record numeric FPS using the low-end profile task before forest density increases.
+3. Define Milestone 3 implementation scope: settlement claim and house schema.

@@ -45,6 +45,16 @@
 				"reveal": "always",
 				"panel": "dedicated"
 			}
+		},
+		{
+			"label": "UE: Open One Morning Hunt Map Low-End Profile",
+			"type": "shell",
+			"command": "& 'C:\\Program Files\\Epic Games\\UE_5.5\\Engine\\Binaries\\Win64\\UnrealEditor.exe' '${workspaceFolder}\\HimalayanSettlement.uproject' /Game/Maps/L_OneMorningHunt \"-ExecCmds=sg.ViewDistanceQuality 1; sg.AntiAliasingQuality 1; sg.ShadowQuality 1; sg.GlobalIlluminationQuality 0; sg.ReflectionQuality 0; sg.PostProcessQuality 1; sg.TextureQuality 1; sg.EffectsQuality 1; sg.FoliageQuality 0; sg.ShadingQuality 1; stat fps; stat unit\"",
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated"
+			}
 		}
 	]
 }

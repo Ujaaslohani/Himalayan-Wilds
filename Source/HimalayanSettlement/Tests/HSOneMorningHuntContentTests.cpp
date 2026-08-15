@@ -4,7 +4,11 @@
 #include "Animals/HSAnimalActor.h"
 #include "Animals/HSAnimalDefinition.h"
 #include "Building/HSBuildingDefinition.h"
+#include "Components/LightComponent.h"
+#include "Components/SkyLightComponent.h"
 #include "Core/HSGameplayTags.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
 #include "Engine/World.h"
 #include "Interaction/HSInteractionTarget.h"
 #include "NPC/HSNPCActor.h"
@@ -70,6 +74,8 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	bool bFoundInteractionTarget = false;
 	bool bFoundRestPoint = false;
 	bool bFoundTemporaryShelter = false;
+	bool bFoundCheapPrototypeSun = false;
+	bool bFoundCheapPrototypeSkyLight = false;
 	if (World && World->PersistentLevel)
 	{
 		for (const AActor* Actor : World->PersistentLevel->Actors)
@@ -91,6 +97,20 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 			bFoundInteractionTarget |= Actor && Actor->IsA<AHSInteractionTarget>();
 			bFoundRestPoint |= Actor && Actor->IsA<AHSRestPointActor>();
 			bFoundTemporaryShelter |= Actor && Actor->IsA<AHSTemporaryShelterActor>();
+			if (const ADirectionalLight* Sun = Cast<ADirectionalLight>(Actor))
+			{
+				const ULightComponent* SunComponent = Sun->GetLightComponent();
+				bFoundCheapPrototypeSun |= SunComponent
+					&& SunComponent->Mobility == EComponentMobility::Movable
+					&& !SunComponent->CastShadows;
+			}
+			if (const ASkyLight* SkyLight = Cast<ASkyLight>(Actor))
+			{
+				const USkyLightComponent* SkyLightComponent = SkyLight->GetLightComponent();
+				bFoundCheapPrototypeSkyLight |= SkyLightComponent
+					&& SkyLightComponent->Mobility == EComponentMobility::Movable
+					&& !SkyLightComponent->CastShadows;
+			}
 		}
 	}
 
@@ -100,6 +120,8 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("One Morning Hunt map should contain a native interaction target."), bFoundInteractionTarget);
 	TestTrue(TEXT("One Morning Hunt map should contain a native end-of-day rest point."), bFoundRestPoint);
 	TestTrue(TEXT("One Morning Hunt map should contain a native temporary shelter marker."), bFoundTemporaryShelter);
+	TestTrue(TEXT("One Morning Hunt prototype sun should use the cheap no-shadow baseline."), bFoundCheapPrototypeSun);
+	TestTrue(TEXT("One Morning Hunt prototype skylight should use the cheap no-shadow baseline."), bFoundCheapPrototypeSkyLight);
 
 	return true;
 }

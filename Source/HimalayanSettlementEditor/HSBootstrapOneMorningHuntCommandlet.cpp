@@ -4,6 +4,8 @@
 #include "Animals/HSAnimalActor.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Building/HSBuildingDefinition.h"
+#include "Components/LightComponent.h"
+#include "Components/SkyLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/StaticMesh.h"
@@ -225,8 +227,19 @@ void CreateMap()
 	Ground->SetActorScale3D(FVector(20.0f, 20.0f, 1.0f));
 
 	SpawnNamedActor<APlayerStart>(World, TEXT("PlayerStart_OneMorningHunt"), FVector(-300.0f, 0.0f, 90.0f));
-	SpawnNamedActor<ADirectionalLight>(World, TEXT("Sun_Morning"), FVector(0.0f, 0.0f, 400.0f), FRotator(-35.0f, -40.0f, 0.0f));
-	SpawnNamedActor<ASkyLight>(World, TEXT("SkyLight_Morning"), FVector(0.0f, 0.0f, 250.0f));
+	ADirectionalLight* Sun = SpawnNamedActor<ADirectionalLight>(World, TEXT("Sun_Morning"), FVector(0.0f, 0.0f, 400.0f), FRotator(-35.0f, -40.0f, 0.0f));
+	if (ULightComponent* SunComponent = Sun->GetLightComponent())
+	{
+		SunComponent->SetMobility(EComponentMobility::Movable);
+		SunComponent->SetCastShadows(false);
+	}
+
+	ASkyLight* SkyLight = SpawnNamedActor<ASkyLight>(World, TEXT("SkyLight_Morning"), FVector(0.0f, 0.0f, 250.0f));
+	if (USkyLightComponent* SkyLightComponent = SkyLight->GetLightComponent())
+	{
+		SkyLightComponent->SetMobility(EComponentMobility::Movable);
+		SkyLightComponent->SetCastShadows(false);
+	}
 
 	AHSNPCActor* Hunter = SpawnNamedActor<AHSNPCActor>(World, TEXT("NPC_Hunter"), FVector(200.0f, 0.0f, 90.0f), FRotator(0.0f, 180.0f, 0.0f));
 	if (UHSNPCDefinition* HunterDefinition = LoadObject<UHSNPCDefinition>(nullptr, TEXT("/Game/Data/NPCs/DA_NPC_Hunter.DA_NPC_Hunter")))

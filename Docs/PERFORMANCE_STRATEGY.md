@@ -41,11 +41,27 @@ Epic's documentation describes Lumen as UE5's default dynamic global illuminatio
 
 ## Near-Term Profiling Checklist
 
-- Record FPS in editor with the current prototype map.
-- Test viewport scalability settings at Low, Medium, and High.
-- Check whether lighting, shadows, or editor overhead are the biggest visible cost.
+- Open `UE: Open One Morning Hunt Map Low-End Profile` from VS Code.
+- Record FPS in editor with the current prototype map using the `stat fps` and `stat unit` overlays.
+- Compare against the normal `UE: Open One Morning Hunt Map` task.
+- Check whether Game, Draw, or GPU time is highest in the `stat unit` overlay.
 - Add a packaged Development build performance check once packaging is introduced.
 - Keep a performance note after each visual/world milestone.
+
+## Current Baseline Preset
+
+- Default game user settings now target low/medium scalability for early low-end testing.
+- Project renderer defaults disable Lumen global illumination, Lumen reflections, Virtual Shadow Maps, motion blur, and ambient occlusion.
+- The generated prototype map uses movable no-shadow sun/skylight lights to keep the test arena cheap and avoid lighting rebuild work during early gameplay iteration.
+- VS Code includes `UE: Open One Morning Hunt Map Low-End Profile`, which launches the map with low scalability CVars plus `stat fps` and `stat unit`.
+
+## Current Baseline Result
+
+- Date: 2026-08-15
+- Automation: 37 `HimalayanSettlement` tests passed.
+- Headless map launch: passes.
+- Hands-on low-end profile launch: confirmed working in the editor.
+- Numeric FPS/Game/Draw/GPU readings: not recorded yet.
 
 ## Target Philosophy
 
