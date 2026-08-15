@@ -1,0 +1,50 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "UE: Build Editor",
+			"type": "shell",
+			"command": "& 'C:\\Program Files\\Epic Games\\UE_5.5\\Engine\\Binaries\\DotNET\\UnrealBuildTool\\UnrealBuildTool.exe' HimalayanSettlementEditor Win64 Development \"-Project=${workspaceFolder}\\HimalayanSettlement.uproject\" -WaitMutex -FromMsBuild",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"problemMatcher": "$msCompile",
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated"
+			}
+		},
+		{
+			"label": "UE: Run Automation Tests",
+			"type": "shell",
+			"command": "& 'C:\\Program Files\\Epic Games\\UE_5.5\\Engine\\Binaries\\Win64\\UnrealEditor-Cmd.exe' '${workspaceFolder}\\HimalayanSettlement.uproject' -unattended -nop4 -nosplash -nullrhi \"-ExecCmds=Automation RunTests HimalayanSettlement; Quit\"",
+			"group": "test",
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated"
+			}
+		},
+		{
+			"label": "UE: Bootstrap One Morning Hunt Content",
+			"type": "shell",
+			"command": "& 'C:\\Program Files\\Epic Games\\UE_5.5\\Engine\\Binaries\\Win64\\UnrealEditor-Cmd.exe' '${workspaceFolder}\\HimalayanSettlement.uproject' -unattended -nop4 -nosplash -nullrhi -run=HSBootstrapOneMorningHunt",
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated"
+			}
+		},
+		{
+			"label": "UE: Open One Morning Hunt Map",
+			"type": "shell",
+			"command": "& 'C:\\Program Files\\Epic Games\\UE_5.5\\Engine\\Binaries\\Win64\\UnrealEditor.exe' '${workspaceFolder}\\HimalayanSettlement.uproject' /Game/Maps/L_OneMorningHunt",
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated"
+			}
+		}
+	]
+}

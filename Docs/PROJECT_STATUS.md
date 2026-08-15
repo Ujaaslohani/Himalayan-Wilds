@@ -44,6 +44,7 @@ Unreal Engine 5.5.4.
 - Native HUD completion message added for completed player progress milestones.
 - Concise One Morning Hunt playtest checklist added.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
+- VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - All 32 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
