@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 2: Temporary Shelter And Sleep: complete.
+Movement expansion after Milestone 2: complete. Next milestone is Milestone 3: Settlement Claim And House Schema.
 
 ## Engine Version
 
@@ -46,6 +46,7 @@ Unreal Engine 5.5.4.
 - Native camp rest point added as the gated end-of-day marker for the One Morning Hunt loop.
 - Native world time state added with day/night phase and half-day advancement.
 - Native temporary shelter marker added; sleeping flips day/night and expires the shelter.
+- Native player movement supports jump, crouch, and prone traversal controls.
 - Concise One Morning Hunt playtest checklist added.
 - Hands-on One Morning Hunt playtest results sheet added for milestone closeout.
 - Full milestone roadmap added in `Docs/MILESTONES.md`.
@@ -57,11 +58,12 @@ Unreal Engine 5.5.4.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
 - Hands-on editor playtest passed with the visible `Morning hunt completed` confirmation.
 - Hands-on temporary shelter playtest passed and Milestone 2 was confirmed complete.
-- All 37 `HimalayanSettlement` automation tests pass.
+- Hands-on movement playtest passed for jump, crouch, and prone.
+- All 39 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
-- Core player movement polish: jump, crouch, and prone.
+- Milestone 3 settlement claim and house schema scope.
 
 ## Known Blockers
 
@@ -81,6 +83,6 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Add native jump, crouch, and prone controls.
-2. Record numeric FPS using the low-end profile task before forest density increases.
-3. Define Milestone 3 implementation scope: settlement claim and house schema.
+1. Define Milestone 3 implementation scope in the existing gameplay direction and milestone docs.
+2. Add the native settlement claim and house schema foundation.
+3. Record numeric FPS using the low-end profile task before forest density increases.

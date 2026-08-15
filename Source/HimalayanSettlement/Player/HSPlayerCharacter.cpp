@@ -19,17 +19,32 @@
 #include "Settlement/HSSettlementUnlockComponent.h"
 
 AHSPlayerCharacter::AHSPlayerCharacter()
+	: PlayerStance(EHSPlayerStance::Standing)
+	, StandingWalkSpeed(350.0f)
+	, CrouchWalkSpeed(190.0f)
+	, ProneMoveSpeed(85.0f)
+	, StandingCapsuleHalfHeight(88.0f)
+	, CrouchCapsuleHalfHeight(48.0f)
+	, ProneCapsuleHalfHeight(36.0f)
+	, StandingCameraHeight(64.0f)
+	, CrouchCameraHeight(40.0f)
+	, ProneCameraHeight(24.0f)
 {
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationRoll = false;
 	bUseControllerRotationYaw = true;
 
+	GetCapsuleComponent()->SetCapsuleHalfHeight(StandingCapsuleHalfHeight);
 	GetCharacterMovement()->bOrientRotationToMovement = false;
-	GetCharacterMovement()->MaxWalkSpeed = 350.0f;
+	GetCharacterMovement()->MaxWalkSpeed = StandingWalkSpeed;
+	GetCharacterMovement()->MaxWalkSpeedCrouched = CrouchWalkSpeed;
+	GetCharacterMovement()->JumpZVelocity = 420.0f;
+	GetCharacterMovement()->AirControl = 0.25f;
+	GetCharacterMovement()->NavAgentProps.bCanCrouch = true;
 
 	FirstPersonCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
 	FirstPersonCamera->SetupAttachment(GetCapsuleComponent());
-	FirstPersonCamera->SetRelativeLocation(FVector(0.0f, 0.0f, BaseEyeHeight));
+	FirstPersonCamera->SetRelativeLocation(FVector(0.0f, 0.0f, StandingCameraHeight));
 	FirstPersonCamera->bUsePawnControlRotation = true;
 
 	InteractionSensor = CreateDefaultSubobject<UHSInteractionSensorComponent>(TEXT("InteractionSensor"));
@@ -65,6 +80,21 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	HuntAction->ValueType = EInputActionValueType::Boolean;
 	PlayerMappingContext->MapKey(HuntAction, EKeys::LeftMouseButton);
 	PlayerMappingContext->MapKey(HuntAction, EKeys::Gamepad_RightTrigger);
+
+	JumpAction = CreateDefaultSubobject<UInputAction>(TEXT("JumpAction"));
+	JumpAction->ValueType = EInputActionValueType::Boolean;
+	PlayerMappingContext->MapKey(JumpAction, EKeys::SpaceBar);
+	PlayerMappingContext->MapKey(JumpAction, EKeys::Gamepad_FaceButton_Top);
+
+	CrouchAction = CreateDefaultSubobject<UInputAction>(TEXT("CrouchAction"));
+	CrouchAction->ValueType = EInputActionValueType::Boolean;
+	PlayerMappingContext->MapKey(CrouchAction, EKeys::LeftControl);
+	PlayerMappingContext->MapKey(CrouchAction, EKeys::Gamepad_LeftThumbstick);
+
+	ProneAction = CreateDefaultSubobject<UInputAction>(TEXT("ProneAction"));
+	ProneAction->ValueType = EInputActionValueType::Boolean;
+	PlayerMappingContext->MapKey(ProneAction, EKeys::Z);
+	PlayerMappingContext->MapKey(ProneAction, EKeys::Gamepad_FaceButton_Right);
 }
 
 void AHSPlayerCharacter::PawnClientRestart()
@@ -82,10 +112,19 @@ void AHSPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AHSPlayerCharacter::Look);
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::Interact);
 	EnhancedInputComponent->BindAction(HuntAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::Hunt);
+	EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::StartJump);
+	EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &AHSPlayerCharacter::StopJump);
+	EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::ToggleCrouchStance);
+	EnhancedInputComponent->BindAction(ProneAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::ToggleProneStance);
 }
 
 void AHSPlayerCharacter::Move(const FInputActionValue& InputValue)
 {
+	if (PlayerStance == EHSPlayerStance::Prone && GetCharacterMovement()->IsFalling())
+	{
+		return;
+	}
+
 	const FVector2D MovementInput = InputValue.Get<FVector2D>();
 	const FRotator ControlRotation = Controller ? Controller->GetControlRotation() : FRotator::ZeroRotator;
 	const FRotator YawRotation(0.0f, ControlRotation.Yaw, 0.0f);
@@ -125,6 +164,42 @@ void AHSPlayerCharacter::Hunt(const FInputActionValue& InputValue)
 	}
 }
 
+void AHSPlayerCharacter::StartJump(const FInputActionValue& InputValue)
+{
+	if (PlayerStance == EHSPlayerStance::Prone)
+	{
+		SetPlayerStance(EHSPlayerStance::Standing);
+	}
+
+	Jump();
+}
+
+void AHSPlayerCharacter::StopJump(const FInputActionValue& InputValue)
+{
+	StopJumping();
+}
+
+void AHSPlayerCharacter::ToggleCrouchStance(const FInputActionValue& InputValue)
+{
+	SetPlayerStance(PlayerStance == EHSPlayerStance::Crouching ? EHSPlayerStance::Standing : EHSPlayerStance::Crouching);
+}
+
+void AHSPlayerCharacter::ToggleProneStance(const FInputActionValue& InputValue)
+{
+	SetPlayerStance(PlayerStance == EHSPlayerStance::Prone ? EHSPlayerStance::Standing : EHSPlayerStance::Prone);
+}
+
+void AHSPlayerCharacter::SetPlayerStance(EHSPlayerStance NewStance)
+{
+	if (PlayerStance == NewStance)
+	{
+		return;
+	}
+
+	PlayerStance = NewStance;
+	ApplyStanceMovementSettings();
+}
+
 void AHSPlayerCharacter::ApplyInputMappingContext()
 {
 	APlayerController* PlayerController = Cast<APlayerController>(Controller);
@@ -139,5 +214,41 @@ void AHSPlayerCharacter::ApplyInputMappingContext()
 	{
 		InputSubsystem->RemoveMappingContext(PlayerMappingContext);
 		InputSubsystem->AddMappingContext(PlayerMappingContext, 0);
+	}
+}
+
+void AHSPlayerCharacter::ApplyStanceMovementSettings()
+{
+	UCharacterMovementComponent* MovementComponent = GetCharacterMovement();
+	UCapsuleComponent* Capsule = GetCapsuleComponent();
+	if (!MovementComponent || !Capsule || !FirstPersonCamera)
+	{
+		return;
+	}
+
+	switch (PlayerStance)
+	{
+	case EHSPlayerStance::Crouching:
+		UnCrouch(false);
+		Capsule->SetCapsuleHalfHeight(CrouchCapsuleHalfHeight, true);
+		FirstPersonCamera->SetRelativeLocation(FVector(0.0f, 0.0f, CrouchCameraHeight));
+		MovementComponent->MaxWalkSpeed = CrouchWalkSpeed;
+		Crouch(false);
+		break;
+
+	case EHSPlayerStance::Prone:
+		UnCrouch(false);
+		Capsule->SetCapsuleHalfHeight(ProneCapsuleHalfHeight, true);
+		FirstPersonCamera->SetRelativeLocation(FVector(0.0f, 0.0f, ProneCameraHeight));
+		MovementComponent->MaxWalkSpeed = ProneMoveSpeed;
+		break;
+
+	case EHSPlayerStance::Standing:
+	default:
+		UnCrouch(false);
+		Capsule->SetCapsuleHalfHeight(StandingCapsuleHalfHeight, true);
+		FirstPersonCamera->SetRelativeLocation(FVector(0.0f, 0.0f, StandingCameraHeight));
+		MovementComponent->MaxWalkSpeed = StandingWalkSpeed;
+		break;
 	}
 }
