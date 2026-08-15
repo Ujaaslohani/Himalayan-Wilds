@@ -1,0 +1,28 @@
+# Unreal generated files
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vs/
+*.sln
+*.suo
+*.opensdf
+*.opendb
+*.VC.db
+*.VC.VC.opendb
+
+# Build artifacts
+Build/
+Builds/
+
+# Local/editor noise
+*.log
+*.tmp
+*.user
+*.userosscache
+*.sdf
+
+# Keep project docs/config/source tracked.
+!Config/
+!Docs/
+!Source/

@@ -1,0 +1,7 @@
+#include "Core/HSLogCategories.h"
+
+DEFINE_LOG_CATEGORY(LogHSCore);
+DEFINE_LOG_CATEGORY(LogHSInteraction);
+DEFINE_LOG_CATEGORY(LogHSAI);
+DEFINE_LOG_CATEGORY(LogHSQuest);
+DEFINE_LOG_CATEGORY(LogHSSettlement);
