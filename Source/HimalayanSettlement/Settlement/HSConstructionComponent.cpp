@@ -4,6 +4,7 @@
 #include "Core/HSLogCategories.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
+#include "Settlement/HSCompletedBuildingActor.h"
 #include "Settlement/HSSettlementPlanComponent.h"
 #include "World/HSGameState.h"
 #include "World/HSWorldTimeComponent.h"
@@ -52,6 +53,7 @@ bool UHSConstructionComponent::StartNextPendingSchema(UHSSettlementPlanComponent
 			FHSConstructionJob ConstructionJob;
 			ConstructionJob.BuildingTag = ConsumedSchema.BuildingTag;
 			ConstructionJob.Location = ConsumedSchema.Location;
+			ConstructionJob.YawDegrees = ConsumedSchema.YawDegrees;
 			ConstructionJob.RequiredDays = ResolveRequiredDays(ConsumedSchema.BuildingTag);
 			ConstructionJob.ProgressDays = 0.0f;
 			ConstructionJob.State = EHSConstructionJobState::Active;
@@ -88,6 +90,7 @@ bool UHSConstructionComponent::AdvanceConstruction(float DeltaDays)
 
 	ActiveJob->State = EHSConstructionJobState::Complete;
 	CompletedBuildings.AddTag(ActiveJob->BuildingTag);
+	SpawnCompletedBuildingVisual(*ActiveJob);
 	OnConstructionJobCompleted.Broadcast(*ActiveJob);
 	UE_LOG(LogHSSettlement, Log, TEXT("%s completed construction job for %s."), *GetNameSafe(GetOwner()), *ActiveJob->BuildingTag.ToString());
 	return true;
@@ -168,6 +171,8 @@ void UHSConstructionComponent::RestoreConstructionState(const TArray<FHSConstruc
 			CompletedBuildings.AddTag(ConstructionJob.BuildingTag);
 		}
 	}
+
+	RebuildCompletedBuildingVisuals();
 }
 
 void UHSConstructionComponent::HandleTimeAdvanced(EHSTimePhase NewTimePhase, float ElapsedDays)
@@ -180,6 +185,68 @@ void UHSConstructionComponent::HandleTimeAdvanced(EHSTimePhase NewTimePhase, flo
 float UHSConstructionComponent::ResolveRequiredDays(FGameplayTag BuildingTag) const
 {
 	return BuildingTag == TAG_HS_Building_BasicHouse ? HouseConstructionDays : HouseConstructionDays;
+}
+
+void UHSConstructionComponent::SpawnCompletedBuildingVisual(const FHSConstructionJob& ConstructionJob)
+{
+	if (!ConstructionJob.IsComplete() || !ConstructionJob.BuildingTag.IsValid())
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	for (const TWeakObjectPtr<AHSCompletedBuildingActor>& ExistingActor : SpawnedCompletedBuildingActors)
+	{
+		if (const AHSCompletedBuildingActor* CompletedActor = ExistingActor.Get())
+		{
+			if (CompletedActor->GetBuildingTag() == ConstructionJob.BuildingTag)
+			{
+				return;
+			}
+		}
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Owner = GetOwner();
+	SpawnParameters.Name = MakeUniqueObjectName(World, AHSCompletedBuildingActor::StaticClass(), FName(TEXT("CompletedBuilding")));
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	AHSCompletedBuildingActor* CompletedBuilding = World->SpawnActor<AHSCompletedBuildingActor>(
+		ConstructionJob.Location,
+		FRotator(0.0f, ConstructionJob.YawDegrees, 0.0f),
+		SpawnParameters);
+
+	if (CompletedBuilding)
+	{
+		CompletedBuilding->ConfigureCompletedBuilding(ConstructionJob.BuildingTag);
+		SpawnedCompletedBuildingActors.Add(CompletedBuilding);
+	}
+}
+
+void UHSConstructionComponent::RebuildCompletedBuildingVisuals()
+{
+	for (const TWeakObjectPtr<AHSCompletedBuildingActor>& ExistingActor : SpawnedCompletedBuildingActors)
+	{
+		if (AHSCompletedBuildingActor* CompletedActor = ExistingActor.Get())
+		{
+			CompletedActor->Destroy();
+		}
+	}
+
+	SpawnedCompletedBuildingActors.Reset();
+
+	for (const FHSConstructionJob& ConstructionJob : ConstructionJobs)
+	{
+		if (ConstructionJob.IsComplete())
+		{
+			SpawnCompletedBuildingVisual(ConstructionJob);
+		}
+	}
 }
 
 FHSConstructionJob* UHSConstructionComponent::FindActiveJob()

@@ -109,6 +109,8 @@ NPC services are coordinated by `UHSNPCServiceComponent`, a no-tick native compo
 
 `UHSBuildPlacementComponent` owns the player-facing free-build schema placement flow. It starts disabled, ticks only while a placement preview is active, drives a lightweight no-tick preview actor, validates against `UHSSettlementPlanComponent`, and records a pending schema when confirmed. The first build menu selects Basic House before entering placement. Builder construction still consumes the pending schema and takes the configured time to complete it.
 
+`AHSCompletedBuildingActor` is the first no-tick completed-building visual. `UHSConstructionComponent` spawns it when a construction job completes and rebuilds it from completed construction jobs during save restore. It is a prototype visual marker, not final house art or collision.
+
 ## Herbalism
 
 `UHSPlantEffectComponent` stores known plants and one active temporary effect on the player. `AHSPlantActor` is a no-tick interactable that applies a known plant definition and consumes itself. Plant effects expire from `UHSWorldTimeComponent` events, not per-frame checks.

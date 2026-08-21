@@ -6,6 +6,7 @@
 #include "HSConstructionComponent.generated.h"
 
 class UHSSettlementPlanComponent;
+class AHSCompletedBuildingActor;
 enum class EHSTimePhase : uint8;
 
 UENUM(BlueprintType)
@@ -25,6 +26,9 @@ struct HIMALAYANSETTLEMENT_API FHSConstructionJob
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Construction")
 	FVector Location = FVector::ZeroVector;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Construction")
+	float YawDegrees = 0.0f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Construction")
 	float RequiredDays = 1.0f;
@@ -89,6 +93,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Construction")
 	const FGameplayTagContainer& GetCompletedBuildings() const { return CompletedBuildings; }
 
+	const TArray<TWeakObjectPtr<AHSCompletedBuildingActor>>& GetSpawnedCompletedBuildingActors() const { return SpawnedCompletedBuildingActors; }
+
 	void RestoreConstructionState(const TArray<FHSConstructionJob>& NewConstructionJobs, const FGameplayTagContainer& NewCompletedBuildings);
 
 private:
@@ -96,6 +102,8 @@ private:
 	void HandleTimeAdvanced(EHSTimePhase NewTimePhase, float ElapsedDays);
 
 	float ResolveRequiredDays(FGameplayTag BuildingTag) const;
+	void SpawnCompletedBuildingVisual(const FHSConstructionJob& ConstructionJob);
+	void RebuildCompletedBuildingVisuals();
 	FHSConstructionJob* FindActiveJob();
 	const FHSConstructionJob* FindActiveJob() const;
 
@@ -107,6 +115,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Construction")
 	FGameplayTagContainer CompletedBuildings;
+
+	UPROPERTY(Transient)
+	TArray<TWeakObjectPtr<AHSCompletedBuildingActor>> SpawnedCompletedBuildingActors;
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<class UHSWorldTimeComponent> BoundWorldTime;

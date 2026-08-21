@@ -60,6 +60,7 @@ Unreal Engine 5.5.4.
 - Basic house placement now starts from player build mode instead of relying on a fixed map schema marker.
 - Basic house building definition and `Building.BasicHouse` / `Settlement.Stage.Claimed` tags added.
 - Native construction component added for one active builder job, half-day time progress, and completed building state.
+- Native completed-building visual actor added; house completion now spawns a visible no-tick prototype house at the placed schema location.
 - Builder profession tag, builder data asset, and builder NPC bootstrap path added.
 - Native HUD feedback added for construction start and completion.
 - Milestone 4 builder construction-time foundation compiles.
@@ -105,7 +106,7 @@ Unreal Engine 5.5.4.
 - Hands-on movement playtest passed for jump, crouch, and prone.
 - Milestone 3 settlement claim and house schema foundation compiles.
 - Content bootstrap succeeds with zero warnings and regenerates the basic house schema marker.
-- All 74 `HimalayanSettlement` automation tests pass.
+- All 75 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
@@ -132,7 +133,7 @@ Unreal Engine 5.5.4.
 1. Run hands-on hunter intel playtest: ask hunter for animal signs, confirm marker appears, sleep into next day, and confirm a fresh report is available.
 2. Run hands-on herbalist playtest: talk to Herbalist, use Speed Herb, confirm movement is faster, sleep/advance time, and confirm the effect expires.
 3. Run hands-on soldier playtest: talk to Soldier, confirm bow and arrows are granted once, and confirm repeat interaction does not duplicate supplies.
-4. Run hands-on free-build playtest: claim settlement, press `B`, rotate with `Q/R`, place house with left mouse or `E`, ask Builder to start construction, then sleep until the 1-day build completes.
+4. Run hands-on free-build playtest: claim settlement, press `B`, choose Basic House with `[1]`, rotate with `Q/R`, place house with left mouse or `E`, ask Builder to start construction, then sleep until the 1-day build completes and a completed house visual appears.
 5. Run hands-on service-framework sanity pass: confirm Builder/Hunter/Herbalist/Soldier prompts still appear only when their service is available.
 6. Run hands-on exploration pass: walk settlement to village core, follow trail markers to forest edge, find animal ridge, and confirm the route is readable without explanation.
 7. Run hands-on closeout for Milestones 3-5 if not already confirmed in-editor.

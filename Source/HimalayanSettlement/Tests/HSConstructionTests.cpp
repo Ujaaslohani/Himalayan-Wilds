@@ -7,6 +7,7 @@
 #include "NPC/HSNPCActor.h"
 #include "NPC/HSNPCDefinition.h"
 #include "Player/HSPlayerCharacter.h"
+#include "Settlement/HSCompletedBuildingActor.h"
 #include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
 #include "World/HSGameState.h"
@@ -45,6 +46,28 @@ bool FHSConstructionDefaultsTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Construction component should not start with an active job."), Construction->HasActiveJob());
 	TestEqual(TEXT("Construction component should start with no jobs."), Construction->GetConstructionJobs().Num(), 0);
 	TestEqual(TEXT("Basic house construction should take one day at first."), Construction->GetHouseConstructionDays(), 1.0f);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSCompletedBuildingVisualDefaultsTest,
+	"HimalayanSettlement.Construction.CompletedBuildingVisualDefaultsAreCheap",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSCompletedBuildingVisualDefaultsTest::RunTest(const FString& Parameters)
+{
+	AHSCompletedBuildingActor* CompletedBuilding = NewObject<AHSCompletedBuildingActor>();
+
+	TestNotNull(TEXT("Completed building actor should be constructible."), CompletedBuilding);
+	TestFalse(TEXT("Completed building actor should not tick."), CompletedBuilding ? CompletedBuilding->PrimaryActorTick.bCanEverTick : true);
+	TestNotNull(TEXT("Completed building should own a wall mesh."), CompletedBuilding ? CompletedBuilding->GetWallMesh() : nullptr);
+	TestNotNull(TEXT("Completed building should own a roof mesh."), CompletedBuilding ? CompletedBuilding->GetRoofMesh() : nullptr);
+	TestEqual(TEXT("Wall mesh should not use collision yet."), CompletedBuilding && CompletedBuilding->GetWallMesh() ? CompletedBuilding->GetWallMesh()->GetCollisionEnabled() : ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::NoCollision);
+	TestEqual(TEXT("Roof mesh should not use collision yet."), CompletedBuilding && CompletedBuilding->GetRoofMesh() ? CompletedBuilding->GetRoofMesh()->GetCollisionEnabled() : ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::NoCollision);
+
+	CompletedBuilding->ConfigureCompletedBuilding(TAG_HS_Building_BasicHouse);
+	TestTrue(TEXT("Completed building should store configured tag."), CompletedBuilding->GetBuildingTag() == TAG_HS_Building_BasicHouse);
 
 	return true;
 }
@@ -139,6 +162,11 @@ bool FHSConstructionWorldTimeAdvancesActiveJobTest::RunTest(const FString& Param
 	TestEqual(TEXT("One time advance should progress half a day."), Construction->GetConstructionJobs()[0].ProgressDays, 0.5f);
 	WorldTime->AdvanceHalfDay();
 	TestTrue(TEXT("Second time advance should complete the house."), Construction->HasCompletedBuilding(TAG_HS_Building_BasicHouse));
+	TestEqual(TEXT("Completing construction should spawn one completed building visual."), Construction->GetSpawnedCompletedBuildingActors().Num(), 1);
+	const AHSCompletedBuildingActor* CompletedBuilding = Construction->GetSpawnedCompletedBuildingActors().Num() > 0 ? Construction->GetSpawnedCompletedBuildingActors()[0].Get() : nullptr;
+	TestNotNull(TEXT("Completed building visual should be valid."), CompletedBuilding);
+	TestTrue(TEXT("Completed building visual should store the house tag."), CompletedBuilding && CompletedBuilding->GetBuildingTag() == TAG_HS_Building_BasicHouse);
+	TestEqual(TEXT("Completed building visual should spawn at schema location."), CompletedBuilding ? CompletedBuilding->GetActorLocation() : FVector::ZeroVector, FVector(250.0f, 0.0f, 0.0f));
 
 	World->DestroyWorld(false);
 	return true;
