@@ -32,9 +32,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Persistence")
 	const FString& GetDefaultSlotName() const { return DefaultSlotName; }
 
+	UFUNCTION(BlueprintPure, Category = "Persistence")
+	const FString& GetAutosaveSlotName() const { return AutosaveSlotName; }
+
 private:
 	class UHSWorldTimeComponent* ResolveWorldTime() const;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Persistence")
 	FString DefaultSlotName;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Persistence")
+	FString AutosaveSlotName;
 };

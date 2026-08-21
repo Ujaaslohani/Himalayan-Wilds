@@ -16,6 +16,7 @@
 
 UHSSettlementPersistenceComponent::UHSSettlementPersistenceComponent()
 	: DefaultSlotName(TEXT("HimalayanSettlement_Prototype"))
+	, AutosaveSlotName(TEXT("HimalayanSettlement_Autosave"))
 {
 	PrimaryComponentTick.bCanEverTick = false;
 }

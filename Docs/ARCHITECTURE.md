@@ -11,7 +11,7 @@ Target split:
 
 ## Scope Boundary
 
-Current milestone: early vertical-slice foundations through One Morning Hunt, temporary sleep, settlement schema, builder construction, persistence, hunter intel, herbalist plant knowledge, exploration markers, and a basic native HUD status/objective overlay.
+Current milestone: early vertical-slice foundations through One Morning Hunt, temporary sleep, settlement schema, builder construction, persistence, hunter intel, herbalist plant knowledge, exploration markers, basic native HUD status/objective overlay, and first pause/save menu controls.
 
 The player starts in a primitive settlement, talks to one hunter NPC, receives a deer-hunting task, tracks and hunts a deer, harvests resources, returns to the NPC, unlocks early settlement progression, places a house schema, uses specialist NPC services, and advances time through sleep.
 
@@ -69,6 +69,8 @@ The first quest handoff is intentionally small: `UHSQuestHandoffComponent` refer
 
 `AHSHUD` is the first native HUD layer. It draws a minimal interaction prompt from the player interaction sensor cache, short feedback messages for progress, settlement planning, construction, hunter intel, and plant effects, plus a compact vertical-slice status/objective readout. Objective guidance is derived from existing native state such as quest completion, carried deer resources, settlement claim, pending schemas, construction jobs, and completed house state. It is intentionally not a broader inventory, dialogue, quest log, or survival HUD.
 
+Pause menu presentation is currently native Canvas HUD. `Esc` cancels active build placement first; otherwise it pauses/unpauses the game and shows keyboard commands for Resume, Save, Load, Options, and Exit. This is the first functional menu layer and may later be replaced by richer UMG/Slate widgets without moving gameplay rules out of C++.
+
 ## Prototype Visual Markers
 
 Native placeholder actors own simple non-colliding static mesh components using engine basic shapes. These markers make the current test map readable while real art, animation, and Blueprint visual setup remain out of scope for this milestone slice.
@@ -111,7 +113,7 @@ NPC services are coordinated by `UHSNPCServiceComponent`, a no-tick native compo
 
 ## Persistence
 
-`UHSSettlementSaveGame` is versioned and stores time, milestones, carried resources, settlement unlocks, schema state, construction jobs, hunter intel, and herbalist plant state. `UHSSettlementPersistenceComponent` snapshots and restores from native components and rejects unsupported save versions.
+`UHSSettlementSaveGame` is versioned and stores time, milestones, carried resources, settlement unlocks, schema state, construction jobs, hunter intel, and herbalist plant state. `UHSSettlementPersistenceComponent` snapshots and restores from native components and rejects unsupported save versions. Manual pause-menu saves use the default slot, while event-driven autosaves use a separate autosave slot so deliberate saves are not overwritten by sleep, milestone, or construction events.
 
 ## Performance Rules
 

@@ -2,14 +2,16 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "GameplayTagContainer.h"
 #include "Herbalism/HSPlantEffectComponent.h"
+#include "Settlement/HSConstructionComponent.h"
+#include "World/HSWorldTimeComponent.h"
 #include "HSPlayerCharacter.generated.h"
 
 class UCameraComponent;
 class UHSAnimalIntelComponent;
 class UHSBuildPlacementComponent;
 class UHSHuntingComponent;
-class UHSConstructionComponent;
 class UHSInteractionSensorComponent;
 class UHSSettlementPersistenceComponent;
 class UHSPlayerProgressComponent;
@@ -71,6 +73,30 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Player|Movement")
 	void SetPlayerStance(EHSPlayerStance NewStance);
 
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	bool IsPauseMenuOpen() const { return bPauseMenuOpen; }
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	bool IsPauseOptionsOpen() const { return bPauseOptionsOpen; }
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void OpenPauseMenu();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void ClosePauseMenu();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	bool SaveFromPauseMenu();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	bool LoadFromPauseMenu();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void TogglePauseOptions();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Persistence")
+	bool AutosaveSettlementState(const FString& Reason);
+
 private:
 	void Move(const FInputActionValue& InputValue);
 	void Look(const FInputActionValue& InputValue);
@@ -83,11 +109,28 @@ private:
 	void ToggleBuildPlacement(const FInputActionValue& InputValue);
 	void RotateBuildPlacementLeft(const FInputActionValue& InputValue);
 	void RotateBuildPlacementRight(const FInputActionValue& InputValue);
-	void CancelBuildPlacement(const FInputActionValue& InputValue);
+	void HandleEscapeAction(const FInputActionValue& InputValue);
+	void HandlePauseMenuResume(const FInputActionValue& InputValue);
+	void HandlePauseMenuSave(const FInputActionValue& InputValue);
+	void HandlePauseMenuLoad(const FInputActionValue& InputValue);
+	void HandlePauseMenuOptions(const FInputActionValue& InputValue);
+	void HandlePauseMenuExit(const FInputActionValue& InputValue);
 	void SaveSettlementState(const FInputActionValue& InputValue);
 	void LoadSettlementState(const FInputActionValue& InputValue);
 	void ApplyInputMappingContext();
 	void ApplyStanceMovementSettings();
+	void SetPauseMenuOpen(bool bNewOpen);
+	void ExitGameFromPauseMenu() const;
+	void BindAutosaveSources();
+
+	UFUNCTION()
+	void HandleAutosaveMilestoneCompleted(FGameplayTag MilestoneTag);
+
+	UFUNCTION()
+	void HandleAutosaveConstructionChanged(const FHSConstructionJob& ConstructionJob);
+
+	UFUNCTION()
+	void HandleAutosaveTimeAdvanced(EHSTimePhase NewTimePhase, float ElapsedDays);
 
 	UFUNCTION()
 	void HandlePlantEffectMovementChanged(const struct FHSPlantEffectState& PlantEffect);
@@ -162,7 +205,22 @@ private:
 	TObjectPtr<UInputAction> RotateBuildRightAction;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UInputAction> CancelBuildPlacementAction;
+	TObjectPtr<UInputAction> EscapeAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> PauseMenuResumeAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> PauseMenuSaveAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> PauseMenuLoadAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> PauseMenuOptionsAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> PauseMenuExitAction;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> SaveAction;
@@ -199,4 +257,16 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Player|Movement")
 	float ProneCameraHeight;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
+	bool bPauseMenuOpen;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
+	bool bPauseOptionsOpen;
+
+	UPROPERTY(Transient)
+	bool bAutosaveSuppressed;
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<UHSWorldTimeComponent> BoundAutosaveWorldTime;
 };

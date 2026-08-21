@@ -6,6 +6,7 @@
 #include "Herbalism/HSPlantEffectComponent.h"
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "Interaction/HSInteractionSensorComponent.h"
+#include "Player/HSPlayerCharacter.h"
 #include "Progression/HSPlayerProgressComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
 #include "Settlement/HSBuildPlacementComponent.h"
@@ -44,6 +45,7 @@ void AHSHUD::DrawHUD()
 
 	const AHSGameState* GameState = GetWorld() ? GetWorld()->GetGameState<AHSGameState>() : nullptr;
 	const APawn* Pawn = PlayerOwner->GetPawn();
+	const AHSPlayerCharacter* PlayerCharacter = Cast<AHSPlayerCharacter>(Pawn);
 
 	const TArray<FString> StatusLines = BuildStatusLines(GameState, Pawn);
 	for (int32 LineIndex = 0; LineIndex < StatusLines.Num(); ++LineIndex)
@@ -56,6 +58,12 @@ void AHSHUD::DrawHUD()
 	for (int32 LineIndex = 0; LineIndex < ObjectiveLines.Num(); ++LineIndex)
 	{
 		DrawStatusTextLine(ObjectiveLines[LineIndex], ObjectiveStartY + (StatusLineHeight * LineIndex), FLinearColor(0.75f, 1.0f, 0.72f, 1.0f));
+	}
+
+	if (PlayerCharacter && PlayerCharacter->IsPauseMenuOpen())
+	{
+		DrawPauseMenu(PlayerCharacter);
+		return;
 	}
 
 	const UHSBuildPlacementComponent* BuildPlacementComponent = Pawn ? Pawn->FindComponentByClass<UHSBuildPlacementComponent>() : nullptr;
@@ -469,4 +477,47 @@ void AHSHUD::DrawCenteredTextLine(const FString& Text, float Y, float Scale, con
 void AHSHUD::DrawStatusTextLine(const FString& Text, float Y, const FLinearColor& Color)
 {
 	DrawText(Text, Color, StatusPanelX, Y, GEngine->GetSmallFont(), StatusScale, false);
+}
+
+void AHSHUD::DrawPauseMenu(const AHSPlayerCharacter* PlayerCharacter)
+{
+	if (!Canvas || !PlayerCharacter)
+	{
+		return;
+	}
+
+	const float PanelWidth = FMath::Min(420.0f, Canvas->ClipX - 48.0f);
+	const float PanelHeight = PlayerCharacter->IsPauseOptionsOpen() ? 310.0f : 240.0f;
+	const float PanelX = (Canvas->ClipX - PanelWidth) * 0.5f;
+	const float PanelY = (Canvas->ClipY - PanelHeight) * 0.5f;
+
+	DrawRect(FLinearColor(0.02f, 0.025f, 0.025f, 0.82f), PanelX, PanelY, PanelWidth, PanelHeight);
+
+	float LineY = PanelY + 26.0f;
+	DrawCenteredTextLine(TEXT("Paused"), LineY, 1.25f, FLinearColor(0.95f, 0.95f, 0.86f, 1.0f));
+	LineY += 42.0f;
+
+	const TArray<FString> MenuLines = {
+		TEXT("[1] Resume"),
+		TEXT("[2] Save"),
+		TEXT("[3] Load"),
+		TEXT("[4] Options"),
+		TEXT("[5] Exit")
+	};
+
+	for (const FString& MenuLine : MenuLines)
+	{
+		DrawText(MenuLine, FLinearColor::White, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.95f, false);
+		LineY += 28.0f;
+	}
+
+	if (PlayerCharacter->IsPauseOptionsOpen())
+	{
+		LineY += 12.0f;
+		DrawText(TEXT("Options"), FLinearColor(0.75f, 1.0f, 0.72f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.9f, false);
+		LineY += 28.0f;
+		DrawText(TEXT("Low-end profile is active from project settings."), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
+		LineY += 22.0f;
+		DrawText(TEXT("More graphics/audio controls come next."), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
+	}
 }

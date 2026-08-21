@@ -88,6 +88,7 @@ private:
 	void ShowCompletionMessage(FText Message);
 	void DrawCenteredTextLine(const FString& Text, float Y, float Scale, const FLinearColor& Color);
 	void DrawStatusTextLine(const FString& Text, float Y, const FLinearColor& Color);
+	void DrawPauseMenu(const class AHSPlayerCharacter* PlayerCharacter);
 
 	UPROPERTY(EditDefaultsOnly, Category = "HUD", meta = (ClampMin = "0.0"))
 	float PromptVerticalOffset;

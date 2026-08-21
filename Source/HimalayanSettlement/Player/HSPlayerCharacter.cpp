@@ -16,6 +16,8 @@
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "Hunting/HSHuntingComponent.h"
 #include "Interaction/HSInteractionSensorComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "Persistence/HSSettlementPersistenceComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
@@ -23,6 +25,8 @@
 #include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
 #include "Settlement/HSSettlementUnlockComponent.h"
+#include "World/HSGameState.h"
+#include "World/HSWorldTimeComponent.h"
 
 AHSPlayerCharacter::AHSPlayerCharacter()
 	: PlayerStance(EHSPlayerStance::Standing)
@@ -35,6 +39,9 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	, StandingCameraHeight(64.0f)
 	, CrouchCameraHeight(40.0f)
 	, ProneCameraHeight(24.0f)
+	, bPauseMenuOpen(false)
+	, bPauseOptionsOpen(false)
+	, bAutosaveSuppressed(false)
 {
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationRoll = false;
@@ -121,9 +128,35 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	RotateBuildRightAction->ValueType = EInputActionValueType::Boolean;
 	PlayerMappingContext->MapKey(RotateBuildRightAction, EKeys::R);
 
-	CancelBuildPlacementAction = CreateDefaultSubobject<UInputAction>(TEXT("CancelBuildPlacementAction"));
-	CancelBuildPlacementAction->ValueType = EInputActionValueType::Boolean;
-	PlayerMappingContext->MapKey(CancelBuildPlacementAction, EKeys::Escape);
+	EscapeAction = CreateDefaultSubobject<UInputAction>(TEXT("EscapeAction"));
+	EscapeAction->ValueType = EInputActionValueType::Boolean;
+	EscapeAction->bTriggerWhenPaused = true;
+	PlayerMappingContext->MapKey(EscapeAction, EKeys::Escape);
+
+	PauseMenuResumeAction = CreateDefaultSubobject<UInputAction>(TEXT("PauseMenuResumeAction"));
+	PauseMenuResumeAction->ValueType = EInputActionValueType::Boolean;
+	PauseMenuResumeAction->bTriggerWhenPaused = true;
+	PlayerMappingContext->MapKey(PauseMenuResumeAction, EKeys::One);
+
+	PauseMenuSaveAction = CreateDefaultSubobject<UInputAction>(TEXT("PauseMenuSaveAction"));
+	PauseMenuSaveAction->ValueType = EInputActionValueType::Boolean;
+	PauseMenuSaveAction->bTriggerWhenPaused = true;
+	PlayerMappingContext->MapKey(PauseMenuSaveAction, EKeys::Two);
+
+	PauseMenuLoadAction = CreateDefaultSubobject<UInputAction>(TEXT("PauseMenuLoadAction"));
+	PauseMenuLoadAction->ValueType = EInputActionValueType::Boolean;
+	PauseMenuLoadAction->bTriggerWhenPaused = true;
+	PlayerMappingContext->MapKey(PauseMenuLoadAction, EKeys::Three);
+
+	PauseMenuOptionsAction = CreateDefaultSubobject<UInputAction>(TEXT("PauseMenuOptionsAction"));
+	PauseMenuOptionsAction->ValueType = EInputActionValueType::Boolean;
+	PauseMenuOptionsAction->bTriggerWhenPaused = true;
+	PlayerMappingContext->MapKey(PauseMenuOptionsAction, EKeys::Four);
+
+	PauseMenuExitAction = CreateDefaultSubobject<UInputAction>(TEXT("PauseMenuExitAction"));
+	PauseMenuExitAction->ValueType = EInputActionValueType::Boolean;
+	PauseMenuExitAction->bTriggerWhenPaused = true;
+	PlayerMappingContext->MapKey(PauseMenuExitAction, EKeys::Five);
 
 	SaveAction = CreateDefaultSubobject<UInputAction>(TEXT("SaveAction"));
 	SaveAction->ValueType = EInputActionValueType::Boolean;
@@ -143,6 +176,8 @@ void AHSPlayerCharacter::BeginPlay()
 		PlantEffectComponent->OnPlantEffectApplied.AddUniqueDynamic(this, &AHSPlayerCharacter::HandlePlantEffectMovementChanged);
 		PlantEffectComponent->OnPlantEffectExpired.AddUniqueDynamic(this, &AHSPlayerCharacter::HandlePlantEffectMovementChanged);
 	}
+
+	BindAutosaveSources();
 }
 
 void AHSPlayerCharacter::PawnClientRestart()
@@ -167,13 +202,23 @@ void AHSPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	EnhancedInputComponent->BindAction(BuildPlacementAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::ToggleBuildPlacement);
 	EnhancedInputComponent->BindAction(RotateBuildLeftAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::RotateBuildPlacementLeft);
 	EnhancedInputComponent->BindAction(RotateBuildRightAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::RotateBuildPlacementRight);
-	EnhancedInputComponent->BindAction(CancelBuildPlacementAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::CancelBuildPlacement);
+	EnhancedInputComponent->BindAction(EscapeAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleEscapeAction);
+	EnhancedInputComponent->BindAction(PauseMenuResumeAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandlePauseMenuResume);
+	EnhancedInputComponent->BindAction(PauseMenuSaveAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandlePauseMenuSave);
+	EnhancedInputComponent->BindAction(PauseMenuLoadAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandlePauseMenuLoad);
+	EnhancedInputComponent->BindAction(PauseMenuOptionsAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandlePauseMenuOptions);
+	EnhancedInputComponent->BindAction(PauseMenuExitAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandlePauseMenuExit);
 	EnhancedInputComponent->BindAction(SaveAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::SaveSettlementState);
 	EnhancedInputComponent->BindAction(LoadAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::LoadSettlementState);
 }
 
 void AHSPlayerCharacter::Move(const FInputActionValue& InputValue)
 {
+	if (bPauseMenuOpen)
+	{
+		return;
+	}
+
 	if (PlayerStance == EHSPlayerStance::Prone && GetCharacterMovement()->IsFalling())
 	{
 		return;
@@ -189,6 +234,11 @@ void AHSPlayerCharacter::Move(const FInputActionValue& InputValue)
 
 void AHSPlayerCharacter::Look(const FInputActionValue& InputValue)
 {
+	if (bPauseMenuOpen)
+	{
+		return;
+	}
+
 	const FVector2D LookInput = InputValue.Get<FVector2D>();
 	AddControllerYawInput(LookInput.X);
 	AddControllerPitchInput(LookInput.Y);
@@ -196,6 +246,11 @@ void AHSPlayerCharacter::Look(const FInputActionValue& InputValue)
 
 void AHSPlayerCharacter::Interact(const FInputActionValue& InputValue)
 {
+	if (bPauseMenuOpen)
+	{
+		return;
+	}
+
 	if (BuildPlacementComponent && BuildPlacementComponent->IsPlacementActive())
 	{
 		BuildPlacementComponent->ConfirmPlacement();
@@ -214,6 +269,11 @@ void AHSPlayerCharacter::Interact(const FInputActionValue& InputValue)
 
 void AHSPlayerCharacter::Hunt(const FInputActionValue& InputValue)
 {
+	if (bPauseMenuOpen)
+	{
+		return;
+	}
+
 	if (BuildPlacementComponent && BuildPlacementComponent->IsPlacementActive())
 	{
 		BuildPlacementComponent->ConfirmPlacement();
@@ -232,6 +292,11 @@ void AHSPlayerCharacter::Hunt(const FInputActionValue& InputValue)
 
 void AHSPlayerCharacter::StartJump(const FInputActionValue& InputValue)
 {
+	if (bPauseMenuOpen)
+	{
+		return;
+	}
+
 	if (PlayerStance == EHSPlayerStance::Prone)
 	{
 		SetPlayerStance(EHSPlayerStance::Standing);
@@ -247,16 +312,31 @@ void AHSPlayerCharacter::StopJump(const FInputActionValue& InputValue)
 
 void AHSPlayerCharacter::ToggleCrouchStance(const FInputActionValue& InputValue)
 {
+	if (bPauseMenuOpen)
+	{
+		return;
+	}
+
 	SetPlayerStance(PlayerStance == EHSPlayerStance::Crouching ? EHSPlayerStance::Standing : EHSPlayerStance::Crouching);
 }
 
 void AHSPlayerCharacter::ToggleProneStance(const FInputActionValue& InputValue)
 {
+	if (bPauseMenuOpen)
+	{
+		return;
+	}
+
 	SetPlayerStance(PlayerStance == EHSPlayerStance::Prone ? EHSPlayerStance::Standing : EHSPlayerStance::Prone);
 }
 
 void AHSPlayerCharacter::ToggleBuildPlacement(const FInputActionValue& InputValue)
 {
+	if (bPauseMenuOpen)
+	{
+		return;
+	}
+
 	if (!BuildPlacementComponent)
 	{
 		return;
@@ -274,6 +354,11 @@ void AHSPlayerCharacter::ToggleBuildPlacement(const FInputActionValue& InputValu
 
 void AHSPlayerCharacter::RotateBuildPlacementLeft(const FInputActionValue& InputValue)
 {
+	if (bPauseMenuOpen)
+	{
+		return;
+	}
+
 	if (BuildPlacementComponent)
 	{
 		BuildPlacementComponent->RotatePlacement(-1.0f);
@@ -282,30 +367,130 @@ void AHSPlayerCharacter::RotateBuildPlacementLeft(const FInputActionValue& Input
 
 void AHSPlayerCharacter::RotateBuildPlacementRight(const FInputActionValue& InputValue)
 {
+	if (bPauseMenuOpen)
+	{
+		return;
+	}
+
 	if (BuildPlacementComponent)
 	{
 		BuildPlacementComponent->RotatePlacement(1.0f);
 	}
 }
 
-void AHSPlayerCharacter::CancelBuildPlacement(const FInputActionValue& InputValue)
+void AHSPlayerCharacter::HandleEscapeAction(const FInputActionValue& InputValue)
 {
-	if (BuildPlacementComponent)
+	if (BuildPlacementComponent && BuildPlacementComponent->IsPlacementActive())
 	{
 		BuildPlacementComponent->CancelPlacement();
+		return;
+	}
+
+	SetPauseMenuOpen(!bPauseMenuOpen);
+}
+
+void AHSPlayerCharacter::HandlePauseMenuResume(const FInputActionValue& InputValue)
+{
+	if (bPauseMenuOpen)
+	{
+		ClosePauseMenu();
+	}
+}
+
+void AHSPlayerCharacter::HandlePauseMenuSave(const FInputActionValue& InputValue)
+{
+	if (bPauseMenuOpen)
+	{
+		SaveFromPauseMenu();
+	}
+}
+
+void AHSPlayerCharacter::HandlePauseMenuLoad(const FInputActionValue& InputValue)
+{
+	if (bPauseMenuOpen)
+	{
+		LoadFromPauseMenu();
+	}
+}
+
+void AHSPlayerCharacter::HandlePauseMenuOptions(const FInputActionValue& InputValue)
+{
+	if (bPauseMenuOpen)
+	{
+		TogglePauseOptions();
+	}
+}
+
+void AHSPlayerCharacter::HandlePauseMenuExit(const FInputActionValue& InputValue)
+{
+	if (bPauseMenuOpen)
+	{
+		ExitGameFromPauseMenu();
 	}
 }
 
 void AHSPlayerCharacter::SaveSettlementState(const FInputActionValue& InputValue)
 {
-	const bool bSaved = SettlementPersistenceComponent && SettlementPersistenceComponent->SaveToSlot(SettlementPersistenceComponent->GetDefaultSlotName());
+	if (bPauseMenuOpen)
+	{
+		return;
+	}
+
+	const bool bSaved = SaveFromPauseMenu();
 	UE_LOG(LogHSSettlement, Log, TEXT("%s manual settlement save result: %s."), *GetNameSafe(this), bSaved ? TEXT("saved") : TEXT("failed"));
 }
 
 void AHSPlayerCharacter::LoadSettlementState(const FInputActionValue& InputValue)
 {
-	const bool bLoaded = SettlementPersistenceComponent && SettlementPersistenceComponent->LoadFromSlot(SettlementPersistenceComponent->GetDefaultSlotName());
+	if (bPauseMenuOpen)
+	{
+		return;
+	}
+
+	const bool bLoaded = LoadFromPauseMenu();
 	UE_LOG(LogHSSettlement, Log, TEXT("%s manual settlement load result: %s."), *GetNameSafe(this), bLoaded ? TEXT("loaded") : TEXT("failed"));
+}
+
+void AHSPlayerCharacter::OpenPauseMenu()
+{
+	SetPauseMenuOpen(true);
+}
+
+void AHSPlayerCharacter::ClosePauseMenu()
+{
+	SetPauseMenuOpen(false);
+}
+
+bool AHSPlayerCharacter::SaveFromPauseMenu()
+{
+	const bool bSaved = SettlementPersistenceComponent && SettlementPersistenceComponent->SaveToSlot(SettlementPersistenceComponent->GetDefaultSlotName());
+	UE_LOG(LogHSSettlement, Log, TEXT("%s pause menu save result: %s."), *GetNameSafe(this), bSaved ? TEXT("saved") : TEXT("failed"));
+	return bSaved;
+}
+
+bool AHSPlayerCharacter::LoadFromPauseMenu()
+{
+	bAutosaveSuppressed = true;
+	const bool bLoaded = SettlementPersistenceComponent && SettlementPersistenceComponent->LoadFromSlot(SettlementPersistenceComponent->GetDefaultSlotName());
+	bAutosaveSuppressed = false;
+	UE_LOG(LogHSSettlement, Log, TEXT("%s pause menu load result: %s."), *GetNameSafe(this), bLoaded ? TEXT("loaded") : TEXT("failed"));
+	if (bLoaded)
+	{
+		BindAutosaveSources();
+	}
+	return bLoaded;
+}
+
+bool AHSPlayerCharacter::AutosaveSettlementState(const FString& Reason)
+{
+	if (bAutosaveSuppressed || !SettlementPersistenceComponent)
+	{
+		return false;
+	}
+
+	const bool bSaved = SettlementPersistenceComponent->SaveToSlot(SettlementPersistenceComponent->GetAutosaveSlotName());
+	UE_LOG(LogHSSettlement, Log, TEXT("%s autosave after %s: %s."), *GetNameSafe(this), *Reason, bSaved ? TEXT("saved") : TEXT("failed"));
+	return bSaved;
 }
 
 void AHSPlayerCharacter::SetPlayerStance(EHSPlayerStance NewStance)
@@ -339,6 +524,91 @@ void AHSPlayerCharacter::ApplyInputMappingContext()
 void AHSPlayerCharacter::HandlePlantEffectMovementChanged(const FHSPlantEffectState& PlantEffect)
 {
 	ApplyStanceMovementSettings();
+}
+
+void AHSPlayerCharacter::SetPauseMenuOpen(bool bNewOpen)
+{
+	if (bPauseMenuOpen == bNewOpen)
+	{
+		return;
+	}
+
+	bPauseMenuOpen = bNewOpen;
+	if (!bPauseMenuOpen)
+	{
+		bPauseOptionsOpen = false;
+	}
+
+	if (GetWorld())
+	{
+		UGameplayStatics::SetGamePaused(this, bPauseMenuOpen);
+	}
+
+	APlayerController* PlayerController = Cast<APlayerController>(Controller);
+	if (PlayerController)
+	{
+		PlayerController->bShowMouseCursor = bPauseMenuOpen;
+		PlayerController->SetIgnoreLookInput(bPauseMenuOpen);
+		PlayerController->SetIgnoreMoveInput(bPauseMenuOpen);
+	}
+}
+
+void AHSPlayerCharacter::TogglePauseOptions()
+{
+	bPauseOptionsOpen = !bPauseOptionsOpen;
+}
+
+void AHSPlayerCharacter::ExitGameFromPauseMenu() const
+{
+	APlayerController* PlayerController = Cast<APlayerController>(Controller);
+	UKismetSystemLibrary::QuitGame(this, PlayerController, EQuitPreference::Quit, false);
+}
+
+void AHSPlayerCharacter::BindAutosaveSources()
+{
+	if (PlayerProgressComponent)
+	{
+		PlayerProgressComponent->OnMilestoneCompleted.RemoveDynamic(this, &AHSPlayerCharacter::HandleAutosaveMilestoneCompleted);
+		PlayerProgressComponent->OnMilestoneCompleted.AddUniqueDynamic(this, &AHSPlayerCharacter::HandleAutosaveMilestoneCompleted);
+	}
+
+	if (ConstructionComponent)
+	{
+		ConstructionComponent->OnConstructionJobStarted.RemoveDynamic(this, &AHSPlayerCharacter::HandleAutosaveConstructionChanged);
+		ConstructionComponent->OnConstructionJobStarted.AddUniqueDynamic(this, &AHSPlayerCharacter::HandleAutosaveConstructionChanged);
+		ConstructionComponent->OnConstructionJobCompleted.RemoveDynamic(this, &AHSPlayerCharacter::HandleAutosaveConstructionChanged);
+		ConstructionComponent->OnConstructionJobCompleted.AddUniqueDynamic(this, &AHSPlayerCharacter::HandleAutosaveConstructionChanged);
+	}
+
+	const UWorld* World = GetWorld();
+	const AHSGameState* GameState = World ? World->GetGameState<AHSGameState>() : nullptr;
+	UHSWorldTimeComponent* WorldTime = GameState ? GameState->GetWorldTimeComponent() : nullptr;
+	if (WorldTime && BoundAutosaveWorldTime.Get() != WorldTime)
+	{
+		if (UHSWorldTimeComponent* PreviousWorldTime = BoundAutosaveWorldTime.Get())
+		{
+			PreviousWorldTime->OnTimeAdvanced.RemoveDynamic(this, &AHSPlayerCharacter::HandleAutosaveTimeAdvanced);
+		}
+
+		BoundAutosaveWorldTime = WorldTime;
+		WorldTime->OnTimeAdvanced.AddUniqueDynamic(this, &AHSPlayerCharacter::HandleAutosaveTimeAdvanced);
+	}
+}
+
+void AHSPlayerCharacter::HandleAutosaveMilestoneCompleted(FGameplayTag MilestoneTag)
+{
+	AutosaveSettlementState(FString::Printf(TEXT("milestone %s"), *MilestoneTag.ToString()));
+}
+
+void AHSPlayerCharacter::HandleAutosaveConstructionChanged(const FHSConstructionJob& ConstructionJob)
+{
+	AutosaveSettlementState(FString::Printf(TEXT("construction %s"), *ConstructionJob.BuildingTag.ToString()));
+}
+
+void AHSPlayerCharacter::HandleAutosaveTimeAdvanced(EHSTimePhase NewTimePhase, float ElapsedDays)
+{
+	(void)NewTimePhase;
+	AutosaveSettlementState(FString::Printf(TEXT("time %.1f days"), ElapsedDays));
 }
 
 void AHSPlayerCharacter::ApplyStanceMovementSettings()

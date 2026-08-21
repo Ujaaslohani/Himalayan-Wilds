@@ -215,4 +215,28 @@ bool FHSPlayerHasPersistenceComponentTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSPersistenceManualAndAutosaveSlotsAreSeparateTest,
+	"HimalayanSettlement.Persistence.ManualAndAutosaveSlotsAreSeparate",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSPersistenceManualAndAutosaveSlotsAreSeparateTest::RunTest(const FString& Parameters)
+{
+	const AHSPlayerCharacter* Player = GetDefault<AHSPlayerCharacter>();
+	const UHSSettlementPersistenceComponent* Persistence = Player ? Player->GetSettlementPersistenceComponent() : nullptr;
+
+	TestNotNull(TEXT("Player class should have a valid default object."), Player);
+	TestNotNull(TEXT("Player should own persistence component."), Persistence);
+	if (!Persistence)
+	{
+		return false;
+	}
+
+	TestFalse(TEXT("Manual save slot should not be empty."), Persistence->GetDefaultSlotName().IsEmpty());
+	TestFalse(TEXT("Autosave slot should not be empty."), Persistence->GetAutosaveSlotName().IsEmpty());
+	TestNotEqual(TEXT("Autosave should not overwrite the manual save slot."), Persistence->GetAutosaveSlotName(), Persistence->GetDefaultSlotName());
+
+	return true;
+}
+
 #endif
