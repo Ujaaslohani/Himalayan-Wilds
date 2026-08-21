@@ -11,7 +11,7 @@ Target split:
 
 ## Scope Boundary
 
-Current milestone: early vertical-slice foundations through One Morning Hunt, temporary sleep, settlement schema, builder construction, persistence, hunter intel, herbalist plant knowledge, exploration markers, basic native HUD status/objective overlay, and first pause/save menu controls.
+Current milestone: early vertical-slice foundations through One Morning Hunt, temporary sleep, settlement schema, builder construction, persistence, hunter intel, herbalist plant knowledge, exploration markers, basic native HUD status/objective overlay, and first native inventory/build/options menu controls.
 
 The player starts in a primitive settlement, talks to one hunter NPC, receives a deer-hunting task, tracks and hunts a deer, harvests resources, returns to the NPC, unlocks early settlement progression, places a house schema, uses specialist NPC services, and advances time through sleep.
 
@@ -71,6 +71,8 @@ The first quest handoff is intentionally small: `UHSQuestHandoffComponent` refer
 
 Pause menu presentation is currently native Canvas HUD. `Esc` cancels active build placement first; otherwise it pauses/unpauses the game and shows keyboard commands for Resume, Save, Load, Options, and Exit. This is the first functional menu layer and may later be replaced by richer UMG/Slate widgets without moving gameplay rules out of C++.
 
+Inventory and build menu presentation also live in the native Canvas HUD for now. `I`/`Tab` shows carried item stacks from `UHSResourceCarryComponent`; `B` opens a schema menu and `[1]` starts the Basic House free-placement preview. The pause options panel can cycle a simple graphics scalability preset. These are first-pass control surfaces, not final visual UI.
+
 ## Prototype Visual Markers
 
 Native placeholder actors own simple non-colliding static mesh components using engine basic shapes. These markers make the current test map readable while real art, animation, and Blueprint visual setup remain out of scope for this milestone slice.
@@ -89,7 +91,7 @@ Native placeholder actors own simple non-colliding static mesh components using 
 
 ## Resource Carry State
 
-`UHSResourceCarryComponent` is the first lightweight resource state on the player. It stores harvested `FHSItemStack` values merged by gameplay tag so quest return logic can query carried resources. It is not yet a full inventory, container, weight, equipment, UI, or persistence system.
+`UHSResourceCarryComponent` is the first lightweight resource state on the player. It stores harvested `FHSItemStack` values merged by gameplay tag so quest return logic and the first inventory screen can query carried resources. It is not yet a full container, weight, equipment, crafting, or item-use system.
 
 ## Player Progress
 
@@ -105,7 +107,7 @@ NPC services are coordinated by `UHSNPCServiceComponent`, a no-tick native compo
 
 ## Build Placement
 
-`UHSBuildPlacementComponent` owns the player-facing free-build schema placement flow. It starts disabled, ticks only while a placement preview is active, drives a lightweight no-tick preview actor, validates against `UHSSettlementPlanComponent`, and records a pending schema when confirmed. Builder construction still consumes the pending schema and takes the configured time to complete it.
+`UHSBuildPlacementComponent` owns the player-facing free-build schema placement flow. It starts disabled, ticks only while a placement preview is active, drives a lightweight no-tick preview actor, validates against `UHSSettlementPlanComponent`, and records a pending schema when confirmed. The first build menu selects Basic House before entering placement. Builder construction still consumes the pending schema and takes the configured time to complete it.
 
 ## Herbalism
 

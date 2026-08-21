@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 11: Vertical Slice Closeout: implementation started with basic native HUD status/objective overlay, pause menu, manual save/load, and autosave foundation; inventory/build/options menus and hands-on closeout pending.
+Milestone 11: Vertical Slice Closeout: implementation started with basic native HUD status/objective overlay, pause menu, manual save/load, autosave foundation, inventory screen, build schema menu, and first options control; hands-on closeout pending.
 
 ## Engine Version
 
@@ -94,6 +94,9 @@ Unreal Engine 5.5.4.
 - Native pause menu foundation added: `Esc` cancels build placement first, otherwise pauses/resumes and shows Resume, Save, Load, Options, and Exit commands.
 - Manual pause-menu save/load uses the default save slot; event-driven autosave uses a separate autosave slot.
 - Autosave now runs on milestone completion, time advance/sleep, construction start, and construction completion, with suppression during manual load restore.
+- Native inventory screen added on `I` / `Tab`, showing carried item stacks from the resource carry component.
+- Native build menu added on `B`; Basic House is selected with `[1]` before entering free placement.
+- Pause options can cycle a simple graphics scalability preset with `[6]`.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
@@ -136,5 +139,5 @@ Unreal Engine 5.5.4.
 8. Record numeric FPS using the low-end profile task before forest density increases.
 9. Run hands-on HUD pass: confirm status/objective lines appear clearly without blocking the center interaction prompt.
 10. Run hands-on pause/save pass: press `Esc`, test Resume/Save/Load/Options, confirm build placement `Esc` still cancels placement before pausing, and confirm autosave files are produced after sleep/construction/progress events.
-11. Implement the first inventory screen.
-12. Replace direct `B` house placement with a build-mode schema menu.
+11. Run hands-on inventory/build/options pass: confirm `I`/`Tab` opens inventory, `B` opens build menu, `[1]` enters Basic House placement, and `[6]` cycles graphics preset when pause options are open.
+12. Add mouse-driven UMG/Slate polish later if the native Canvas controls test well.

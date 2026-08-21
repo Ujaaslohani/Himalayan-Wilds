@@ -41,6 +41,9 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	, ProneCameraHeight(24.0f)
 	, bPauseMenuOpen(false)
 	, bPauseOptionsOpen(false)
+	, bInventoryOpen(false)
+	, bBuildMenuOpen(false)
+	, GraphicsQualityPreset(0)
 	, bAutosaveSuppressed(false)
 {
 	bUseControllerRotationPitch = false;
@@ -120,6 +123,11 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	PlayerMappingContext->MapKey(BuildPlacementAction, EKeys::B);
 	PlayerMappingContext->MapKey(BuildPlacementAction, EKeys::Gamepad_Special_Right);
 
+	InventoryAction = CreateDefaultSubobject<UInputAction>(TEXT("InventoryAction"));
+	InventoryAction->ValueType = EInputActionValueType::Boolean;
+	PlayerMappingContext->MapKey(InventoryAction, EKeys::I);
+	PlayerMappingContext->MapKey(InventoryAction, EKeys::Tab);
+
 	RotateBuildLeftAction = CreateDefaultSubobject<UInputAction>(TEXT("RotateBuildLeftAction"));
 	RotateBuildLeftAction->ValueType = EInputActionValueType::Boolean;
 	PlayerMappingContext->MapKey(RotateBuildLeftAction, EKeys::Q);
@@ -157,6 +165,11 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	PauseMenuExitAction->ValueType = EInputActionValueType::Boolean;
 	PauseMenuExitAction->bTriggerWhenPaused = true;
 	PlayerMappingContext->MapKey(PauseMenuExitAction, EKeys::Five);
+
+	MenuUtilityAction = CreateDefaultSubobject<UInputAction>(TEXT("MenuUtilityAction"));
+	MenuUtilityAction->ValueType = EInputActionValueType::Boolean;
+	MenuUtilityAction->bTriggerWhenPaused = true;
+	PlayerMappingContext->MapKey(MenuUtilityAction, EKeys::Six);
 
 	SaveAction = CreateDefaultSubobject<UInputAction>(TEXT("SaveAction"));
 	SaveAction->ValueType = EInputActionValueType::Boolean;
@@ -200,6 +213,7 @@ void AHSPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::ToggleCrouchStance);
 	EnhancedInputComponent->BindAction(ProneAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::ToggleProneStance);
 	EnhancedInputComponent->BindAction(BuildPlacementAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::ToggleBuildPlacement);
+	EnhancedInputComponent->BindAction(InventoryAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::ToggleInventory);
 	EnhancedInputComponent->BindAction(RotateBuildLeftAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::RotateBuildPlacementLeft);
 	EnhancedInputComponent->BindAction(RotateBuildRightAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::RotateBuildPlacementRight);
 	EnhancedInputComponent->BindAction(EscapeAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleEscapeAction);
@@ -208,13 +222,14 @@ void AHSPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	EnhancedInputComponent->BindAction(PauseMenuLoadAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandlePauseMenuLoad);
 	EnhancedInputComponent->BindAction(PauseMenuOptionsAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandlePauseMenuOptions);
 	EnhancedInputComponent->BindAction(PauseMenuExitAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandlePauseMenuExit);
+	EnhancedInputComponent->BindAction(MenuUtilityAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleMenuUtilityAction);
 	EnhancedInputComponent->BindAction(SaveAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::SaveSettlementState);
 	EnhancedInputComponent->BindAction(LoadAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::LoadSettlementState);
 }
 
 void AHSPlayerCharacter::Move(const FInputActionValue& InputValue)
 {
-	if (bPauseMenuOpen)
+	if (bPauseMenuOpen || bInventoryOpen || bBuildMenuOpen)
 	{
 		return;
 	}
@@ -234,7 +249,7 @@ void AHSPlayerCharacter::Move(const FInputActionValue& InputValue)
 
 void AHSPlayerCharacter::Look(const FInputActionValue& InputValue)
 {
-	if (bPauseMenuOpen)
+	if (bPauseMenuOpen || bInventoryOpen || bBuildMenuOpen)
 	{
 		return;
 	}
@@ -246,7 +261,7 @@ void AHSPlayerCharacter::Look(const FInputActionValue& InputValue)
 
 void AHSPlayerCharacter::Interact(const FInputActionValue& InputValue)
 {
-	if (bPauseMenuOpen)
+	if (bPauseMenuOpen || bInventoryOpen || bBuildMenuOpen)
 	{
 		return;
 	}
@@ -269,7 +284,7 @@ void AHSPlayerCharacter::Interact(const FInputActionValue& InputValue)
 
 void AHSPlayerCharacter::Hunt(const FInputActionValue& InputValue)
 {
-	if (bPauseMenuOpen)
+	if (bPauseMenuOpen || bInventoryOpen || bBuildMenuOpen)
 	{
 		return;
 	}
@@ -292,7 +307,7 @@ void AHSPlayerCharacter::Hunt(const FInputActionValue& InputValue)
 
 void AHSPlayerCharacter::StartJump(const FInputActionValue& InputValue)
 {
-	if (bPauseMenuOpen)
+	if (bPauseMenuOpen || bInventoryOpen || bBuildMenuOpen)
 	{
 		return;
 	}
@@ -312,7 +327,7 @@ void AHSPlayerCharacter::StopJump(const FInputActionValue& InputValue)
 
 void AHSPlayerCharacter::ToggleCrouchStance(const FInputActionValue& InputValue)
 {
-	if (bPauseMenuOpen)
+	if (bPauseMenuOpen || bInventoryOpen || bBuildMenuOpen)
 	{
 		return;
 	}
@@ -322,7 +337,7 @@ void AHSPlayerCharacter::ToggleCrouchStance(const FInputActionValue& InputValue)
 
 void AHSPlayerCharacter::ToggleProneStance(const FInputActionValue& InputValue)
 {
-	if (bPauseMenuOpen)
+	if (bPauseMenuOpen || bInventoryOpen || bBuildMenuOpen)
 	{
 		return;
 	}
@@ -332,7 +347,7 @@ void AHSPlayerCharacter::ToggleProneStance(const FInputActionValue& InputValue)
 
 void AHSPlayerCharacter::ToggleBuildPlacement(const FInputActionValue& InputValue)
 {
-	if (bPauseMenuOpen)
+	if (bPauseMenuOpen || bInventoryOpen)
 	{
 		return;
 	}
@@ -348,13 +363,13 @@ void AHSPlayerCharacter::ToggleBuildPlacement(const FInputActionValue& InputValu
 	}
 	else
 	{
-		BuildPlacementComponent->StartBasicHousePlacement();
+		ToggleBuildMenu();
 	}
 }
 
 void AHSPlayerCharacter::RotateBuildPlacementLeft(const FInputActionValue& InputValue)
 {
-	if (bPauseMenuOpen)
+	if (bPauseMenuOpen || bInventoryOpen || bBuildMenuOpen)
 	{
 		return;
 	}
@@ -367,7 +382,7 @@ void AHSPlayerCharacter::RotateBuildPlacementLeft(const FInputActionValue& Input
 
 void AHSPlayerCharacter::RotateBuildPlacementRight(const FInputActionValue& InputValue)
 {
-	if (bPauseMenuOpen)
+	if (bPauseMenuOpen || bInventoryOpen || bBuildMenuOpen)
 	{
 		return;
 	}
@@ -378,11 +393,33 @@ void AHSPlayerCharacter::RotateBuildPlacementRight(const FInputActionValue& Inpu
 	}
 }
 
+void AHSPlayerCharacter::ToggleInventory(const FInputActionValue& InputValue)
+{
+	if (bPauseMenuOpen || (BuildPlacementComponent && BuildPlacementComponent->IsPlacementActive()))
+	{
+		return;
+	}
+
+	ToggleInventoryMenu();
+}
+
 void AHSPlayerCharacter::HandleEscapeAction(const FInputActionValue& InputValue)
 {
 	if (BuildPlacementComponent && BuildPlacementComponent->IsPlacementActive())
 	{
 		BuildPlacementComponent->CancelPlacement();
+		return;
+	}
+
+	if (bInventoryOpen)
+	{
+		SetInventoryOpen(false);
+		return;
+	}
+
+	if (bBuildMenuOpen)
+	{
+		SetBuildMenuOpen(false);
 		return;
 	}
 
@@ -394,6 +431,12 @@ void AHSPlayerCharacter::HandlePauseMenuResume(const FInputActionValue& InputVal
 	if (bPauseMenuOpen)
 	{
 		ClosePauseMenu();
+		return;
+	}
+
+	if (bBuildMenuOpen)
+	{
+		StartBasicHouseFromBuildMenu();
 	}
 }
 
@@ -418,6 +461,14 @@ void AHSPlayerCharacter::HandlePauseMenuOptions(const FInputActionValue& InputVa
 	if (bPauseMenuOpen)
 	{
 		TogglePauseOptions();
+	}
+}
+
+void AHSPlayerCharacter::HandleMenuUtilityAction(const FInputActionValue& InputValue)
+{
+	if (bPauseMenuOpen && bPauseOptionsOpen)
+	{
+		CycleGraphicsQualityPreset();
 	}
 }
 
@@ -493,6 +544,58 @@ bool AHSPlayerCharacter::AutosaveSettlementState(const FString& Reason)
 	return bSaved;
 }
 
+FString AHSPlayerCharacter::GetGraphicsQualityPresetName() const
+{
+	switch (GraphicsQualityPreset)
+	{
+	case 0:
+		return TEXT("Low");
+	case 1:
+		return TEXT("Medium");
+	case 2:
+		return TEXT("High");
+	default:
+		return TEXT("Custom");
+	}
+}
+
+void AHSPlayerCharacter::ToggleInventoryMenu()
+{
+	SetInventoryOpen(!bInventoryOpen);
+}
+
+void AHSPlayerCharacter::ToggleBuildMenu()
+{
+	SetBuildMenuOpen(!bBuildMenuOpen);
+}
+
+void AHSPlayerCharacter::StartBasicHouseFromBuildMenu()
+{
+	if (!BuildPlacementComponent)
+	{
+		return;
+	}
+
+	SetBuildMenuOpen(false);
+	BuildPlacementComponent->StartBasicHousePlacement();
+}
+
+void AHSPlayerCharacter::CycleGraphicsQualityPreset()
+{
+	GraphicsQualityPreset = (GraphicsQualityPreset + 1) % 3;
+
+	const FString PresetValue = FString::FromInt(GraphicsQualityPreset);
+	UKismetSystemLibrary::ExecuteConsoleCommand(this, FString::Printf(TEXT("sg.ViewDistanceQuality %s"), *PresetValue));
+	UKismetSystemLibrary::ExecuteConsoleCommand(this, FString::Printf(TEXT("sg.AntiAliasingQuality %s"), *PresetValue));
+	UKismetSystemLibrary::ExecuteConsoleCommand(this, FString::Printf(TEXT("sg.ShadowQuality %s"), *PresetValue));
+	UKismetSystemLibrary::ExecuteConsoleCommand(this, FString::Printf(TEXT("sg.GlobalIlluminationQuality %s"), *PresetValue));
+	UKismetSystemLibrary::ExecuteConsoleCommand(this, FString::Printf(TEXT("sg.ReflectionQuality %s"), *PresetValue));
+	UKismetSystemLibrary::ExecuteConsoleCommand(this, FString::Printf(TEXT("sg.PostProcessQuality %s"), *PresetValue));
+	UKismetSystemLibrary::ExecuteConsoleCommand(this, FString::Printf(TEXT("sg.TextureQuality %s"), *PresetValue));
+	UKismetSystemLibrary::ExecuteConsoleCommand(this, FString::Printf(TEXT("sg.EffectsQuality %s"), *PresetValue));
+	UKismetSystemLibrary::ExecuteConsoleCommand(this, FString::Printf(TEXT("sg.FoliageQuality %s"), *PresetValue));
+}
+
 void AHSPlayerCharacter::SetPlayerStance(EHSPlayerStance NewStance)
 {
 	if (PlayerStance == NewStance)
@@ -534,7 +637,11 @@ void AHSPlayerCharacter::SetPauseMenuOpen(bool bNewOpen)
 	}
 
 	bPauseMenuOpen = bNewOpen;
-	if (!bPauseMenuOpen)
+	if (bPauseMenuOpen)
+	{
+		CloseNonPauseMenus();
+	}
+	else
 	{
 		bPauseOptionsOpen = false;
 	}
@@ -551,6 +658,40 @@ void AHSPlayerCharacter::SetPauseMenuOpen(bool bNewOpen)
 		PlayerController->SetIgnoreLookInput(bPauseMenuOpen);
 		PlayerController->SetIgnoreMoveInput(bPauseMenuOpen);
 	}
+}
+
+void AHSPlayerCharacter::SetInventoryOpen(bool bNewOpen)
+{
+	if (bInventoryOpen == bNewOpen)
+	{
+		return;
+	}
+
+	bInventoryOpen = bNewOpen;
+	if (bInventoryOpen)
+	{
+		bBuildMenuOpen = false;
+	}
+}
+
+void AHSPlayerCharacter::SetBuildMenuOpen(bool bNewOpen)
+{
+	if (bBuildMenuOpen == bNewOpen)
+	{
+		return;
+	}
+
+	bBuildMenuOpen = bNewOpen;
+	if (bBuildMenuOpen)
+	{
+		bInventoryOpen = false;
+	}
+}
+
+void AHSPlayerCharacter::CloseNonPauseMenus()
+{
+	bInventoryOpen = false;
+	bBuildMenuOpen = false;
 }
 
 void AHSPlayerCharacter::TogglePauseOptions()

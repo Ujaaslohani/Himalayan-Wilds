@@ -79,6 +79,18 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Player|Menu")
 	bool IsPauseOptionsOpen() const { return bPauseOptionsOpen; }
 
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	bool IsInventoryOpen() const { return bInventoryOpen; }
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	bool IsBuildMenuOpen() const { return bBuildMenuOpen; }
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	int32 GetGraphicsQualityPreset() const { return GraphicsQualityPreset; }
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	FString GetGraphicsQualityPresetName() const;
+
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
 	void OpenPauseMenu();
 
@@ -93,6 +105,18 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
 	void TogglePauseOptions();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void ToggleInventoryMenu();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void ToggleBuildMenu();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void StartBasicHouseFromBuildMenu();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void CycleGraphicsQualityPreset();
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Persistence")
 	bool AutosaveSettlementState(const FString& Reason);
@@ -109,17 +133,22 @@ private:
 	void ToggleBuildPlacement(const FInputActionValue& InputValue);
 	void RotateBuildPlacementLeft(const FInputActionValue& InputValue);
 	void RotateBuildPlacementRight(const FInputActionValue& InputValue);
+	void ToggleInventory(const FInputActionValue& InputValue);
 	void HandleEscapeAction(const FInputActionValue& InputValue);
 	void HandlePauseMenuResume(const FInputActionValue& InputValue);
 	void HandlePauseMenuSave(const FInputActionValue& InputValue);
 	void HandlePauseMenuLoad(const FInputActionValue& InputValue);
 	void HandlePauseMenuOptions(const FInputActionValue& InputValue);
 	void HandlePauseMenuExit(const FInputActionValue& InputValue);
+	void HandleMenuUtilityAction(const FInputActionValue& InputValue);
 	void SaveSettlementState(const FInputActionValue& InputValue);
 	void LoadSettlementState(const FInputActionValue& InputValue);
 	void ApplyInputMappingContext();
 	void ApplyStanceMovementSettings();
 	void SetPauseMenuOpen(bool bNewOpen);
+	void SetInventoryOpen(bool bNewOpen);
+	void SetBuildMenuOpen(bool bNewOpen);
+	void CloseNonPauseMenus();
 	void ExitGameFromPauseMenu() const;
 	void BindAutosaveSources();
 
@@ -199,6 +228,9 @@ private:
 	TObjectPtr<UInputAction> BuildPlacementAction;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> InventoryAction;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> RotateBuildLeftAction;
 
 	UPROPERTY(Transient)
@@ -221,6 +253,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> PauseMenuExitAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> MenuUtilityAction;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> SaveAction;
@@ -263,6 +298,15 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
 	bool bPauseOptionsOpen;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
+	bool bInventoryOpen;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
+	bool bBuildMenuOpen;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
+	int32 GraphicsQualityPreset;
 
 	UPROPERTY(Transient)
 	bool bAutosaveSuppressed;

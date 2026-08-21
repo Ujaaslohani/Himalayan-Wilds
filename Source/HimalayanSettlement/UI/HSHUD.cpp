@@ -66,6 +66,18 @@ void AHSHUD::DrawHUD()
 		return;
 	}
 
+	if (PlayerCharacter && PlayerCharacter->IsInventoryOpen())
+	{
+		DrawInventoryMenu(PlayerCharacter);
+		return;
+	}
+
+	if (PlayerCharacter && PlayerCharacter->IsBuildMenuOpen())
+	{
+		DrawBuildMenu(PlayerCharacter);
+		return;
+	}
+
 	const UHSBuildPlacementComponent* BuildPlacementComponent = Pawn ? Pawn->FindComponentByClass<UHSBuildPlacementComponent>() : nullptr;
 	if (BuildPlacementComponent && BuildPlacementComponent->IsPlacementActive())
 	{
@@ -497,13 +509,18 @@ void AHSHUD::DrawPauseMenu(const AHSPlayerCharacter* PlayerCharacter)
 	DrawCenteredTextLine(TEXT("Paused"), LineY, 1.25f, FLinearColor(0.95f, 0.95f, 0.86f, 1.0f));
 	LineY += 42.0f;
 
-	const TArray<FString> MenuLines = {
+	TArray<FString> MenuLines = {
 		TEXT("[1] Resume"),
 		TEXT("[2] Save"),
 		TEXT("[3] Load"),
 		TEXT("[4] Options"),
 		TEXT("[5] Exit")
 	};
+
+	if (PlayerCharacter->IsPauseOptionsOpen())
+	{
+		MenuLines.Add(FString::Printf(TEXT("[6] Graphics: %s"), *PlayerCharacter->GetGraphicsQualityPresetName()));
+	}
 
 	for (const FString& MenuLine : MenuLines)
 	{
@@ -516,8 +533,75 @@ void AHSHUD::DrawPauseMenu(const AHSPlayerCharacter* PlayerCharacter)
 		LineY += 12.0f;
 		DrawText(TEXT("Options"), FLinearColor(0.75f, 1.0f, 0.72f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.9f, false);
 		LineY += 28.0f;
-		DrawText(TEXT("Low-end profile is active from project settings."), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
+		DrawText(TEXT("Press 6 to cycle graphics preset."), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
 		LineY += 22.0f;
-		DrawText(TEXT("More graphics/audio controls come next."), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
+		DrawText(TEXT("Audio and mouse sensitivity controls come later."), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
 	}
+}
+
+void AHSHUD::DrawInventoryMenu(const AHSPlayerCharacter* PlayerCharacter)
+{
+	if (!Canvas || !PlayerCharacter)
+	{
+		return;
+	}
+
+	const float PanelWidth = FMath::Min(520.0f, Canvas->ClipX - 48.0f);
+	const float PanelHeight = 320.0f;
+	const float PanelX = (Canvas->ClipX - PanelWidth) * 0.5f;
+	const float PanelY = (Canvas->ClipY - PanelHeight) * 0.5f;
+
+	DrawRect(FLinearColor(0.02f, 0.025f, 0.025f, 0.82f), PanelX, PanelY, PanelWidth, PanelHeight);
+
+	float LineY = PanelY + 26.0f;
+	DrawCenteredTextLine(TEXT("Inventory"), LineY, 1.25f, FLinearColor(0.95f, 0.95f, 0.86f, 1.0f));
+	LineY += 46.0f;
+
+	const UHSResourceCarryComponent* ResourceCarryComponent = PlayerCharacter->GetResourceCarryComponent();
+	if (!ResourceCarryComponent || ResourceCarryComponent->GetCarriedItems().Num() == 0)
+	{
+		DrawText(TEXT("No carried items."), FLinearColor::White, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.95f, false);
+	}
+	else
+	{
+		for (const FHSItemStack& Stack : ResourceCarryComponent->GetCarriedItems())
+		{
+			if (Stack.IsValidStack())
+			{
+				DrawText(FString::Printf(TEXT("%s   x%d"), *Stack.ItemTag.ToString(), Stack.Quantity), FLinearColor::White, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.9f, false);
+				LineY += 28.0f;
+			}
+		}
+	}
+
+	DrawText(TEXT("[I/Tab/Esc] Close"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, PanelY + PanelHeight - 42.0f, GEngine->GetSmallFont(), 0.85f, false);
+}
+
+void AHSHUD::DrawBuildMenu(const AHSPlayerCharacter* PlayerCharacter)
+{
+	if (!Canvas || !PlayerCharacter)
+	{
+		return;
+	}
+
+	const float PanelWidth = FMath::Min(520.0f, Canvas->ClipX - 48.0f);
+	const float PanelHeight = 260.0f;
+	const float PanelX = (Canvas->ClipX - PanelWidth) * 0.5f;
+	const float PanelY = (Canvas->ClipY - PanelHeight) * 0.5f;
+
+	DrawRect(FLinearColor(0.02f, 0.025f, 0.025f, 0.82f), PanelX, PanelY, PanelWidth, PanelHeight);
+
+	float LineY = PanelY + 26.0f;
+	DrawCenteredTextLine(TEXT("Build"), LineY, 1.25f, FLinearColor(0.95f, 0.95f, 0.86f, 1.0f));
+	LineY += 50.0f;
+
+	const UHSSettlementPlanComponent* SettlementPlanComponent = PlayerCharacter->GetSettlementPlanComponent();
+	const bool bHasClaim = SettlementPlanComponent && SettlementPlanComponent->HasSettlementClaim();
+	const FLinearColor SchemaColor = bHasClaim ? FLinearColor::White : FLinearColor(1.0f, 0.55f, 0.45f, 1.0f);
+
+	DrawText(TEXT("[1] Basic House"), SchemaColor, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.95f, false);
+	LineY += 32.0f;
+	DrawText(bHasClaim ? TEXT("Place a house schema for the Builder.") : TEXT("Claim the settlement site before building."), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
+
+	DrawText(TEXT("[B/Esc] Close"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, PanelY + PanelHeight - 42.0f, GEngine->GetSmallFont(), 0.85f, false);
 }
