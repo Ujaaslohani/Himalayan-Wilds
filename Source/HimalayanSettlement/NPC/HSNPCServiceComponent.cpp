@@ -69,6 +69,36 @@ bool UHSNPCServiceComponent::GetBestServiceOption(const AActor* Interactor, FHSN
 	return bFoundService;
 }
 
+FText UHSNPCServiceComponent::GetCurrentRoutineLabel() const
+{
+	const AHSNPCActor* NPC = Cast<AHSNPCActor>(GetOwner());
+	const UHSWorldTimeComponent* WorldTime = ResolveWorldTime();
+	const bool bNight = WorldTime && WorldTime->GetTimePhase() == EHSTimePhase::Night;
+	if (!NPC)
+	{
+		return FText::GetEmpty();
+	}
+
+	if (NPC->GetProfessionTag() == TAG_HS_NPC_Profession_Builder)
+	{
+		return bNight ? LOCTEXT("BuilderNightRoutine", "Resting before build work") : LOCTEXT("BuilderDayRoutine", "Working near the build yard");
+	}
+	if (NPC->GetProfessionTag() == TAG_HS_NPC_Profession_Hunter)
+	{
+		return bNight ? LOCTEXT("HunterNightRoutine", "Checking trail reports") : LOCTEXT("HunterDayRoutine", "Scouting animal signs");
+	}
+	if (NPC->GetProfessionTag() == TAG_HS_NPC_Profession_Herbalist)
+	{
+		return bNight ? LOCTEXT("HerbalistNightRoutine", "Drying herbs") : LOCTEXT("HerbalistDayRoutine", "Tending useful plants");
+	}
+	if (NPC->GetProfessionTag() == TAG_HS_NPC_Profession_Soldier)
+	{
+		return bNight ? LOCTEXT("SoldierNightRoutine", "Keeping night watch") : LOCTEXT("SoldierDayRoutine", "Maintaining weapons");
+	}
+
+	return FText::GetEmpty();
+}
+
 bool UHSNPCServiceComponent::GetServiceOption(FGameplayTag ServiceTag, const AActor* Interactor, FHSNPCServiceOption& OutServiceOption) const
 {
 	if (!ServiceTag.IsValid())
@@ -217,7 +247,17 @@ bool UHSNPCServiceComponent::TryExecuteService(FGameplayTag ServiceTag, AActor* 
 
 	if (ServiceTag == TAG_HS_NPC_Service_Herbalist_TeachSpeedHerb)
 	{
-		return ExecuteHerbalistService(Interactor);
+		return ExecuteHerbalistPlantService(Interactor, TAG_HS_Plant_SpeedHerb);
+	}
+
+	if (ServiceTag == TAG_HS_NPC_Service_Herbalist_TeachScentHerb)
+	{
+		return ExecuteHerbalistPlantService(Interactor, TAG_HS_Plant_ScentHerb);
+	}
+
+	if (ServiceTag == TAG_HS_NPC_Service_Herbalist_TeachSenseHerb)
+	{
+		return ExecuteHerbalistPlantService(Interactor, TAG_HS_Plant_SenseHerb);
 	}
 
 	if (ServiceTag == TAG_HS_NPC_Service_Herbalist_RestoreHealth)
@@ -233,6 +273,16 @@ bool UHSNPCServiceComponent::TryExecuteService(FGameplayTag ServiceTag, AActor* 
 	if (ServiceTag == TAG_HS_NPC_Service_Soldier_ProvideArrows)
 	{
 		return ExecuteSoldierArrowsService(Interactor);
+	}
+
+	if (ServiceTag == TAG_HS_NPC_Service_Soldier_ProvideSpear)
+	{
+		return ExecuteSoldierSpearService(Interactor);
+	}
+
+	if (ServiceTag == TAG_HS_NPC_Service_Soldier_ProvideReinforcedBow)
+	{
+		return ExecuteSoldierReinforcedBowService(Interactor);
 	}
 
 	return false;
@@ -335,6 +385,22 @@ void UHSNPCServiceComponent::AddHerbalistService(const AHSNPCActor& NPC, const A
 	ServiceOption.Priority = 30;
 	OutServiceOptions.Add(ServiceOption);
 
+	FHSNPCServiceOption ScentOption;
+	ScentOption.ServiceTag = TAG_HS_NPC_Service_Herbalist_TeachScentHerb;
+	ScentOption.ProfessionTag = TAG_HS_NPC_Profession_Herbalist;
+	ScentOption.Prompt = LOCTEXT("LearnScentHerbPrompt", "Learn scent herb");
+	ScentOption.bAvailable = PlantEffectComponent && !PlantEffectComponent->HasPlantKnowledge(TAG_HS_Plant_ScentHerb);
+	ScentOption.Priority = 29;
+	OutServiceOptions.Add(ScentOption);
+
+	FHSNPCServiceOption SenseOption;
+	SenseOption.ServiceTag = TAG_HS_NPC_Service_Herbalist_TeachSenseHerb;
+	SenseOption.ProfessionTag = TAG_HS_NPC_Profession_Herbalist;
+	SenseOption.Prompt = LOCTEXT("LearnSenseHerbPrompt", "Learn sense herb");
+	SenseOption.bAvailable = PlantEffectComponent && !PlantEffectComponent->HasPlantKnowledge(TAG_HS_Plant_SenseHerb);
+	SenseOption.Priority = 28;
+	OutServiceOptions.Add(SenseOption);
+
 	const UHSPlayerHealthComponent* HealthComponent = Interactor ? Interactor->FindComponentByClass<UHSPlayerHealthComponent>() : nullptr;
 	FHSNPCServiceOption HealOption;
 	HealOption.ServiceTag = TAG_HS_NPC_Service_Herbalist_RestoreHealth;
@@ -369,6 +435,22 @@ void UHSNPCServiceComponent::AddSoldierService(const AHSNPCActor& NPC, const AAc
 	ArrowOption.bAvailable = ResourceCarry && ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic) > 0 && ResourceCarry->GetQuantityForTag(TAG_HS_Item_Arrow_Basic) < 6;
 	ArrowOption.Priority = 20;
 	OutServiceOptions.Add(ArrowOption);
+
+	FHSNPCServiceOption SpearOption;
+	SpearOption.ServiceTag = TAG_HS_NPC_Service_Soldier_ProvideSpear;
+	SpearOption.ProfessionTag = TAG_HS_NPC_Profession_Soldier;
+	SpearOption.Prompt = LOCTEXT("RequestSpearPrompt", "Request spear");
+	SpearOption.bAvailable = ResourceCarry && ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic) > 0 && ResourceCarry->GetQuantityForTag(TAG_HS_Item_Spear_Basic) <= 0;
+	SpearOption.Priority = 18;
+	OutServiceOptions.Add(SpearOption);
+
+	FHSNPCServiceOption ReinforcedBowOption;
+	ReinforcedBowOption.ServiceTag = TAG_HS_NPC_Service_Soldier_ProvideReinforcedBow;
+	ReinforcedBowOption.ProfessionTag = TAG_HS_NPC_Profession_Soldier;
+	ReinforcedBowOption.Prompt = LOCTEXT("RequestReinforcedBowPrompt", "Request reinforced bow");
+	ReinforcedBowOption.bAvailable = ResourceCarry && ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic) > 0 && ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Reinforced) <= 0;
+	ReinforcedBowOption.Priority = 16;
+	OutServiceOptions.Add(ReinforcedBowOption);
 }
 
 bool UHSNPCServiceComponent::ExecuteBuilderService(AActor* Interactor) const
@@ -410,8 +492,13 @@ bool UHSNPCServiceComponent::ExecuteHunterRefreshLeadService(AActor* Interactor)
 
 bool UHSNPCServiceComponent::ExecuteHerbalistService(AActor* Interactor) const
 {
+	return ExecuteHerbalistPlantService(Interactor, TAG_HS_Plant_SpeedHerb);
+}
+
+bool UHSNPCServiceComponent::ExecuteHerbalistPlantService(AActor* Interactor, FGameplayTag PlantTag) const
+{
 	UHSPlantEffectComponent* PlantEffectComponent = Interactor ? Interactor->FindComponentByClass<UHSPlantEffectComponent>() : nullptr;
-	return PlantEffectComponent && PlantEffectComponent->LearnPlant(TAG_HS_Plant_SpeedHerb);
+	return PlantEffectComponent && PlantEffectComponent->LearnPlant(PlantTag);
 }
 
 bool UHSNPCServiceComponent::ExecuteHerbalistRestoreHealthService(AActor* Interactor) const
@@ -447,6 +534,30 @@ bool UHSNPCServiceComponent::ExecuteSoldierArrowsService(AActor* Interactor) con
 	}
 
 	ResourceCarry->AddStack(FHSItemStack{ TAG_HS_Item_Arrow_Basic, 6 });
+	return true;
+}
+
+bool UHSNPCServiceComponent::ExecuteSoldierSpearService(AActor* Interactor) const
+{
+	UHSResourceCarryComponent* ResourceCarry = Interactor ? Interactor->FindComponentByClass<UHSResourceCarryComponent>() : nullptr;
+	if (!ResourceCarry || ResourceCarry->GetQuantityForTag(TAG_HS_Item_Spear_Basic) > 0)
+	{
+		return false;
+	}
+
+	ResourceCarry->AddStack(FHSItemStack{ TAG_HS_Item_Spear_Basic, 1 });
+	return true;
+}
+
+bool UHSNPCServiceComponent::ExecuteSoldierReinforcedBowService(AActor* Interactor) const
+{
+	UHSResourceCarryComponent* ResourceCarry = Interactor ? Interactor->FindComponentByClass<UHSResourceCarryComponent>() : nullptr;
+	if (!ResourceCarry || ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Reinforced) > 0 || ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic) <= 0)
+	{
+		return false;
+	}
+
+	ResourceCarry->AddStack(FHSItemStack{ TAG_HS_Item_Bow_Reinforced, 1 });
 	return true;
 }
 

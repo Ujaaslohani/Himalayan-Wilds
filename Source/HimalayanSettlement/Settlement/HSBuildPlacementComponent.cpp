@@ -60,6 +60,16 @@ bool UHSBuildPlacementComponent::StartBasicHouseMinorUpgradePlacement()
 	return StartPlacement(ResolveBasicHouseMinorUpgradeDefinition());
 }
 
+bool UHSBuildPlacementComponent::StartBuildingPlacement(FGameplayTag BuildingTag, FText DisplayName)
+{
+	if (BuildingTag == TAG_HS_Building_BasicHouse)
+	{
+		return StartBasicHousePlacement();
+	}
+
+	return StartPlacement(ResolveRuntimeBuildingDefinition(BuildingTag, DisplayName));
+}
+
 bool UHSBuildPlacementComponent::StartBasicCampsitePlacement()
 {
 	return StartTemporaryShelterPlacement();
@@ -92,6 +102,10 @@ bool UHSBuildPlacementComponent::StartPlacement(UHSBuildingDefinition* BuildingD
 		SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		PreviewActor = World->SpawnActor<AHSBuildPlacementPreviewActor>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
 	}
+	if (PreviewActor)
+	{
+		PreviewActor->ConfigureForBuilding(BuildingDefinition->BuildingTag, false);
+	}
 
 	SetComponentTickEnabled(true);
 	UpdatePreview();
@@ -120,6 +134,10 @@ bool UHSBuildPlacementComponent::StartTemporaryShelterPlacement()
 		FActorSpawnParameters SpawnParameters;
 		SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 		PreviewActor = World->SpawnActor<AHSBuildPlacementPreviewActor>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+	}
+	if (PreviewActor)
+	{
+		PreviewActor->ConfigureForBuilding(FGameplayTag(), true);
 	}
 
 	SetComponentTickEnabled(true);
@@ -310,14 +328,32 @@ UHSBuildingDefinition* UHSBuildPlacementComponent::ResolveBasicHouseDefinition()
 
 UHSBuildingDefinition* UHSBuildPlacementComponent::ResolveBasicHouseMinorUpgradeDefinition()
 {
-	if (!RuntimeMinorUpgradeDefinition)
+	RuntimeMinorUpgradeDefinition = ResolveRuntimeBuildingDefinition(TAG_HS_Building_BasicHouseMinorUpgrade, NSLOCTEXT("HSBuildPlacementComponent", "MinorUpgradeDisplayName", "Minor House Upgrade"));
+	return RuntimeMinorUpgradeDefinition;
+}
+
+UHSBuildingDefinition* UHSBuildPlacementComponent::ResolveRuntimeBuildingDefinition(FGameplayTag BuildingTag, FText DisplayName)
+{
+	if (!BuildingTag.IsValid())
 	{
-		RuntimeMinorUpgradeDefinition = NewObject<UHSBuildingDefinition>(this, TEXT("RuntimeBasicHouseMinorUpgradeDefinition"));
-		RuntimeMinorUpgradeDefinition->DisplayName = NSLOCTEXT("HSBuildPlacementComponent", "MinorUpgradeDisplayName", "Minor House Upgrade");
-		RuntimeMinorUpgradeDefinition->BuildingTag = TAG_HS_Building_BasicHouseMinorUpgrade;
+		return nullptr;
 	}
 
-	return RuntimeMinorUpgradeDefinition;
+	for (UHSBuildingDefinition* Definition : RuntimeBuildingDefinitions)
+	{
+		if (Definition && Definition->BuildingTag == BuildingTag)
+		{
+			Definition->DisplayName = DisplayName;
+			return Definition;
+		}
+	}
+
+	const FName DefinitionName = MakeUniqueObjectName(this, UHSBuildingDefinition::StaticClass(), FName(*FString::Printf(TEXT("Runtime_%s"), *BuildingTag.GetTagName().ToString().Replace(TEXT("."), TEXT("_")))));
+	UHSBuildingDefinition* Definition = NewObject<UHSBuildingDefinition>(this, DefinitionName);
+	Definition->DisplayName = DisplayName;
+	Definition->BuildingTag = BuildingTag;
+	RuntimeBuildingDefinitions.Add(Definition);
+	return Definition;
 }
 
 UHSSettlementPlanComponent* UHSBuildPlacementComponent::ResolveSettlementPlan() const

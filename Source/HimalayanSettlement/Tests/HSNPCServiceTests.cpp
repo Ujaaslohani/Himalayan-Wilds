@@ -295,6 +295,14 @@ bool FHSNPCServiceHerbalistAndSoldierSecondServicesTest::RunTest(const FString& 
 	TestTrue(TEXT("Soldier arrow service should be available with low arrows."), ServiceOption.bAvailable);
 	TestTrue(TEXT("Executing soldier arrow service should add arrows."), SoldierServices->TryExecuteService(TAG_HS_NPC_Service_Soldier_ProvideArrows, Player));
 	TestEqual(TEXT("Soldier should add six arrows."), Carry->GetQuantityForTag(TAG_HS_Item_Arrow_Basic), 8);
+	TestTrue(TEXT("Soldier spear service should be queryable."), SoldierServices->GetServiceOption(TAG_HS_NPC_Service_Soldier_ProvideSpear, Player, ServiceOption));
+	TestTrue(TEXT("Soldier spear service should be available after basic bow."), ServiceOption.bAvailable);
+	TestTrue(TEXT("Executing soldier spear service should add spear."), SoldierServices->TryExecuteService(TAG_HS_NPC_Service_Soldier_ProvideSpear, Player));
+	TestEqual(TEXT("Soldier should add one spear."), Carry->GetQuantityForTag(TAG_HS_Item_Spear_Basic), 1);
+	TestTrue(TEXT("Soldier reinforced bow service should be queryable."), SoldierServices->GetServiceOption(TAG_HS_NPC_Service_Soldier_ProvideReinforcedBow, Player, ServiceOption));
+	TestTrue(TEXT("Soldier reinforced bow service should be available after basic bow."), ServiceOption.bAvailable);
+	TestTrue(TEXT("Executing soldier reinforced bow service should add reinforced bow."), SoldierServices->TryExecuteService(TAG_HS_NPC_Service_Soldier_ProvideReinforcedBow, Player));
+	TestEqual(TEXT("Soldier should add one reinforced bow."), Carry->GetQuantityForTag(TAG_HS_Item_Bow_Reinforced), 1);
 
 	World->DestroyWorld(false);
 	return true;

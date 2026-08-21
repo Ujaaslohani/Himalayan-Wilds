@@ -6,11 +6,13 @@
 #include "Building/HSBuildingDefinition.h"
 #include "Components/LightComponent.h"
 #include "Components/SkyLightComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Core/HSGameplayTags.h"
 #include "Engine/DirectionalLight.h"
 #include "Engine/SkyLight.h"
 #include "Engine/World.h"
 #include "Exploration/HSExplorationMarkerActor.h"
+#include "Exploration/HSPrototypeVisualActor.h"
 #include "Herbalism/HSPlantActor.h"
 #include "Herbalism/HSPlantDefinition.h"
 #include "Interaction/HSInteractionTarget.h"
@@ -99,6 +101,8 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	int32 TrailMarkerCount = 0;
 	bool bFoundCheapPrototypeSun = false;
 	bool bFoundCheapPrototypeSkyLight = false;
+	int32 PrototypeVisualCount = 0;
+	bool bPrototypeVisualsAreCheap = true;
 	if (World && World->PersistentLevel)
 	{
 		for (const AActor* Actor : World->PersistentLevel->Actors)
@@ -133,6 +137,14 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 				bFoundForestMarker |= ExplorationMarker->GetMarkerTag() == TAG_HS_Location_Forest && !ExplorationMarker->PrimaryActorTick.bCanEverTick;
 				bFoundAnimalAreaMarker |= ExplorationMarker->GetMarkerTag() == TAG_HS_Location_AnimalArea && !ExplorationMarker->PrimaryActorTick.bCanEverTick;
 				TrailMarkerCount += ExplorationMarker->GetMarkerTag() == TAG_HS_Location_Trail && !ExplorationMarker->PrimaryActorTick.bCanEverTick ? 1 : 0;
+			}
+			if (const AHSPrototypeVisualActor* PrototypeVisual = Cast<AHSPrototypeVisualActor>(Actor))
+			{
+				++PrototypeVisualCount;
+				const UStaticMeshComponent* PrototypeMesh = PrototypeVisual->GetPrototypeMesh();
+				bPrototypeVisualsAreCheap &= !PrototypeVisual->PrimaryActorTick.bCanEverTick
+					&& PrototypeMesh
+					&& PrototypeMesh->GetCollisionEnabled() == ECollisionEnabled::NoCollision;
 			}
 			bFoundInteractionTarget |= Actor && Actor->IsA<AHSInteractionTarget>();
 			bFoundRestPoint |= Actor && Actor->IsA<AHSRestPointActor>();
@@ -170,6 +182,8 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("One Morning Hunt map should contain a forest exploration marker."), bFoundForestMarker);
 	TestTrue(TEXT("One Morning Hunt map should contain an animal-area exploration marker."), bFoundAnimalAreaMarker);
 	TestTrue(TEXT("One Morning Hunt map should contain a readable trail route."), TrailMarkerCount >= 3);
+	TestTrue(TEXT("Expanded map should contain cheap native prototype visuals."), PrototypeVisualCount >= 30);
+	TestTrue(TEXT("Prototype visuals should stay no-tick and no-collision."), bPrototypeVisualsAreCheap);
 	TestTrue(TEXT("One Morning Hunt prototype sun should use the cheap no-shadow baseline."), bFoundCheapPrototypeSun);
 	TestTrue(TEXT("One Morning Hunt prototype skylight should use the cheap no-shadow baseline."), bFoundCheapPrototypeSkyLight);
 

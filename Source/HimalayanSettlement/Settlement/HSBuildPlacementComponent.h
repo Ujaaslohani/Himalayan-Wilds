@@ -55,6 +55,9 @@ public:
 	bool StartBasicHouseMinorUpgradePlacement();
 
 	UFUNCTION(BlueprintCallable, Category = "Build Placement")
+	bool StartBuildingPlacement(FGameplayTag BuildingTag, FText DisplayName);
+
+	UFUNCTION(BlueprintCallable, Category = "Build Placement")
 	bool StartBasicCampsitePlacement();
 
 	UFUNCTION(BlueprintCallable, Category = "Build Placement")
@@ -93,6 +96,7 @@ private:
 	void DestroyPreview();
 	UHSBuildingDefinition* ResolveBasicHouseDefinition();
 	UHSBuildingDefinition* ResolveBasicHouseMinorUpgradeDefinition();
+	UHSBuildingDefinition* ResolveRuntimeBuildingDefinition(FGameplayTag BuildingTag, FText DisplayName);
 	UHSSettlementPlanComponent* ResolveSettlementPlan() const;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Build Placement")
@@ -118,6 +122,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UHSBuildingDefinition> RuntimeMinorUpgradeDefinition;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UHSBuildingDefinition>> RuntimeBuildingDefinitions;
 
 	UPROPERTY(VisibleAnywhere, Category = "Build Placement")
 	EHSBuildPlacementMode PlacementMode;

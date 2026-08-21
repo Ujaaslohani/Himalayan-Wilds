@@ -187,12 +187,16 @@ bool FHSBuildMenuAvailabilityFeedbackTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Blocked upgrade reason should mention settlement claim."), Reason.ToString().Contains(TEXT("Claim")));
 	TestTrue(TEXT("Basic campsite should be available without a settlement claim."), Player->CanStartBasicCampsiteFromBuildMenu(&Reason));
 	TestTrue(TEXT("Campsite reason should mention temporary placement."), Reason.ToString().Contains(TEXT("temporary")));
+	TestEqual(TEXT("Build menu should expose the core foundation catalog."), Player->GetBuildMenuEntryCount(), 10);
+	TestTrue(TEXT("Build menu entry 3 should remain the campsite shortcut."), Player->GetBuildMenuEntryLabel(2).ToString().Contains(TEXT("Campsite")));
+	TestTrue(TEXT("Build menu should include storage hut schema."), Player->GetBuildMenuEntryTag(5) == TAG_HS_Building_StorageHut);
+	TestTrue(TEXT("Build menu should include drying rack schema."), Player->GetBuildMenuEntryTag(9) == TAG_HS_Building_BasicDryingRack);
 
 	Player->GetSettlementPlanComponent()->RestoreSettlementPlan(true, FVector::ZeroVector, {});
 	TestTrue(TEXT("Basic house should be available after claim."), Player->CanStartBasicHouseFromBuildMenu(&Reason));
 	TestTrue(TEXT("Available build reason should mention readiness."), Reason.ToString().Contains(TEXT("Ready")));
 	TestFalse(TEXT("Minor upgrade should be blocked before a completed house."), Player->CanStartBasicHouseMinorUpgradeFromBuildMenu(&Reason));
-	TestTrue(TEXT("Blocked upgrade reason should mention the basic house."), Reason.ToString().Contains(TEXT("Basic House")));
+	TestTrue(TEXT("Blocked upgrade reason should mention a prerequisite."), Reason.ToString().Contains(TEXT("Complete")));
 	Player->SelectBuildMenuDelta(1);
 	Player->SelectBuildMenuDelta(1);
 	TestEqual(TEXT("Build menu selection should support the campsite entry."), Player->GetSelectedBuildMenuIndex(), 2);
@@ -214,6 +218,17 @@ bool FHSBuildMenuAvailabilityFeedbackTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Completed build reason should mention completion."), Reason.ToString().Contains(TEXT("complete")));
 	TestTrue(TEXT("Minor upgrade should be available after house completion."), Player->CanStartBasicHouseMinorUpgradeFromBuildMenu(&Reason));
 	TestTrue(TEXT("Available upgrade reason should mention readiness."), Reason.ToString().Contains(TEXT("Ready")));
+	TestFalse(TEXT("Mid upgrade should wait for completed minor upgrade."), Player->CanStartBuildMenuEntry(3, &Reason));
+	TestTrue(TEXT("Mid upgrade block should mention prerequisite."), Reason.ToString().Contains(TEXT("Complete")));
+	TestTrue(TEXT("Storage hut should be available after basic house."), Player->CanStartBuildMenuEntry(5, &Reason));
+
+	FHSConstructionJob CompletedMinorJob;
+	CompletedMinorJob.BuildingTag = TAG_HS_Building_BasicHouseMinorUpgrade;
+	CompletedMinorJob.State = EHSConstructionJobState::Complete;
+	CompletedBuildings.AddTag(TAG_HS_Building_BasicHouseMinorUpgrade);
+	Player->GetConstructionComponent()->RestoreConstructionState({ CompletedJob, CompletedMinorJob }, CompletedBuildings);
+	TestTrue(TEXT("Mid upgrade should be available after minor upgrade completion."), Player->CanStartBuildMenuEntry(3, &Reason));
+	TestFalse(TEXT("Major upgrade should wait for completed mid upgrade."), Player->CanStartBuildMenuEntry(4, &Reason));
 
 	return true;
 }

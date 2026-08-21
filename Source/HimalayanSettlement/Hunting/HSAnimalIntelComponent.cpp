@@ -105,6 +105,21 @@ bool UHSAnimalIntelComponent::CanRequestDailyAnimalLead() const
 	return DefaultAnimalTag.IsValid() && LastReportDay != ResolveCurrentDay();
 }
 
+FText UHSAnimalIntelComponent::DescribeActiveLead() const
+{
+	if (!ActiveLead.IsValid())
+	{
+		return NSLOCTEXT("HSAnimalIntelComponent", "NoActiveLead", "No active animal report.");
+	}
+
+	return FText::Format(
+		NSLOCTEXT("HSAnimalIntelComponent", "ActiveLeadSummary", "{0} signs near X {1}, Y {2}. Report day {3}."),
+		FText::FromString(ActiveLead.AnimalTag.ToString()),
+		FText::AsNumber(FMath::RoundToInt(ActiveLead.Location.X)),
+		FText::AsNumber(FMath::RoundToInt(ActiveLead.Location.Y)),
+		FText::AsNumber(ActiveLead.ReportDay));
+}
+
 void UHSAnimalIntelComponent::RestoreAnimalIntelState(const FHSAnimalLead& NewActiveLead, int32 NewLastReportDay)
 {
 	LastReportDay = NewLastReportDay;

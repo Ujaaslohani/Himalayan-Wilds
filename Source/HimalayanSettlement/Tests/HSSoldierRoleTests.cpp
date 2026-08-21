@@ -66,7 +66,8 @@ bool FHSSoldierProvidesBasicWeaponSuppliesTest::RunTest(const FString& Parameter
 	TestEqual(TEXT("Soldier should grant one basic bow."), ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic), 1);
 	TestEqual(TEXT("Soldier should grant a basic arrow bundle."), ResourceCarry->GetQuantityForTag(TAG_HS_Item_Arrow_Basic), 12);
 	TestTrue(TEXT("Soldier should auto-equip the granted bow."), Equipment->IsBowEquipped());
-	TestFalse(TEXT("Selected soldier service should be unavailable after bow is granted."), ServiceComponent && ServiceComponent->GetSelectedServiceOption(Player, SelectedService));
+	TestTrue(TEXT("Follow-up soldier services should be available after bow is granted."), ServiceComponent && ServiceComponent->GetSelectedServiceOption(Player, SelectedService));
+	TestTrue(TEXT("Follow-up soldier service should be spear or reinforced bow."), SelectedService.ServiceTag == TAG_HS_NPC_Service_Soldier_ProvideSpear || SelectedService.ServiceTag == TAG_HS_NPC_Service_Soldier_ProvideReinforcedBow);
 
 	Soldier->Interact_Implementation(Player);
 	TestEqual(TEXT("Soldier should not duplicate bow supplies while player already has a bow."), ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic), 1);

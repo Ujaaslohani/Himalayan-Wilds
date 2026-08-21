@@ -94,7 +94,16 @@ FText AHSNPCActor::GetInteractionPrompt_Implementation(const AActor* Interactor)
 
 	FFormatNamedArguments Arguments;
 	Arguments.Add(TEXT("Name"), GetDisplayName());
-	return FText::Format(InteractionPromptFormat, Arguments);
+	const FText BasePrompt = FText::Format(InteractionPromptFormat, Arguments);
+	if (NPCServiceComponent)
+	{
+		const FText RoutineLabel = NPCServiceComponent->GetCurrentRoutineLabel();
+		if (!RoutineLabel.IsEmpty())
+		{
+			return FText::Format(LOCTEXT("NPCPromptWithRoutine", "{0}: {1}"), BasePrompt, RoutineLabel);
+		}
+	}
+	return BasePrompt;
 }
 
 bool AHSNPCActor::CanInteract_Implementation(const AActor* Interactor) const

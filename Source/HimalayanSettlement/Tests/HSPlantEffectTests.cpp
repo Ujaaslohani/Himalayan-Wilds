@@ -8,6 +8,7 @@
 #include "Herbalism/HSPlantEffectComponent.h"
 #include "NPC/HSNPCActor.h"
 #include "NPC/HSNPCDefinition.h"
+#include "NPC/HSNPCServiceComponent.h"
 #include "Player/HSPlayerCharacter.h"
 #include "World/HSGameState.h"
 #include "World/HSWorldTimeComponent.h"
@@ -96,6 +97,11 @@ bool FHSHerbalistTeachesPlantAndPlantAppliesEffectTest::RunTest(const FString& P
 	TestTrue(TEXT("Herbalist prompt should offer plant knowledge."), Herbalist->GetInteractionPrompt_Implementation(Player).ToString().Contains(TEXT("plant")));
 	Herbalist->Interact_Implementation(Player);
 	TestTrue(TEXT("Herbalist should teach speed herb."), PlantEffect->HasPlantKnowledge(TAG_HS_Plant_SpeedHerb));
+	UHSNPCServiceComponent* HerbalistServices = Herbalist->GetNPCServiceComponent();
+	TestTrue(TEXT("Herbalist scent herb service should teach scent knowledge."), HerbalistServices && HerbalistServices->TryExecuteService(TAG_HS_NPC_Service_Herbalist_TeachScentHerb, Player));
+	TestTrue(TEXT("Herbalist should teach scent herb."), PlantEffect->HasPlantKnowledge(TAG_HS_Plant_ScentHerb));
+	TestTrue(TEXT("Herbalist sense herb service should teach sense knowledge."), HerbalistServices && HerbalistServices->TryExecuteService(TAG_HS_NPC_Service_Herbalist_TeachSenseHerb, Player));
+	TestTrue(TEXT("Herbalist should teach sense herb."), PlantEffect->HasPlantKnowledge(TAG_HS_Plant_SenseHerb));
 
 	const float BaseStandingSpeed = Player->GetStandingWalkSpeed();
 	TestTrue(TEXT("Known plant should apply its effect."), Plant->CanInteract_Implementation(Player));

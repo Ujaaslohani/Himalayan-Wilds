@@ -14,6 +14,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Exploration/HSExplorationMarkerActor.h"
+#include "Exploration/HSPrototypeVisualActor.h"
 #include "Factories/WorldFactory.h"
 #include "GameFramework/PlayerStart.h"
 #include "GameplayTagsManager.h"
@@ -137,6 +138,18 @@ void CreateDefinitions()
 	Arrow->Weight = 0.05f;
 	SaveAssetPackage(Arrow);
 
+	UHSItemDefinition* ReinforcedBow = ConfigureAsset<UHSItemDefinition>(TEXT("/Game/Data/Items/DA_Item_ReinforcedBow"), TEXT("DA_Item_ReinforcedBow"));
+	ReinforcedBow->DisplayName = FText::FromString(TEXT("Reinforced Bow"));
+	ReinforcedBow->ItemTag = Tag(TEXT("Item.Bow.Reinforced"));
+	ReinforcedBow->Weight = 1.35f;
+	SaveAssetPackage(ReinforcedBow);
+
+	UHSItemDefinition* Spear = ConfigureAsset<UHSItemDefinition>(TEXT("/Game/Data/Items/DA_Item_BasicSpear"), TEXT("DA_Item_BasicSpear"));
+	Spear->DisplayName = FText::FromString(TEXT("Basic Spear"));
+	Spear->ItemTag = Tag(TEXT("Item.Spear.Basic"));
+	Spear->Weight = 1.8f;
+	SaveAssetPackage(Spear);
+
 	UHSItemDefinition* Meat = ConfigureAsset<UHSItemDefinition>(TEXT("/Game/Data/Items/DA_Item_DeerMeat"), TEXT("DA_Item_DeerMeat"));
 	Meat->DisplayName = FText::FromString(TEXT("Deer Meat"));
 	Meat->ItemTag = Tag(TEXT("Resource.Meat.Deer"));
@@ -176,7 +189,7 @@ void CreateDefinitions()
 	UHSNPCDefinition* Herbalist = ConfigureAsset<UHSNPCDefinition>(TEXT("/Game/Data/NPCs/DA_NPC_Herbalist"), TEXT("DA_NPC_Herbalist"));
 	Herbalist->DisplayName = FText::FromString(TEXT("Herbalist"));
 	Herbalist->ProfessionTag = Tag(TEXT("NPC.Profession.Herbalist"));
-	Herbalist->KnowledgeTags = Tags({ TEXT("Plant.SpeedHerb") });
+	Herbalist->KnowledgeTags = Tags({ TEXT("Plant.SpeedHerb"), TEXT("Plant.ScentHerb"), TEXT("Plant.SenseHerb") });
 	Herbalist->UnlockTags.Reset();
 	SaveAssetPackage(Herbalist);
 
@@ -195,6 +208,22 @@ void CreateDefinitions()
 	SpeedHerb->DurationDays = 0.5f;
 	SaveAssetPackage(SpeedHerb);
 
+	UHSPlantDefinition* ScentHerb = ConfigureAsset<UHSPlantDefinition>(TEXT("/Game/Data/Plants/DA_Plant_ScentHerb"), TEXT("DA_Plant_ScentHerb"));
+	ScentHerb->DisplayName = FText::FromString(TEXT("Scent Herb"));
+	ScentHerb->PlantTag = Tag(TEXT("Plant.ScentHerb"));
+	ScentHerb->EffectTag = Tag(TEXT("Effect.Plant.Scent"));
+	ScentHerb->MovementSpeedMultiplier = 1.0f;
+	ScentHerb->DurationDays = 0.5f;
+	SaveAssetPackage(ScentHerb);
+
+	UHSPlantDefinition* SenseHerb = ConfigureAsset<UHSPlantDefinition>(TEXT("/Game/Data/Plants/DA_Plant_SenseHerb"), TEXT("DA_Plant_SenseHerb"));
+	SenseHerb->DisplayName = FText::FromString(TEXT("Sense Herb"));
+	SenseHerb->PlantTag = Tag(TEXT("Plant.SenseHerb"));
+	SenseHerb->EffectTag = Tag(TEXT("Effect.Plant.Sense"));
+	SenseHerb->MovementSpeedMultiplier = 1.0f;
+	SenseHerb->DurationDays = 0.5f;
+	SaveAssetPackage(SenseHerb);
+
 	UHSBuildingDefinition* Rack = ConfigureAsset<UHSBuildingDefinition>(TEXT("/Game/Data/Buildings/DA_Building_BasicDryingRack"), TEXT("DA_Building_BasicDryingRack"));
 	Rack->DisplayName = FText::FromString(TEXT("Basic Drying Rack"));
 	Rack->BuildingTag = Tag(TEXT("Building.BasicDryingRack"));
@@ -208,6 +237,34 @@ void CreateDefinitions()
 	House->RequiredKnowledgeTags = Tags({ TEXT("Knowledge.Settlement.BasicCrafting") });
 	House->ResourceCosts.Reset();
 	SaveAssetPackage(House);
+
+	struct FBuildingAssetSeed
+	{
+		const TCHAR* PackageName;
+		const TCHAR* AssetName;
+		const TCHAR* DisplayName;
+		const TCHAR* BuildingTag;
+	};
+
+	const FBuildingAssetSeed BuildingSeeds[] = {
+		{ TEXT("/Game/Data/Buildings/DA_Building_BasicHouseMinorUpgrade"), TEXT("DA_Building_BasicHouseMinorUpgrade"), TEXT("Minor House Upgrade"), TEXT("Building.BasicHouse.MinorUpgrade") },
+		{ TEXT("/Game/Data/Buildings/DA_Building_BasicHouseMidUpgrade"), TEXT("DA_Building_BasicHouseMidUpgrade"), TEXT("Mid House Upgrade"), TEXT("Building.BasicHouse.MidUpgrade") },
+		{ TEXT("/Game/Data/Buildings/DA_Building_BasicHouseMajorUpgrade"), TEXT("DA_Building_BasicHouseMajorUpgrade"), TEXT("Major House Upgrade"), TEXT("Building.BasicHouse.MajorUpgrade") },
+		{ TEXT("/Game/Data/Buildings/DA_Building_StorageHut"), TEXT("DA_Building_StorageHut"), TEXT("Storage Hut"), TEXT("Building.StorageHut") },
+		{ TEXT("/Game/Data/Buildings/DA_Building_Workshop"), TEXT("DA_Building_Workshop"), TEXT("Workshop"), TEXT("Building.Workshop") },
+		{ TEXT("/Game/Data/Buildings/DA_Building_WatchPost"), TEXT("DA_Building_WatchPost"), TEXT("Watch Post"), TEXT("Building.WatchPost") },
+		{ TEXT("/Game/Data/Buildings/DA_Building_HerbalHut"), TEXT("DA_Building_HerbalHut"), TEXT("Herbal Hut"), TEXT("Building.HerbalHut") }
+	};
+
+	for (const FBuildingAssetSeed& Seed : BuildingSeeds)
+	{
+		UHSBuildingDefinition* Building = ConfigureAsset<UHSBuildingDefinition>(Seed.PackageName, Seed.AssetName);
+		Building->DisplayName = FText::FromString(Seed.DisplayName);
+		Building->BuildingTag = Tag(Seed.BuildingTag);
+		Building->RequiredKnowledgeTags = Tags({ TEXT("Knowledge.Settlement.BasicCrafting") });
+		Building->ResourceCosts.Reset();
+		SaveAssetPackage(Building);
+	}
 
 	UHSQuestDefinition* Quest = ConfigureAsset<UHSQuestDefinition>(TEXT("/Game/Data/Quests/DA_Quest_OneMorningHunt"), TEXT("DA_Quest_OneMorningHunt"));
 	Quest->DisplayName = FText::FromString(TEXT("One Morning Hunt"));
@@ -252,6 +309,45 @@ AHSExplorationMarkerActor* SpawnExplorationMarker(UWorld* World, const TCHAR* Na
 	return Marker;
 }
 
+AHSPrototypeVisualActor* SpawnVisual(UWorld* World, const TCHAR* Name, const FVector& Location, EHSPrototypeVisualShape Shape, FLinearColor Color, FVector Scale, const FRotator& Rotation = FRotator::ZeroRotator)
+{
+	AHSPrototypeVisualActor* Visual = SpawnNamedActor<AHSPrototypeVisualActor>(World, Name, Location, Rotation);
+	Visual->ConfigureVisual(Shape, Color, Scale);
+	return Visual;
+}
+
+void SpawnTreeCluster(UWorld* World, const TCHAR* NamePrefix, const TArray<FVector>& Locations)
+{
+	int32 Index = 0;
+	for (const FVector& Location : Locations)
+	{
+		const FString TrunkName = FString::Printf(TEXT("%s_Trunk_%02d"), NamePrefix, Index);
+		const FString CanopyName = FString::Printf(TEXT("%s_Canopy_%02d"), NamePrefix, Index);
+		SpawnVisual(World, *TrunkName, Location + FVector(0.0f, 0.0f, 70.0f), EHSPrototypeVisualShape::Cylinder, FLinearColor(0.30f, 0.18f, 0.10f, 1.0f), FVector(0.16f, 0.16f, 1.45f));
+		SpawnVisual(World, *CanopyName, Location + FVector(0.0f, 0.0f, 178.0f), EHSPrototypeVisualShape::Cone, FLinearColor(0.08f, 0.30f, 0.14f, 1.0f), FVector(0.95f, 0.95f, 1.25f));
+		++Index;
+	}
+}
+
+void SpawnFenceRun(UWorld* World, const TCHAR* NamePrefix, const TArray<FVector>& Locations, bool bHorizontal)
+{
+	int32 Index = 0;
+	for (const FVector& Location : Locations)
+	{
+		const FString PostName = FString::Printf(TEXT("%s_Post_%02d"), NamePrefix, Index);
+		SpawnVisual(World, *PostName, Location + FVector(0.0f, 0.0f, 45.0f), EHSPrototypeVisualShape::Cylinder, FLinearColor(0.36f, 0.25f, 0.15f, 1.0f), FVector(0.08f, 0.08f, 0.9f));
+		if (Index > 0)
+		{
+			const FVector PreviousLocation = Locations[Index - 1];
+			const FVector Midpoint = (PreviousLocation + Location) * 0.5f + FVector(0.0f, 0.0f, 58.0f);
+			const float Length = FVector::Dist2D(PreviousLocation, Location) / 100.0f;
+			const FString RailName = FString::Printf(TEXT("%s_Rail_%02d"), NamePrefix, Index);
+			SpawnVisual(World, *RailName, Midpoint, EHSPrototypeVisualShape::Cube, FLinearColor(0.40f, 0.27f, 0.15f, 1.0f), bHorizontal ? FVector(Length, 0.06f, 0.06f) : FVector(0.06f, Length, 0.06f));
+		}
+		++Index;
+	}
+}
+
 UWorld* CreateOrLoadMap()
 {
 	if (UWorld* ExistingWorld = LoadObject<UWorld>(nullptr, TEXT("/Game/Maps/L_OneMorningHunt.L_OneMorningHunt")))
@@ -280,7 +376,12 @@ void CreateMap()
 	{
 		Ground->GetStaticMeshComponent()->SetStaticMesh(PlaneMesh);
 	}
-	Ground->SetActorScale3D(FVector(20.0f, 20.0f, 1.0f));
+	Ground->SetActorScale3D(FVector(42.0f, 34.0f, 1.0f));
+
+	SpawnVisual(World, TEXT("Region_Settlement_Dirt"), FVector(-360.0f, -220.0f, 2.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.42f, 0.34f, 0.23f, 1.0f), FVector(7.2f, 4.6f, 0.025f));
+	SpawnVisual(World, TEXT("Region_Village_Dirt"), FVector(-720.0f, -180.0f, 3.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.38f, 0.31f, 0.22f, 1.0f), FVector(5.0f, 3.2f, 0.025f));
+	SpawnVisual(World, TEXT("Region_Forest_Floor"), FVector(720.0f, -420.0f, 4.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.12f, 0.22f, 0.11f, 1.0f), FVector(10.5f, 5.8f, 0.025f));
+	SpawnVisual(World, TEXT("Region_Herb_Glade"), FVector(360.0f, 300.0f, 5.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.16f, 0.30f, 0.13f, 1.0f), FVector(4.0f, 2.8f, 0.025f));
 
 	SpawnNamedActor<APlayerStart>(World, TEXT("PlayerStart_OneMorningHunt"), FVector(-300.0f, 0.0f, 90.0f));
 	ADirectionalLight* Sun = SpawnNamedActor<ADirectionalLight>(World, TEXT("Sun_Morning"), FVector(0.0f, 0.0f, 400.0f), FRotator(-35.0f, -40.0f, 0.0f));
@@ -327,8 +428,23 @@ void CreateMap()
 	SpawnNamedActor<AHSTemporaryShelterActor>(World, TEXT("Temporary_Shelter_Sleep"), FVector(-230.0f, 220.0f, 55.0f), FRotator(0.0f, 25.0f, 0.0f));
 	SpawnNamedActor<AHSSettlementClaimActor>(World, TEXT("Settlement_Claim_Marker"), FVector(-80.0f, -260.0f, 55.0f), FRotator::ZeroRotator);
 
+	SpawnVisual(World, TEXT("Village_Hut_A"), FVector(-720.0f, -300.0f, 65.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.46f, 0.37f, 0.25f, 1.0f), FVector(1.6f, 1.05f, 1.3f));
+	SpawnVisual(World, TEXT("Village_Hut_A_Roof"), FVector(-720.0f, -300.0f, 150.0f), EHSPrototypeVisualShape::Cone, FLinearColor(0.18f, 0.20f, 0.15f, 1.0f), FVector(1.9f, 1.35f, 0.55f));
+	SpawnVisual(World, TEXT("Village_Hut_B"), FVector(-860.0f, -80.0f, 55.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.43f, 0.34f, 0.23f, 1.0f), FVector(1.35f, 0.9f, 1.1f), FRotator(0.0f, 18.0f, 0.0f));
+	SpawnVisual(World, TEXT("Village_Hut_B_Roof"), FVector(-860.0f, -80.0f, 130.0f), EHSPrototypeVisualShape::Cone, FLinearColor(0.17f, 0.19f, 0.14f, 1.0f), FVector(1.6f, 1.15f, 0.48f), FRotator(0.0f, 18.0f, 0.0f));
+	SpawnVisual(World, TEXT("Builder_Workbench"), FVector(-430.0f, -345.0f, 42.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.37f, 0.24f, 0.12f, 1.0f), FVector(1.25f, 0.45f, 0.25f), FRotator(0.0f, 8.0f, 0.0f));
+	SpawnVisual(World, TEXT("Builder_Log_Pile_A"), FVector(-520.0f, -360.0f, 30.0f), EHSPrototypeVisualShape::Cylinder, FLinearColor(0.34f, 0.21f, 0.11f, 1.0f), FVector(0.18f, 0.18f, 1.55f), FRotator(90.0f, 0.0f, 0.0f));
+	SpawnVisual(World, TEXT("Builder_Log_Pile_B"), FVector(-520.0f, -325.0f, 30.0f), EHSPrototypeVisualShape::Cylinder, FLinearColor(0.30f, 0.18f, 0.09f, 1.0f), FVector(0.18f, 0.18f, 1.55f), FRotator(90.0f, 0.0f, 0.0f));
+
+	SpawnFenceRun(World, TEXT("Settlement_Fence_North"), { FVector(-650.0f, -430.0f, 0.0f), FVector(-480.0f, -430.0f, 0.0f), FVector(-310.0f, -430.0f, 0.0f), FVector(-140.0f, -430.0f, 0.0f) }, true);
+	SpawnFenceRun(World, TEXT("Settlement_Fence_West"), { FVector(-650.0f, -430.0f, 0.0f), FVector(-650.0f, -250.0f, 0.0f), FVector(-650.0f, -70.0f, 0.0f) }, false);
+
 	AHSPlantActor* SpeedHerb = SpawnNamedActor<AHSPlantActor>(World, TEXT("Plant_SpeedHerb"), FVector(360.0f, 230.0f, 45.0f), FRotator::ZeroRotator);
 	SpeedHerb->SetPlantDefinition(GetOrCreateAsset<UHSPlantDefinition>(TEXT("/Game/Data/Plants/DA_Plant_SpeedHerb"), TEXT("DA_Plant_SpeedHerb")));
+	AHSPlantActor* ScentHerb = SpawnNamedActor<AHSPlantActor>(World, TEXT("Plant_ScentHerb"), FVector(430.0f, 315.0f, 45.0f), FRotator::ZeroRotator);
+	ScentHerb->SetPlantDefinition(GetOrCreateAsset<UHSPlantDefinition>(TEXT("/Game/Data/Plants/DA_Plant_ScentHerb"), TEXT("DA_Plant_ScentHerb")));
+	AHSPlantActor* SenseHerb = SpawnNamedActor<AHSPlantActor>(World, TEXT("Plant_SenseHerb"), FVector(300.0f, 340.0f, 45.0f), FRotator::ZeroRotator);
+	SenseHerb->SetPlantDefinition(GetOrCreateAsset<UHSPlantDefinition>(TEXT("/Game/Data/Plants/DA_Plant_SenseHerb"), TEXT("DA_Plant_SenseHerb")));
 
 	SpawnExplorationMarker(World, TEXT("Explore_Village_Core"), FVector(-640.0f, -230.0f, 100.0f), FText::FromString(TEXT("Village Core")), TEXT("Location.Village"));
 	SpawnExplorationMarker(World, TEXT("Explore_Forest_Edge"), FVector(900.0f, -360.0f, 100.0f), FText::FromString(TEXT("Forest Edge")), TEXT("Location.Forest"));
@@ -339,6 +455,23 @@ void CreateMap()
 	SpawnExplorationMarker(World, TEXT("Trail_Ridge_04"), FVector(780.0f, -520.0f, 95.0f), FText::FromString(TEXT("Ridge Return")), TEXT("Location.Trail"));
 	SpawnExplorationMarker(World, TEXT("Explore_Herb_Patch"), FVector(360.0f, 305.0f, 100.0f), FText::FromString(TEXT("Herb Patch")), TEXT("Location.Forest"));
 	SpawnExplorationMarker(World, TEXT("Explore_Builder_Yard"), FVector(-430.0f, -330.0f, 100.0f), FText::FromString(TEXT("Builder Yard")), TEXT("Location.Village"));
+
+	SpawnTreeCluster(World, TEXT("ForestEdge"), {
+		FVector(520.0f, -620.0f, 0.0f),
+		FVector(690.0f, -690.0f, 0.0f),
+		FVector(890.0f, -610.0f, 0.0f),
+		FVector(1040.0f, -470.0f, 0.0f),
+		FVector(1110.0f, -280.0f, 0.0f),
+		FVector(950.0f, -130.0f, 0.0f)
+	});
+	SpawnTreeCluster(World, TEXT("HerbGlade"), {
+		FVector(180.0f, 420.0f, 0.0f),
+		FVector(340.0f, 520.0f, 0.0f),
+		FVector(530.0f, 430.0f, 0.0f)
+	});
+	SpawnVisual(World, TEXT("Ridge_Rock_A"), FVector(650.0f, -500.0f, 35.0f), EHSPrototypeVisualShape::Sphere, FLinearColor(0.34f, 0.36f, 0.34f, 1.0f), FVector(1.0f, 0.65f, 0.45f));
+	SpawnVisual(World, TEXT("Ridge_Rock_B"), FVector(820.0f, -560.0f, 30.0f), EHSPrototypeVisualShape::Sphere, FLinearColor(0.28f, 0.30f, 0.29f, 1.0f), FVector(0.8f, 0.55f, 0.38f));
+	SpawnVisual(World, TEXT("Ridge_Outcrop"), FVector(910.0f, -420.0f, 45.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.30f, 0.31f, 0.29f, 1.0f), FVector(1.8f, 0.65f, 0.65f), FRotator(0.0f, -24.0f, 0.0f));
 
 	World->MarkPackageDirty();
 	SaveMapPackage(World);

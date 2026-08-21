@@ -144,6 +144,7 @@ bool FHSHunterNPCReportsDailyAnimalLeadTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Hunter prompt should offer animal signs."), Hunter->GetInteractionPrompt_Implementation(Player).ToString().Contains(TEXT("animal")));
 	Hunter->Interact_Implementation(Player);
 	TestTrue(TEXT("Hunter interaction should report active animal lead."), AnimalIntel->HasActiveLead());
+	TestTrue(TEXT("Active animal lead summary should mention the reported animal."), AnimalIntel->DescribeActiveLead().ToString().Contains(TEXT("Animal.Deer")));
 	TestFalse(TEXT("Hunter should not report twice in the same day."), AnimalIntel->CanRequestDailyAnimalLead());
 
 	World->DestroyWorld(false);

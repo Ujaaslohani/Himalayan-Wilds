@@ -72,6 +72,9 @@ public:
 	const FHSAnimalLead& GetActiveLead() const { return ActiveLead; }
 
 	UFUNCTION(BlueprintPure, Category = "Animal Intel")
+	FText DescribeActiveLead() const;
+
+	UFUNCTION(BlueprintPure, Category = "Animal Intel")
 	int32 GetLastReportDay() const { return LastReportDay; }
 
 	void RestoreAnimalIntelState(const FHSAnimalLead& NewActiveLead, int32 NewLastReportDay);

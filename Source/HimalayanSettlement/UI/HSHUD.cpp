@@ -18,6 +18,27 @@
 #include "World/HSGameState.h"
 #include "World/HSWorldTimeComponent.h"
 
+namespace
+{
+	FString ResolveInventoryCategory(FGameplayTag ItemTag)
+	{
+		const FString TagText = ItemTag.ToString();
+		if (TagText.StartsWith(TEXT("Item.Bow")) || TagText.StartsWith(TEXT("Item.Arrow")) || TagText.StartsWith(TEXT("Item.Spear")))
+		{
+			return TEXT("Weapons");
+		}
+		if (TagText.StartsWith(TEXT("Plant.")) || TagText.Contains(TEXT("Herb")))
+		{
+			return TEXT("Herbs");
+		}
+		if (TagText.StartsWith(TEXT("Quest.")) || TagText.Contains(TEXT("Knowledge")))
+		{
+			return TEXT("Quest Items");
+		}
+		return TEXT("Resources");
+	}
+}
+
 AHSHUD::AHSHUD()
 	: PromptVerticalOffset(120.0f)
 	, PromptScale(1.15f)
@@ -698,11 +719,19 @@ void AHSHUD::DrawInventoryMenu(const AHSPlayerCharacter* PlayerCharacter)
 	{
 		const int32 SelectedInventoryIndex = PlayerCharacter->GetSelectedInventoryIndex();
 		const TArray<FHSItemStack>& CarriedItems = ResourceCarryComponent->GetCarriedItems();
+		FString CurrentCategory;
 		for (int32 StackIndex = 0; StackIndex < CarriedItems.Num(); ++StackIndex)
 		{
 			const FHSItemStack& Stack = CarriedItems[StackIndex];
 			if (Stack.IsValidStack())
 			{
+				const FString StackCategory = ResolveInventoryCategory(Stack.ItemTag);
+				if (StackCategory != CurrentCategory)
+				{
+					CurrentCategory = StackCategory;
+					DrawText(CurrentCategory, FLinearColor(0.75f, 1.0f, 0.72f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.82f, false);
+					LineY += 20.0f;
+				}
 				const bool bSelected = StackIndex == SelectedInventoryIndex;
 				const FString SelectionMarker = bSelected ? TEXT(">") : TEXT(" ");
 				const FLinearColor StackColor = bSelected ? FLinearColor(0.75f, 1.0f, 0.72f, 1.0f) : FLinearColor::White;
@@ -724,8 +753,8 @@ void AHSHUD::DrawBuildMenu(const AHSPlayerCharacter* PlayerCharacter)
 		return;
 	}
 
-	const float PanelWidth = FMath::Min(520.0f, Canvas->ClipX - 48.0f);
-	const float PanelHeight = 320.0f;
+	const float PanelWidth = FMath::Min(620.0f, Canvas->ClipX - 48.0f);
+	const float PanelHeight = FMath::Min(500.0f, Canvas->ClipY - 48.0f);
 	const float PanelX = (Canvas->ClipX - PanelWidth) * 0.5f;
 	const float PanelY = (Canvas->ClipY - PanelHeight) * 0.5f;
 
@@ -735,36 +764,41 @@ void AHSHUD::DrawBuildMenu(const AHSPlayerCharacter* PlayerCharacter)
 	DrawCenteredTextLine(TEXT("Build"), LineY, 1.25f, FLinearColor(0.95f, 0.95f, 0.86f, 1.0f));
 	LineY += 50.0f;
 
-	const int32 SelectedBuildMenuIndex = PlayerCharacter->GetSelectedBuildMenuIndex();
-	FText HouseReason;
-	FText UpgradeReason;
-	FText CampsiteReason;
-	const bool bCanStartBasicHouse = PlayerCharacter->CanStartBasicHouseFromBuildMenu(&HouseReason);
-	const bool bCanStartMinorUpgrade = PlayerCharacter->CanStartBasicHouseMinorUpgradeFromBuildMenu(&UpgradeReason);
-	const bool bCanStartCampsite = PlayerCharacter->CanStartBasicCampsiteFromBuildMenu(&CampsiteReason);
-	const FLinearColor HouseBaseColor = bCanStartBasicHouse ? FLinearColor::White : FLinearColor(1.0f, 0.55f, 0.45f, 1.0f);
-	const FLinearColor UpgradeBaseColor = bCanStartMinorUpgrade ? FLinearColor::White : FLinearColor(1.0f, 0.55f, 0.45f, 1.0f);
-	const FLinearColor CampsiteBaseColor = bCanStartCampsite ? FLinearColor::White : FLinearColor(1.0f, 0.55f, 0.45f, 1.0f);
-	const FLinearColor HouseColor = SelectedBuildMenuIndex == 0 ? FLinearColor(0.75f, 1.0f, 0.72f, 1.0f) : HouseBaseColor;
-	const FLinearColor UpgradeColor = SelectedBuildMenuIndex == 1 ? FLinearColor(0.75f, 1.0f, 0.72f, 1.0f) : UpgradeBaseColor;
-	const FLinearColor CampsiteColor = SelectedBuildMenuIndex == 2 ? FLinearColor(0.75f, 1.0f, 0.72f, 1.0f) : CampsiteBaseColor;
+	const int32 EntryCount = PlayerCharacter->GetBuildMenuEntryCount();
+	const int32 SelectedBuildMenuIndex = FMath::Clamp(PlayerCharacter->GetSelectedBuildMenuIndex(), 0, FMath::Max(0, EntryCount - 1));
+	const int32 VisibleRows = FMath::Min(7, EntryCount);
+	const int32 FirstVisibleEntry = FMath::Clamp(SelectedBuildMenuIndex - 3, 0, FMath::Max(0, EntryCount - VisibleRows));
 
-	DrawText(SelectedBuildMenuIndex == 0 ? TEXT("> [1] Basic House") : TEXT("  [1] Basic House"), HouseColor, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.95f, false);
-	LineY += 32.0f;
-	DrawText(HouseReason.ToString(), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
-	LineY += 38.0f;
-
-	DrawText(SelectedBuildMenuIndex == 1 ? TEXT("> [2] Minor House Upgrade") : TEXT("  [2] Minor House Upgrade"), UpgradeColor, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.95f, false);
-	LineY += 32.0f;
-	DrawText(UpgradeReason.ToString(), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
-	LineY += 38.0f;
-
-	DrawText(SelectedBuildMenuIndex == 2 ? TEXT("> [3] Basic Campsite") : TEXT("  [3] Basic Campsite"), CampsiteColor, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.95f, false);
-	LineY += 32.0f;
-	DrawText(CampsiteReason.ToString(), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
+	for (int32 RowIndex = 0; RowIndex < VisibleRows; ++RowIndex)
+	{
+		const int32 EntryIndex = FirstVisibleEntry + RowIndex;
+		FText Reason;
+		const bool bCanStart = PlayerCharacter->CanStartBuildMenuEntry(EntryIndex, &Reason);
+		const bool bSelected = EntryIndex == SelectedBuildMenuIndex;
+		const FLinearColor EntryColor = bSelected ? FLinearColor(0.75f, 1.0f, 0.72f, 1.0f) : (bCanStart ? FLinearColor::White : FLinearColor(1.0f, 0.55f, 0.45f, 1.0f));
+		const FString SelectionMarker = bSelected ? TEXT(">") : TEXT(" ");
+		const FString NumberText = EntryIndex < 9 ? FString::Printf(TEXT("[%d]"), EntryIndex + 1) : TEXT("[E]");
+		const FString DaysText = PlayerCharacter->GetBuildMenuEntryRequiredDays(EntryIndex) > 0.0f
+			? FString::Printf(TEXT(" %.2f day"), PlayerCharacter->GetBuildMenuEntryRequiredDays(EntryIndex))
+			: TEXT(" instant");
+		DrawText(FString::Printf(TEXT("%s %s %s  %s"), *SelectionMarker, *NumberText, *PlayerCharacter->GetBuildMenuEntryLabel(EntryIndex).ToString(), *DaysText), EntryColor, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.88f, false);
+		DrawText(PlayerCharacter->GetBuildMenuEntryCategory(EntryIndex).ToString(), FLinearColor(0.70f, 0.78f, 0.76f, 1.0f), PanelX + PanelWidth - 160.0f, LineY + 2.0f, GEngine->GetSmallFont(), 0.78f, false);
+		LineY += 24.0f;
+		if (bSelected)
+		{
+			DrawText(Reason.ToString(), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 74.0f, LineY, GEngine->GetSmallFont(), 0.78f, false);
+			LineY += 22.0f;
+			DrawText(PlayerCharacter->GetBuildMenuEntryDescription(EntryIndex).ToString(), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 74.0f, LineY, GEngine->GetSmallFont(), 0.76f, false);
+			LineY += 28.0f;
+		}
+		else
+		{
+			LineY += 8.0f;
+		}
+	}
 
 	DrawPlayerMenuFeedback(PlayerCharacter, PanelY + PanelHeight - 60.0f);
-	DrawText(TEXT("[Q/R] Select   [1/E] Start selected   [B/Esc] Close"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, PanelY + PanelHeight - 42.0f, GEngine->GetSmallFont(), 0.85f, false);
+	DrawText(TEXT("[1-9] Start item   [E] Start selected   [Q/R] Select   [B/Esc] Close"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, PanelY + PanelHeight - 42.0f, GEngine->GetSmallFont(), 0.78f, false);
 }
 
 void AHSHUD::DrawPlayerMenuFeedback(const AHSPlayerCharacter* PlayerCharacter, float Y)

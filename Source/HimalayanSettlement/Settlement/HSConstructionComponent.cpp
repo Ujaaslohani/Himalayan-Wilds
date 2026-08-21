@@ -184,12 +184,17 @@ void UHSConstructionComponent::HandleTimeAdvanced(EHSTimePhase NewTimePhase, flo
 
 float UHSConstructionComponent::ResolveRequiredDays(FGameplayTag BuildingTag) const
 {
-	if (BuildingTag == TAG_HS_Building_BasicHouseMinorUpgrade)
+	if (BuildingTag == TAG_HS_Building_BasicHouseMinorUpgrade || BuildingTag == TAG_HS_Building_BasicDryingRack)
 	{
 		return 0.25f;
 	}
 
-	return BuildingTag == TAG_HS_Building_BasicHouse ? HouseConstructionDays : HouseConstructionDays;
+	if (BuildingTag == TAG_HS_Building_BasicHouseMidUpgrade || BuildingTag == TAG_HS_Building_StorageHut || BuildingTag == TAG_HS_Building_WatchPost || BuildingTag == TAG_HS_Building_HerbalHut)
+	{
+		return 0.5f;
+	}
+
+	return HouseConstructionDays;
 }
 
 void UHSConstructionComponent::SpawnCompletedBuildingVisual(const FHSConstructionJob& ConstructionJob)

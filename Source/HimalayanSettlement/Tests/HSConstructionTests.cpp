@@ -31,6 +31,14 @@ UHSBuildingDefinition* CreateConstructionTestMinorUpgradeDefinition()
 	return BuildingDefinition;
 }
 
+UHSBuildingDefinition* CreateConstructionTestDefinition(FGameplayTag BuildingTag, const TCHAR* DisplayName)
+{
+	UHSBuildingDefinition* BuildingDefinition = NewObject<UHSBuildingDefinition>();
+	BuildingDefinition->DisplayName = FText::FromString(DisplayName);
+	BuildingDefinition->BuildingTag = BuildingTag;
+	return BuildingDefinition;
+}
+
 bool PlacePendingHouseSchema(UHSSettlementPlanComponent& SettlementPlan)
 {
 	UHSBuildingDefinition* BuildingDefinition = CreateConstructionTestHouseDefinition();
@@ -132,6 +140,46 @@ bool FHSConstructionMinorUpgradeTakesQuarterDayTest::RunTest(const FString& Para
 	TestEqual(TEXT("Minor upgrade should require a quarter day."), Construction->GetConstructionJobs()[0].RequiredDays, 0.25f);
 	TestTrue(TEXT("Quarter-day progress should complete the minor upgrade."), Construction->AdvanceConstruction(0.25f));
 	TestTrue(TEXT("Minor upgrade should be marked complete."), Construction->HasCompletedBuilding(TAG_HS_Building_BasicHouseMinorUpgrade));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSConstructionCoreSchemaDurationsTest,
+	"HimalayanSettlement.Construction.CoreSchemaDurationsMatchBuilderRules",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSConstructionCoreSchemaDurationsTest::RunTest(const FString& Parameters)
+{
+	struct FDurationExpectation
+	{
+		FGameplayTag BuildingTag;
+		const TCHAR* DisplayName;
+		float ExpectedDays;
+	};
+
+	const FDurationExpectation Expectations[] = {
+		{ TAG_HS_Building_BasicHouseMidUpgrade, TEXT("Mid House Upgrade"), 0.5f },
+		{ TAG_HS_Building_BasicHouseMajorUpgrade, TEXT("Major House Upgrade"), 1.0f },
+		{ TAG_HS_Building_StorageHut, TEXT("Storage Hut"), 0.5f },
+		{ TAG_HS_Building_Workshop, TEXT("Workshop"), 1.0f },
+		{ TAG_HS_Building_WatchPost, TEXT("Watch Post"), 0.5f },
+		{ TAG_HS_Building_HerbalHut, TEXT("Herbal Hut"), 0.5f },
+		{ TAG_HS_Building_BasicDryingRack, TEXT("Drying Rack"), 0.25f }
+	};
+
+	for (const FDurationExpectation& Expectation : Expectations)
+	{
+		UHSSettlementPlanComponent* SettlementPlan = NewObject<UHSSettlementPlanComponent>();
+		UHSConstructionComponent* Construction = NewObject<UHSConstructionComponent>();
+		UHSBuildingDefinition* BuildingDefinition = CreateConstructionTestDefinition(Expectation.BuildingTag, Expectation.DisplayName);
+
+		FHSPendingBuildingSchema PendingSchema;
+		TestTrue(FString::Printf(TEXT("%s test settlement should be claimed."), Expectation.DisplayName), SettlementPlan->ClaimSettlement(FVector::ZeroVector));
+		TestTrue(FString::Printf(TEXT("%s schema should be placed."), Expectation.DisplayName), SettlementPlan->PlaceSchema(BuildingDefinition, FVector(300.0f, 0.0f, 0.0f), 0.0f, PendingSchema));
+		TestTrue(FString::Printf(TEXT("%s construction should start."), Expectation.DisplayName), Construction->StartNextPendingSchema(SettlementPlan));
+		TestEqual(FString::Printf(TEXT("%s duration should match builder rule."), Expectation.DisplayName), Construction->GetConstructionJobs()[0].RequiredDays, Expectation.ExpectedDays);
+	}
 
 	return true;
 }

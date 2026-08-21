@@ -56,6 +56,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "NPC Service")
 	int32 GetSelectedServiceIndex() const { return SelectedServiceIndex; }
 
+	UFUNCTION(BlueprintPure, Category = "NPC Service")
+	FText GetCurrentRoutineLabel() const;
+
 	bool GetBestServiceOption(const AActor* Interactor, FHSNPCServiceOption& OutServiceOption) const;
 	bool GetSelectedServiceOption(const AActor* Interactor, FHSNPCServiceOption& OutServiceOption) const;
 	bool GetServiceOption(FGameplayTag ServiceTag, const AActor* Interactor, FHSNPCServiceOption& OutServiceOption) const;
@@ -82,9 +85,12 @@ private:
 	bool ExecuteHunterService(AActor* Interactor) const;
 	bool ExecuteHunterRefreshLeadService(AActor* Interactor) const;
 	bool ExecuteHerbalistService(AActor* Interactor) const;
+	bool ExecuteHerbalistPlantService(AActor* Interactor, FGameplayTag PlantTag) const;
 	bool ExecuteHerbalistRestoreHealthService(AActor* Interactor) const;
 	bool ExecuteSoldierService(AActor* Interactor) const;
 	bool ExecuteSoldierArrowsService(AActor* Interactor) const;
+	bool ExecuteSoldierSpearService(AActor* Interactor) const;
+	bool ExecuteSoldierReinforcedBowService(AActor* Interactor) const;
 
 	class UHSWorldTimeComponent* ResolveWorldTime() const;
 

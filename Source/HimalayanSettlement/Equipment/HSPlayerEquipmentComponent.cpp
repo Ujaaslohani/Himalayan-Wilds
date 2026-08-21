@@ -13,7 +13,7 @@ UHSPlayerEquipmentComponent::UHSPlayerEquipmentComponent()
 bool UHSPlayerEquipmentComponent::HasBow() const
 {
 	const UHSResourceCarryComponent* ResourceCarry = ResolveResourceCarry();
-	return ResourceCarry && ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic) > 0;
+	return ResourceCarry && (ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic) > 0 || ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Reinforced) > 0);
 }
 
 int32 UHSPlayerEquipmentComponent::GetArrowCount() const

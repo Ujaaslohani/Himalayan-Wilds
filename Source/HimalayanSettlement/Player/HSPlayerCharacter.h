@@ -103,6 +103,24 @@ public:
 	int32 GetSelectedBuildMenuIndex() const { return SelectedBuildMenuIndex; }
 
 	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	int32 GetBuildMenuEntryCount() const;
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	FText GetBuildMenuEntryLabel(int32 EntryIndex) const;
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	FText GetBuildMenuEntryCategory(int32 EntryIndex) const;
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	FText GetBuildMenuEntryDescription(int32 EntryIndex) const;
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	float GetBuildMenuEntryRequiredDays(int32 EntryIndex) const;
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	FGameplayTag GetBuildMenuEntryTag(int32 EntryIndex) const;
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
 	int32 GetGraphicsQualityPreset() const { return GraphicsQualityPreset; }
 
 	UFUNCTION(BlueprintPure, Category = "Player|Menu")
@@ -175,7 +193,12 @@ public:
 	void StartSelectedBuildMenuEntry();
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	bool StartBuildMenuEntry(int32 EntryIndex);
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
 	void SelectBuildMenuDelta(int32 Delta);
+
+	bool CanStartBuildMenuEntry(int32 EntryIndex, FText* OutReason = nullptr) const;
 
 	bool CanStartBasicHouseFromBuildMenu(FText* OutReason = nullptr) const;
 
