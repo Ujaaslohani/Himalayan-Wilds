@@ -64,10 +64,11 @@ Epic's documentation describes Lumen as UE5's default dynamic global illuminatio
 ## Current Baseline Result
 
 - Date: 2026-08-21
-- Automation: 79 `HimalayanSettlement` tests passed.
+- Automation: 80 `HimalayanSettlement` tests passed.
 - Headless map launch: passes.
 - Hands-on low-end profile launch: confirmed working in the editor.
 - Hands-on owner report: FPS was around 19, then dropped to around 7 after playing for a while.
+- Hands-on owner retest after Emergency Low-End Mode: around 40 FPS and stable.
 - Low-end benchmark smoke launch: command path confirmed, but no reliable averaged FPS was emitted to the log.
 - Numeric Game/Draw/GPU readings: still need manual recording from the live `stat unit` overlay to identify whether the main bottleneck is CPU/game thread, render thread, or GPU.
 

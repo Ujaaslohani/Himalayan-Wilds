@@ -10,6 +10,14 @@
 class AHSBuildPlacementPreviewActor;
 class UHSBuildingDefinition;
 
+UENUM(BlueprintType)
+enum class EHSBuildPlacementMode : uint8
+{
+	None,
+	BuildingSchema,
+	TemporaryShelter
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FHSBuildPlacementMessageSignature, FText, Message);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FHSBuildPlacementSchemaSignature, const FHSPendingBuildingSchema&, PendingSchema);
 
@@ -37,8 +45,14 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Build Placement")
 	FHSBuildPlacementSchemaSignature OnBuildPlacementConfirmed;
 
+	UPROPERTY(BlueprintAssignable, Category = "Build Placement")
+	FHSBuildPlacementMessageSignature OnBuildPlacementActorConfirmed;
+
 	UFUNCTION(BlueprintCallable, Category = "Build Placement")
 	bool StartBasicHousePlacement();
+
+	UFUNCTION(BlueprintCallable, Category = "Build Placement")
+	bool StartBasicCampsitePlacement();
 
 	UFUNCTION(BlueprintCallable, Category = "Build Placement")
 	bool StartPlacement(UHSBuildingDefinition* BuildingDefinition);
@@ -59,6 +73,9 @@ public:
 	bool CanConfirmPlacement() const { return bCurrentPlacementValid; }
 
 	UFUNCTION(BlueprintPure, Category = "Build Placement")
+	EHSBuildPlacementMode GetPlacementMode() const { return PlacementMode; }
+
+	UFUNCTION(BlueprintPure, Category = "Build Placement")
 	FText GetPlacementStatusText() const { return PlacementStatusText; }
 
 	UFUNCTION(BlueprintPure, Category = "Build Placement")
@@ -68,6 +85,7 @@ public:
 	float GetPreviewYawDegrees() const { return PreviewYawDegrees; }
 
 private:
+	bool StartTemporaryShelterPlacement();
 	void UpdatePreview();
 	void DestroyPreview();
 	UHSBuildingDefinition* ResolveBasicHouseDefinition();
@@ -90,6 +108,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UHSBuildingDefinition> ActiveBuildingDefinition;
+
+	UPROPERTY(VisibleAnywhere, Category = "Build Placement")
+	EHSBuildPlacementMode PlacementMode;
 
 	UPROPERTY(Transient)
 	TObjectPtr<AHSBuildPlacementPreviewActor> PreviewActor;

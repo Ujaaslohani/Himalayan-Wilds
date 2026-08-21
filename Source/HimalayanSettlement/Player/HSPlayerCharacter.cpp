@@ -474,6 +474,12 @@ void AHSPlayerCharacter::HandlePauseMenuSave(const FInputActionValue& InputValue
 	if (bInventoryOpen)
 	{
 		DropInventoryStackQuantity(0, 1);
+		return;
+	}
+
+	if (bBuildMenuOpen)
+	{
+		StartBasicCampsiteFromBuildMenu();
 	}
 }
 
@@ -647,6 +653,28 @@ void AHSPlayerCharacter::StartBasicHouseFromBuildMenu()
 	}
 }
 
+void AHSPlayerCharacter::StartBasicCampsiteFromBuildMenu()
+{
+	if (!BuildPlacementComponent)
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "NoCampsitePlacementComponent", "Campsite placement is unavailable."));
+		return;
+	}
+
+	FText BlockReason;
+	if (!CanStartBasicCampsiteFromBuildMenu(&BlockReason))
+	{
+		SetMenuFeedback(BlockReason);
+		return;
+	}
+
+	SetBuildMenuOpen(false);
+	if (!BuildPlacementComponent->StartBasicCampsitePlacement())
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "CampsitePlacementStartFailed", "Could not start campsite placement."));
+	}
+}
+
 bool AHSPlayerCharacter::CanStartBasicHouseFromBuildMenu(FText* OutReason) const
 {
 	if (!SettlementPlanComponent || !SettlementPlanComponent->HasSettlementClaim())
@@ -688,6 +716,24 @@ bool AHSPlayerCharacter::CanStartBasicHouseFromBuildMenu(FText* OutReason) const
 	if (OutReason)
 	{
 		*OutReason = NSLOCTEXT("HSPlayerCharacter", "BuildMenuHouseReady", "Ready: place a Basic House schema for the Builder.");
+	}
+	return true;
+}
+
+bool AHSPlayerCharacter::CanStartBasicCampsiteFromBuildMenu(FText* OutReason) const
+{
+	if (BuildPlacementComponent && BuildPlacementComponent->IsPlacementActive())
+	{
+		if (OutReason)
+		{
+			*OutReason = NSLOCTEXT("HSPlayerCharacter", "BuildMenuPlacementAlreadyActive", "Finish or cancel the current placement first.");
+		}
+		return false;
+	}
+
+	if (OutReason)
+	{
+		*OutReason = NSLOCTEXT("HSPlayerCharacter", "BuildMenuCampsiteReady", "Ready: place a temporary campsite to sleep once.");
 	}
 	return true;
 }

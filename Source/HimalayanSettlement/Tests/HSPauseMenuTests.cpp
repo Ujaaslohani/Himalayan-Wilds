@@ -132,6 +132,8 @@ bool FHSBuildMenuAvailabilityFeedbackTest::RunTest(const FString& Parameters)
 
 	TestFalse(TEXT("Basic house should be blocked before claim."), Player->CanStartBasicHouseFromBuildMenu(&Reason));
 	TestTrue(TEXT("Blocked build reason should mention settlement claim."), Reason.ToString().Contains(TEXT("Claim")));
+	TestTrue(TEXT("Basic campsite should be available without a settlement claim."), Player->CanStartBasicCampsiteFromBuildMenu(&Reason));
+	TestTrue(TEXT("Campsite reason should mention temporary placement."), Reason.ToString().Contains(TEXT("temporary")));
 
 	Player->GetSettlementPlanComponent()->RestoreSettlementPlan(true, FVector::ZeroVector, {});
 	TestTrue(TEXT("Basic house should be available after claim."), Player->CanStartBasicHouseFromBuildMenu(&Reason));

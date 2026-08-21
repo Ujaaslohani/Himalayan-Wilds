@@ -217,7 +217,7 @@ Complete when:
 
 ## Milestone 11: Vertical Slice Closeout
 
-Status: Implementation started; basic native HUD status/objective overlay, sleep/time feedback, pause/save/autosave controls, first inventory actions, first build schema menu with availability feedback, first graphics option control, clearer prototype marker silhouettes, and completed-house visual feedback complete. Hands-on closeout, flow tuning, and numeric performance pass remain pending.
+Status: Implementation started; basic native HUD status/objective overlay, sleep/time feedback, pause/save/autosave controls, first inventory actions, first build schema/campsite menu with availability feedback, first graphics option control, clearer prototype marker silhouettes, and completed-house visual feedback complete. Hands-on closeout and flow tuning remain pending.
 
 Player experience: A new player can complete an early loop without developer instruction: wake, receive NPC intel, explore, hunt/gather, assign builder, sleep, and see the settlement progress.
 

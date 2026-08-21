@@ -80,6 +80,9 @@ public:
 	void HandleBuildPlacementConfirmed(const FHSPendingBuildingSchema& PendingSchema);
 
 	UFUNCTION()
+	void HandleBuildPlacementActorConfirmed(FText Message);
+
+	UFUNCTION()
 	void HandleTimeAdvanced(EHSTimePhase NewTimePhase, float ElapsedDays);
 
 private:

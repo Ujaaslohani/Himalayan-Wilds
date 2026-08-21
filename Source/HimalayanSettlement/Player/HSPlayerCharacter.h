@@ -127,7 +127,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
 	void StartBasicHouseFromBuildMenu();
 
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void StartBasicCampsiteFromBuildMenu();
+
 	bool CanStartBasicHouseFromBuildMenu(FText* OutReason = nullptr) const;
+
+	bool CanStartBasicCampsiteFromBuildMenu(FText* OutReason = nullptr) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
 	bool InspectInventoryStack(int32 StackIndex);

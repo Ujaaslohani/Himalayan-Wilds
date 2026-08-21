@@ -6,6 +6,7 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "Settlement/HSBuildPlacementPreviewActor.h"
+#include "Settlement/HSTemporaryShelterActor.h"
 
 #define LOCTEXT_NAMESPACE "HSBuildPlacementComponent"
 
@@ -15,6 +16,7 @@ UHSBuildPlacementComponent::UHSBuildPlacementComponent()
 	, PlacementTraceDistance(1800.0f)
 	, RotationStepDegrees(15.0f)
 	, PlacementHeightOffset(45.0f)
+	, PlacementMode(EHSBuildPlacementMode::None)
 	, bPlacementActive(false)
 	, bCurrentPlacementValid(false)
 	, PreviewLocation(FVector::ZeroVector)
@@ -51,6 +53,11 @@ bool UHSBuildPlacementComponent::StartBasicHousePlacement()
 	return StartPlacement(ResolveBasicHouseDefinition());
 }
 
+bool UHSBuildPlacementComponent::StartBasicCampsitePlacement()
+{
+	return StartTemporaryShelterPlacement();
+}
+
 bool UHSBuildPlacementComponent::StartPlacement(UHSBuildingDefinition* BuildingDefinition)
 {
 	if (!BuildingDefinition || !BuildingDefinition->IsDefinitionValid())
@@ -67,6 +74,7 @@ bool UHSBuildPlacementComponent::StartPlacement(UHSBuildingDefinition* BuildingD
 	}
 
 	ActiveBuildingDefinition = BuildingDefinition;
+	PlacementMode = EHSBuildPlacementMode::BuildingSchema;
 	bPlacementActive = true;
 	bCurrentPlacementValid = false;
 	PreviewYawDegrees = GetOwner() ? GetOwner()->GetActorRotation().Yaw : 0.0f;
@@ -86,9 +94,38 @@ bool UHSBuildPlacementComponent::StartPlacement(UHSBuildingDefinition* BuildingD
 	return true;
 }
 
+bool UHSBuildPlacementComponent::StartTemporaryShelterPlacement()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	ActiveBuildingDefinition = nullptr;
+	PlacementMode = EHSBuildPlacementMode::TemporaryShelter;
+	bPlacementActive = true;
+	bCurrentPlacementValid = false;
+	PreviewYawDegrees = GetOwner() ? GetOwner()->GetActorRotation().Yaw : 0.0f;
+
+	if (!PreviewActor)
+	{
+		FActorSpawnParameters SpawnParameters;
+		SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		PreviewActor = World->SpawnActor<AHSBuildPlacementPreviewActor>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+	}
+
+	SetComponentTickEnabled(true);
+	UpdatePreview();
+	PlacementStatusText = LOCTEXT("CampsitePlacementStarted", "Placing Basic Campsite");
+	OnBuildPlacementStarted.Broadcast(PlacementStatusText);
+	UE_LOG(LogHSSettlement, Log, TEXT("%s started free-build placement for a Basic Campsite."), *GetNameSafe(GetOwner()));
+	return true;
+}
+
 bool UHSBuildPlacementComponent::ConfirmPlacement()
 {
-	if (!bPlacementActive || !ActiveBuildingDefinition)
+	if (!bPlacementActive)
 	{
 		return false;
 	}
@@ -96,6 +133,39 @@ bool UHSBuildPlacementComponent::ConfirmPlacement()
 	UpdatePreview();
 	if (!bCurrentPlacementValid)
 	{
+		OnBuildPlacementBlocked.Broadcast(PlacementStatusText);
+		return false;
+	}
+
+	if (PlacementMode == EHSBuildPlacementMode::TemporaryShelter)
+	{
+		UWorld* World = GetWorld();
+		if (!World)
+		{
+			PlacementStatusText = LOCTEXT("CampsitePlacementFailed", "Could not place campsite");
+			OnBuildPlacementBlocked.Broadcast(PlacementStatusText);
+			return false;
+		}
+
+		FActorSpawnParameters SpawnParameters;
+		SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		World->SpawnActor<AHSTemporaryShelterActor>(PreviewLocation, FRotator(0.0f, PreviewYawDegrees, 0.0f), SpawnParameters);
+
+		const FText ConfirmedMessage = LOCTEXT("CampsitePlacementConfirmed", "Basic Campsite placed");
+		OnBuildPlacementActorConfirmed.Broadcast(ConfirmedMessage);
+		UE_LOG(LogHSSettlement, Log, TEXT("%s confirmed free-build Basic Campsite at %s."), *GetNameSafe(GetOwner()), *PreviewLocation.ToCompactString());
+		DestroyPreview();
+		bPlacementActive = false;
+		bCurrentPlacementValid = false;
+		ActiveBuildingDefinition = nullptr;
+		PlacementMode = EHSBuildPlacementMode::None;
+		SetComponentTickEnabled(false);
+		return true;
+	}
+
+	if (!ActiveBuildingDefinition)
+	{
+		PlacementStatusText = LOCTEXT("BuildPlacementMissingDefinition", "No building schema selected");
 		OnBuildPlacementBlocked.Broadcast(PlacementStatusText);
 		return false;
 	}
@@ -115,6 +185,7 @@ bool UHSBuildPlacementComponent::ConfirmPlacement()
 	bPlacementActive = false;
 	bCurrentPlacementValid = false;
 	ActiveBuildingDefinition = nullptr;
+	PlacementMode = EHSBuildPlacementMode::None;
 	SetComponentTickEnabled(false);
 	return true;
 }
@@ -131,6 +202,7 @@ void UHSBuildPlacementComponent::CancelPlacement()
 	bPlacementActive = false;
 	bCurrentPlacementValid = false;
 	ActiveBuildingDefinition = nullptr;
+	PlacementMode = EHSBuildPlacementMode::None;
 	SetComponentTickEnabled(false);
 	PlacementStatusText = CanceledMessage;
 	OnBuildPlacementCanceled.Broadcast(CanceledMessage);
@@ -149,7 +221,7 @@ void UHSBuildPlacementComponent::RotatePlacement(float Direction)
 
 void UHSBuildPlacementComponent::UpdatePreview()
 {
-	if (!bPlacementActive || !ActiveBuildingDefinition)
+	if (!bPlacementActive)
 	{
 		return;
 	}
@@ -180,12 +252,20 @@ void UHSBuildPlacementComponent::UpdatePreview()
 		PreviewLocation.Z = GetOwner() ? GetOwner()->GetActorLocation().Z + PlacementHeightOffset : PreviewLocation.Z;
 	}
 
-	FText FailureReason;
-	UHSSettlementPlanComponent* SettlementPlan = ResolveSettlementPlan();
-	bCurrentPlacementValid = SettlementPlan && SettlementPlan->CanPlaceSchema(ActiveBuildingDefinition, PreviewLocation, &FailureReason);
-	PlacementStatusText = bCurrentPlacementValid
-		? FText::Format(LOCTEXT("BuildPlacementValid", "{0} placement ready"), ActiveBuildingDefinition->DisplayName)
-		: FailureReason;
+	if (PlacementMode == EHSBuildPlacementMode::TemporaryShelter)
+	{
+		bCurrentPlacementValid = true;
+		PlacementStatusText = LOCTEXT("CampsitePlacementValid", "Basic Campsite placement ready");
+	}
+	else
+	{
+		FText FailureReason;
+		UHSSettlementPlanComponent* SettlementPlan = ResolveSettlementPlan();
+		bCurrentPlacementValid = ActiveBuildingDefinition && SettlementPlan && SettlementPlan->CanPlaceSchema(ActiveBuildingDefinition, PreviewLocation, &FailureReason);
+		PlacementStatusText = bCurrentPlacementValid
+			? FText::Format(LOCTEXT("BuildPlacementValid", "{0} placement ready"), ActiveBuildingDefinition->DisplayName)
+			: FailureReason;
+	}
 
 	if (PreviewActor)
 	{

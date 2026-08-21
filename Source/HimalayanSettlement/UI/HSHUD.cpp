@@ -82,7 +82,7 @@ void AHSHUD::DrawHUD()
 	const UHSBuildPlacementComponent* BuildPlacementComponent = Pawn ? Pawn->FindComponentByClass<UHSBuildPlacementComponent>() : nullptr;
 	if (BuildPlacementComponent && BuildPlacementComponent->IsPlacementActive())
 	{
-		const FString BuildText = FString::Printf(TEXT("[Left Mouse/E] Place house   [Q/R] Rotate   [Esc/B] Cancel   %s"), *BuildPlacementComponent->GetPlacementStatusText().ToString());
+		const FString BuildText = FString::Printf(TEXT("[Left Mouse/E] Place   [Q/R] Rotate   [Esc/B] Cancel   %s"), *BuildPlacementComponent->GetPlacementStatusText().ToString());
 		const float BuildY = FMath::Max(0.0f, Canvas->ClipY - PromptVerticalOffset);
 		DrawCenteredTextLine(BuildText, BuildY, 0.95f, BuildPlacementComponent->CanConfirmPlacement() ? FLinearColor(0.55f, 1.0f, 0.55f, 1.0f) : FLinearColor(1.0f, 0.55f, 0.45f, 1.0f));
 	}
@@ -322,6 +322,11 @@ void AHSHUD::HandleBuildPlacementConfirmed(const FHSPendingBuildingSchema& Pendi
 	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "BuildPlacementConfirmed", "Schema placed: {0}"), FText::FromString(PendingSchema.BuildingTag.ToString())));
 }
 
+void AHSHUD::HandleBuildPlacementActorConfirmed(FText Message)
+{
+	ShowCompletionMessage(Message);
+}
+
 void AHSHUD::HandleTimeAdvanced(EHSTimePhase NewTimePhase, float ElapsedDays)
 {
 	const FText PhaseText = NewTimePhase == EHSTimePhase::Day
@@ -447,6 +452,7 @@ void AHSHUD::BindBuildPlacementComponent()
 		PreviousBuildPlacementComponent->OnBuildPlacementCanceled.RemoveDynamic(this, &AHSHUD::HandleBuildPlacementCanceled);
 		PreviousBuildPlacementComponent->OnBuildPlacementBlocked.RemoveDynamic(this, &AHSHUD::HandleBuildPlacementBlocked);
 		PreviousBuildPlacementComponent->OnBuildPlacementConfirmed.RemoveDynamic(this, &AHSHUD::HandleBuildPlacementConfirmed);
+		PreviousBuildPlacementComponent->OnBuildPlacementActorConfirmed.RemoveDynamic(this, &AHSHUD::HandleBuildPlacementActorConfirmed);
 	}
 
 	BoundBuildPlacementComponent = BuildPlacementComponent;
@@ -454,6 +460,7 @@ void AHSHUD::BindBuildPlacementComponent()
 	BuildPlacementComponent->OnBuildPlacementCanceled.AddUniqueDynamic(this, &AHSHUD::HandleBuildPlacementCanceled);
 	BuildPlacementComponent->OnBuildPlacementBlocked.AddUniqueDynamic(this, &AHSHUD::HandleBuildPlacementBlocked);
 	BuildPlacementComponent->OnBuildPlacementConfirmed.AddUniqueDynamic(this, &AHSHUD::HandleBuildPlacementConfirmed);
+	BuildPlacementComponent->OnBuildPlacementActorConfirmed.AddUniqueDynamic(this, &AHSHUD::HandleBuildPlacementActorConfirmed);
 }
 
 void AHSHUD::BindSettlementPlanComponent()
@@ -625,7 +632,7 @@ void AHSHUD::DrawBuildMenu(const AHSPlayerCharacter* PlayerCharacter)
 	}
 
 	const float PanelWidth = FMath::Min(520.0f, Canvas->ClipX - 48.0f);
-	const float PanelHeight = 260.0f;
+	const float PanelHeight = 320.0f;
 	const float PanelX = (Canvas->ClipX - PanelWidth) * 0.5f;
 	const float PanelY = (Canvas->ClipY - PanelHeight) * 0.5f;
 
@@ -642,6 +649,11 @@ void AHSHUD::DrawBuildMenu(const AHSPlayerCharacter* PlayerCharacter)
 	DrawText(TEXT("[1] Basic House"), SchemaColor, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.95f, false);
 	LineY += 32.0f;
 	DrawText(BuildReason.ToString(), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
+	LineY += 38.0f;
+
+	DrawText(TEXT("[2] Basic Campsite"), FLinearColor::White, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.95f, false);
+	LineY += 32.0f;
+	DrawText(TEXT("Place a temporary one-use sleep point."), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
 
 	DrawPlayerMenuFeedback(PlayerCharacter, PanelY + PanelHeight - 60.0f);
 	DrawText(TEXT("[B/Esc] Close"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, PanelY + PanelHeight - 42.0f, GEngine->GetSmallFont(), 0.85f, false);

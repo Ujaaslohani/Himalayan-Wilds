@@ -4,6 +4,7 @@
 #include "Building/HSBuildingDefinition.h"
 #include "Core/HSGameplayTags.h"
 #include "Engine/Engine.h"
+#include "EngineUtils.h"
 #include "Engine/World.h"
 #include "Interaction/HSInteractable.h"
 #include "Player/HSPlayerCharacter.h"
@@ -11,6 +12,7 @@
 #include "Settlement/HSBuildingSchemaActor.h"
 #include "Settlement/HSSettlementClaimActor.h"
 #include "Settlement/HSSettlementPlanComponent.h"
+#include "Settlement/HSTemporaryShelterActor.h"
 
 namespace
 {
@@ -189,6 +191,59 @@ bool FHSFreeBuildPlacementBlocksBeforeSettlementClaimTest::RunTest(const FString
 	TestTrue(TEXT("Blocked placement should remain active for adjustment."), BuildPlacement->IsPlacementActive());
 	BuildPlacement->CancelPlacement();
 	TestFalse(TEXT("Cancel should stop blocked placement."), BuildPlacement->IsPlacementActive());
+
+	World->DestroyWorld(false);
+	GEngine->DestroyWorldContext(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSFreeBuildPlacementSpawnsBasicCampsiteTest,
+	"HimalayanSettlement.Settlement.FreeBuildPlacementSpawnsBasicCampsite",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSFreeBuildPlacementSpawnsBasicCampsiteTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Transient test world should be created."), World);
+	if (!World)
+	{
+		return false;
+	}
+	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+	WorldContext.SetCurrentWorld(World);
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	AHSPlayerCharacter* Player = World->SpawnActor<AHSPlayerCharacter>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+	UHSBuildPlacementComponent* BuildPlacement = Player ? Player->GetBuildPlacementComponent() : nullptr;
+
+	TestNotNull(TEXT("Player should spawn."), Player);
+	TestNotNull(TEXT("Player should own free-build placement component."), BuildPlacement);
+	if (!Player || !BuildPlacement)
+	{
+		World->DestroyWorld(false);
+		GEngine->DestroyWorldContext(World);
+		return false;
+	}
+
+	TestTrue(TEXT("Campsite placement should start without a settlement claim."), BuildPlacement->StartBasicCampsitePlacement());
+	TestTrue(TEXT("Campsite placement should become active."), BuildPlacement->IsPlacementActive());
+	TestEqual(TEXT("Campsite placement mode should be temporary shelter."), BuildPlacement->GetPlacementMode(), EHSBuildPlacementMode::TemporaryShelter);
+	TestTrue(TEXT("Campsite placement should be confirmable."), BuildPlacement->CanConfirmPlacement());
+	TestTrue(TEXT("Confirming campsite placement should spawn a shelter."), BuildPlacement->ConfirmPlacement());
+	TestFalse(TEXT("Campsite placement should deactivate after confirm."), BuildPlacement->IsPlacementActive());
+
+	int32 ShelterCount = 0;
+	for (TActorIterator<AHSTemporaryShelterActor> ShelterIt(World); ShelterIt; ++ShelterIt)
+	{
+		++ShelterCount;
+		TestFalse(TEXT("Spawned campsite should not be expired."), ShelterIt->IsExpired());
+		TestEqual(TEXT("Spawned campsite should have one sleep use."), ShelterIt->GetRemainingSleepUses(), 1);
+	}
+
+	TestEqual(TEXT("Exactly one temporary campsite should spawn."), ShelterCount, 1);
 
 	World->DestroyWorld(false);
 	GEngine->DestroyWorldContext(World);

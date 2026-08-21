@@ -71,7 +71,7 @@ The first quest handoff is intentionally small: `UHSQuestHandoffComponent` refer
 
 Pause menu presentation is currently native Canvas HUD. `Esc` cancels active build placement first; otherwise it pauses/unpauses the game and shows keyboard commands for Resume, Save, Load, Options, and Exit. This is the first functional menu layer and may later be replaced by richer UMG/Slate widgets without moving gameplay rules out of C++.
 
-Inventory and build menu presentation also live in the native Canvas HUD for now. `I`/`Tab` shows carried item stacks from `UHSResourceCarryComponent`; `[1]` inspects the first visible stack, `[2]` drops one item from it, and `[3]` drops that stack for prototype cleanup. `B` opens a schema menu and `[1]` starts the Basic House free-placement preview only when native settlement/construction state allows it. The pause options panel can cycle a simple graphics scalability preset. `F10` toggles the FPS/unit performance overlays for profiling, and `F8` toggles an emergency low-end mode for weak hardware testing. These are first-pass control surfaces, not final visual UI.
+Inventory and build menu presentation also live in the native Canvas HUD for now. `I`/`Tab` shows carried item stacks from `UHSResourceCarryComponent`; `[1]` inspects the first visible stack, `[2]` drops one item from it, and `[3]` drops that stack for prototype cleanup. `B` opens a schema menu where `[1]` starts the Basic House free-placement preview only when native settlement/construction state allows it, while `[2]` starts Basic Campsite placement for a temporary one-use sleep point. The pause options panel can cycle a simple graphics scalability preset. `F10` toggles the FPS/unit performance overlays for profiling, and `F8` toggles an emergency low-end mode for weak hardware testing. These are first-pass control surfaces, not final visual UI.
 
 ## Prototype Visual Markers
 
@@ -107,7 +107,7 @@ NPC services are coordinated by `UHSNPCServiceComponent`, a no-tick native compo
 
 ## Build Placement
 
-`UHSBuildPlacementComponent` owns the player-facing free-build schema placement flow. It starts disabled, ticks only while a placement preview is active, drives a lightweight no-tick preview actor, validates against `UHSSettlementPlanComponent`, and records a pending schema when confirmed. The first build menu selects Basic House before entering placement. Builder construction still consumes the pending schema and takes the configured time to complete it.
+`UHSBuildPlacementComponent` owns the player-facing free-build placement flow. It starts disabled, ticks only while a placement preview is active, and drives a lightweight no-tick preview actor. Basic House placement validates against `UHSSettlementPlanComponent` and records a pending schema when confirmed. Basic Campsite placement skips permanent schema state and spawns a one-use `AHSTemporaryShelterActor` so the player can sleep/advance time without turning camps into long-term settlement infrastructure. Builder construction still consumes only pending building schemas and takes the configured time to complete them.
 
 `AHSCompletedBuildingActor` is the first no-tick completed-building visual. `UHSConstructionComponent` spawns it when a construction job completes and rebuilds it from completed construction jobs during save restore. The prototype house uses basic wall, roof, door, and chimney meshes for readability, but it is not final house art or collision.
 
