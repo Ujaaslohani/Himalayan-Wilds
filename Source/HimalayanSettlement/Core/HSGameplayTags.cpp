@@ -20,6 +20,7 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Milestone_TemporaryShelter_Slept, "Milestone.Tempo
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_NPC_Profession_Hunter, "NPC.Profession.Hunter");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_NPC_Profession_Builder, "NPC.Profession.Builder");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_NPC_Profession_Herbalist, "NPC.Profession.Herbalist");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_NPC_Profession_Soldier, "NPC.Profession.Soldier");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Plant_SpeedHerb, "Plant.SpeedHerb");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Quest_OneMorningHunt, "Quest.OneMorningHunt");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Resource_Hide_Deer, "Resource.Hide.Deer");

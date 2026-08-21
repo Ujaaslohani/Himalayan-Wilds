@@ -8,6 +8,8 @@
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "NPC/HSNPCDefinition.h"
 #include "Quests/HSQuestHandoffComponent.h"
+#include "Resources/HSResourceCarryComponent.h"
+#include "Resources/HSItemStack.h"
 #include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
 #include "UObject/ConstructorHelpers.h"
@@ -29,6 +31,11 @@ bool IsHunterNPC(const AHSNPCActor& NPC)
 bool IsHerbalistNPC(const AHSNPCActor& NPC)
 {
 	return NPC.GetProfessionTag() == TAG_HS_NPC_Profession_Herbalist;
+}
+
+bool IsSoldierNPC(const AHSNPCActor& NPC)
+{
+	return NPC.GetProfessionTag() == TAG_HS_NPC_Profession_Soldier;
 }
 
 bool TryStartBuilderConstruction(const AHSNPCActor& Builder, AActor* Interactor)
@@ -63,6 +70,24 @@ bool TryTeachHerbalistPlantKnowledge(const AHSNPCActor& Herbalist, AActor* Inter
 
 	UHSPlantEffectComponent* PlantEffectComponent = Interactor->FindComponentByClass<UHSPlantEffectComponent>();
 	return PlantEffectComponent && PlantEffectComponent->LearnPlant(TAG_HS_Plant_SpeedHerb);
+}
+
+bool TryProvideSoldierWeaponSupplies(const AHSNPCActor& Soldier, AActor* Interactor)
+{
+	if (!IsSoldierNPC(Soldier) || !Interactor)
+	{
+		return false;
+	}
+
+	UHSResourceCarryComponent* ResourceCarry = Interactor->FindComponentByClass<UHSResourceCarryComponent>();
+	if (!ResourceCarry || ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic) > 0)
+	{
+		return false;
+	}
+
+	ResourceCarry->AddStack(FHSItemStack{ TAG_HS_Item_Bow_Basic, 1 });
+	ResourceCarry->AddStack(FHSItemStack{ TAG_HS_Item_Arrow_Basic, 12 });
+	return true;
 }
 }
 
@@ -156,6 +181,15 @@ FText AHSNPCActor::GetInteractionPrompt_Implementation(const AActor* Interactor)
 		}
 	}
 
+	if (IsSoldierNPC(*this))
+	{
+		const UHSResourceCarryComponent* ResourceCarry = Interactor ? Interactor->FindComponentByClass<UHSResourceCarryComponent>() : nullptr;
+		if (ResourceCarry && ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic) <= 0)
+		{
+			return LOCTEXT("RequestBasicWeaponsPrompt", "Request basic weapons");
+		}
+	}
+
 	FFormatNamedArguments Arguments;
 	Arguments.Add(TEXT("Name"), GetDisplayName());
 	return FText::Format(InteractionPromptFormat, Arguments);
@@ -173,16 +207,18 @@ void AHSNPCActor::Interact_Implementation(AActor* Interactor)
 	const bool bAdvancedQuest = !bStartedConstruction && QuestHandoffComponent && QuestHandoffComponent->TryAdvanceQuest(Interactor);
 	const bool bReportedAnimalLead = !bStartedConstruction && !bAdvancedQuest && TryReportHunterAnimalLead(*this, Interactor);
 	const bool bTaughtPlantKnowledge = !bStartedConstruction && !bAdvancedQuest && !bReportedAnimalLead && TryTeachHerbalistPlantKnowledge(*this, Interactor);
+	const bool bProvidedWeaponSupplies = !bStartedConstruction && !bAdvancedQuest && !bReportedAnimalLead && !bTaughtPlantKnowledge && TryProvideSoldierWeaponSupplies(*this, Interactor);
 	UE_LOG(
 		LogHSInteraction,
 		Log,
-		TEXT("%s started conversation with %s. Construction started: %s. Quest advanced: %s. Animal lead reported: %s. Plant knowledge taught: %s. Interaction count: %d."),
+		TEXT("%s started conversation with %s. Construction started: %s. Quest advanced: %s. Animal lead reported: %s. Plant knowledge taught: %s. Weapon supplies provided: %s. Interaction count: %d."),
 		*GetNameSafe(Interactor),
 		*GetNameSafe(this),
 		bStartedConstruction ? TEXT("true") : TEXT("false"),
 		bAdvancedQuest ? TEXT("true") : TEXT("false"),
 		bReportedAnimalLead ? TEXT("true") : TEXT("false"),
 		bTaughtPlantKnowledge ? TEXT("true") : TEXT("false"),
+		bProvidedWeaponSupplies ? TEXT("true") : TEXT("false"),
 		InteractionCount);
 }
 

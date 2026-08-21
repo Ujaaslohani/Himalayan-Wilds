@@ -48,6 +48,7 @@ bool FHSOneMorningHuntDefinitionsValidateTest::RunTest(const FString& Parameters
 	const UHSNPCDefinition* Hunter = LoadRequiredAsset<UHSNPCDefinition>(*this, TEXT("/Game/Data/NPCs/DA_NPC_Hunter.DA_NPC_Hunter"));
 	const UHSNPCDefinition* Builder = LoadRequiredAsset<UHSNPCDefinition>(*this, TEXT("/Game/Data/NPCs/DA_NPC_Builder.DA_NPC_Builder"));
 	const UHSNPCDefinition* Herbalist = LoadRequiredAsset<UHSNPCDefinition>(*this, TEXT("/Game/Data/NPCs/DA_NPC_Herbalist.DA_NPC_Herbalist"));
+	const UHSNPCDefinition* Soldier = LoadRequiredAsset<UHSNPCDefinition>(*this, TEXT("/Game/Data/NPCs/DA_NPC_Soldier.DA_NPC_Soldier"));
 	const UHSPlantDefinition* SpeedHerb = LoadRequiredAsset<UHSPlantDefinition>(*this, TEXT("/Game/Data/Plants/DA_Plant_SpeedHerb.DA_Plant_SpeedHerb"));
 	const UHSBuildingDefinition* DryingRack = LoadRequiredAsset<UHSBuildingDefinition>(*this, TEXT("/Game/Data/Buildings/DA_Building_BasicDryingRack.DA_Building_BasicDryingRack"));
 	const UHSBuildingDefinition* BasicHouse = LoadRequiredAsset<UHSBuildingDefinition>(*this, TEXT("/Game/Data/Buildings/DA_Building_BasicHouse.DA_Building_BasicHouse"));
@@ -61,6 +62,7 @@ bool FHSOneMorningHuntDefinitionsValidateTest::RunTest(const FString& Parameters
 	if (Hunter) { TestTrue(TEXT("Hunter definition should validate."), Hunter->IsDefinitionValid()); }
 	if (Builder) { TestTrue(TEXT("Builder definition should validate."), Builder->IsDefinitionValid()); }
 	if (Herbalist) { TestTrue(TEXT("Herbalist definition should validate."), Herbalist->IsDefinitionValid()); }
+	if (Soldier) { TestTrue(TEXT("Soldier definition should validate."), Soldier->IsDefinitionValid()); }
 	if (SpeedHerb) { TestTrue(TEXT("Speed herb definition should validate."), SpeedHerb->IsDefinitionValid()); }
 	if (DryingRack) { TestTrue(TEXT("Drying rack definition should validate."), DryingRack->IsDefinitionValid()); }
 	if (BasicHouse) { TestTrue(TEXT("Basic house definition should validate."), BasicHouse->IsDefinitionValid()); }
@@ -83,6 +85,7 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	bool bFoundHunterQuestHandoff = false;
 	bool bFoundBuilder = false;
 	bool bFoundHerbalist = false;
+	bool bFoundSoldier = false;
 	bool bFoundSpeedHerb = false;
 	bool bFoundConfiguredDeer = false;
 	bool bFoundInteractionTarget = false;
@@ -100,6 +103,7 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 				bFoundHunter |= Hunter->GetProfessionTag() == TAG_HS_NPC_Profession_Hunter;
 				bFoundBuilder |= Hunter->GetProfessionTag() == TAG_HS_NPC_Profession_Builder;
 				bFoundHerbalist |= Hunter->GetProfessionTag() == TAG_HS_NPC_Profession_Herbalist;
+				bFoundSoldier |= Hunter->GetProfessionTag() == TAG_HS_NPC_Profession_Soldier;
 				const UHSQuestHandoffComponent* Handoff = Hunter->GetQuestHandoffComponent();
 				bFoundHunterQuestHandoff |= Hunter->GetProfessionTag() == TAG_HS_NPC_Profession_Hunter
 					&& Handoff
@@ -143,6 +147,7 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("One Morning Hunt hunter should offer the first quest handoff."), bFoundHunterQuestHandoff);
 	TestTrue(TEXT("One Morning Hunt map should contain a native builder NPC actor."), bFoundBuilder);
 	TestTrue(TEXT("One Morning Hunt map should contain a native herbalist NPC actor."), bFoundHerbalist);
+	TestTrue(TEXT("One Morning Hunt map should contain a native soldier NPC actor."), bFoundSoldier);
 	TestTrue(TEXT("One Morning Hunt map should contain a configured native speed herb actor."), bFoundSpeedHerb);
 	TestTrue(TEXT("One Morning Hunt map should contain a configured native deer actor."), bFoundConfiguredDeer);
 	TestTrue(TEXT("One Morning Hunt map should contain a native interaction target."), bFoundInteractionTarget);

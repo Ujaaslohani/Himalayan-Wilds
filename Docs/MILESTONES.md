@@ -156,6 +156,8 @@ Complete when:
 
 ## Milestone 8: Soldier Role: Weapons And Safety
 
+Status: Implementation complete; hands-on closeout pending.
+
 Player experience: A soldier gives the settlement defensive and weapon value. The player can receive weapon access, training, or threat warnings.
 
 Scope:

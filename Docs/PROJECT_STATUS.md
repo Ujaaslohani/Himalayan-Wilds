@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 7: Herbalist Role: Plant Knowledge: implementation complete; hands-on closeout pending.
+Milestone 8: Soldier Role: Weapons And Safety: implementation complete; hands-on closeout pending.
 
 ## Engine Version
 
@@ -79,6 +79,9 @@ Unreal Engine 5.5.4.
 - Player movement now applies active plant speed multipliers across standing, crouch, and prone speeds.
 - Native HUD feedback added for plant knowledge learned, plant effect applied, and plant effect expired.
 - Milestone 7 herbalist plant knowledge foundation compiles.
+- Soldier profession tag, soldier data asset, and soldier NPC bootstrap path added.
+- Soldier NPC interaction now grants one basic bow and a basic arrow bundle if the player does not already have a bow.
+- Milestone 8 soldier weapon-supply foundation compiles.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
@@ -87,11 +90,11 @@ Unreal Engine 5.5.4.
 - Hands-on movement playtest passed for jump, crouch, and prone.
 - Milestone 3 settlement claim and house schema foundation compiles.
 - Content bootstrap succeeds with zero warnings and regenerates the basic house schema marker.
-- All 63 `HimalayanSettlement` automation tests pass.
+- All 64 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
-- Hands-on closeout for Milestone 6 hunter intel and Milestone 7 herbalist plant knowledge.
+- Hands-on closeout for Milestone 6 hunter intel, Milestone 7 herbalist plant knowledge, and Milestone 8 soldier weapon supplies.
 
 ## Known Blockers
 
@@ -113,6 +116,7 @@ Unreal Engine 5.5.4.
 
 1. Run hands-on hunter intel playtest: ask hunter for animal signs, confirm marker appears, sleep into next day, and confirm a fresh report is available.
 2. Run hands-on herbalist playtest: talk to Herbalist, use Speed Herb, confirm movement is faster, sleep/advance time, and confirm the effect expires.
-3. Run hands-on free-build playtest: claim settlement, press `B`, rotate with `Q/R`, place house with left mouse or `E`, ask Builder to start construction, then sleep until the 1-day build completes.
-4. Run hands-on closeout for Milestones 3-5 if not already confirmed in-editor.
-5. Record numeric FPS using the low-end profile task before forest density increases.
+3. Run hands-on soldier playtest: talk to Soldier, confirm bow and arrows are granted once, and confirm repeat interaction does not duplicate supplies.
+4. Run hands-on free-build playtest: claim settlement, press `B`, rotate with `Q/R`, place house with left mouse or `E`, ask Builder to start construction, then sleep until the 1-day build completes.
+5. Run hands-on closeout for Milestones 3-5 if not already confirmed in-editor.
+6. Record numeric FPS using the low-end profile task before forest density increases.

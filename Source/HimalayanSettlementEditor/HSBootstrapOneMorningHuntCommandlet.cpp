@@ -179,6 +179,13 @@ void CreateDefinitions()
 	Herbalist->UnlockTags.Reset();
 	SaveAssetPackage(Herbalist);
 
+	UHSNPCDefinition* Soldier = ConfigureAsset<UHSNPCDefinition>(TEXT("/Game/Data/NPCs/DA_NPC_Soldier"), TEXT("DA_NPC_Soldier"));
+	Soldier->DisplayName = FText::FromString(TEXT("Soldier"));
+	Soldier->ProfessionTag = Tag(TEXT("NPC.Profession.Soldier"));
+	Soldier->KnowledgeTags.Reset();
+	Soldier->UnlockTags.Reset();
+	SaveAssetPackage(Soldier);
+
 	UHSPlantDefinition* SpeedHerb = ConfigureAsset<UHSPlantDefinition>(TEXT("/Game/Data/Plants/DA_Plant_SpeedHerb"), TEXT("DA_Plant_SpeedHerb"));
 	SpeedHerb->DisplayName = FText::FromString(TEXT("Speed Herb"));
 	SpeedHerb->PlantTag = Tag(TEXT("Plant.SpeedHerb"));
@@ -297,6 +304,9 @@ void CreateMap()
 
 	AHSNPCActor* Herbalist = SpawnNamedActor<AHSNPCActor>(World, TEXT("NPC_Herbalist"), FVector(-460.0f, 120.0f, 90.0f), FRotator(0.0f, 65.0f, 0.0f));
 	Herbalist->SetNPCDefinition(GetOrCreateAsset<UHSNPCDefinition>(TEXT("/Game/Data/NPCs/DA_NPC_Herbalist"), TEXT("DA_NPC_Herbalist")));
+
+	AHSNPCActor* Soldier = SpawnNamedActor<AHSNPCActor>(World, TEXT("NPC_Soldier"), FVector(-520.0f, -80.0f, 90.0f), FRotator(0.0f, 45.0f, 0.0f));
+	Soldier->SetNPCDefinition(GetOrCreateAsset<UHSNPCDefinition>(TEXT("/Game/Data/NPCs/DA_NPC_Soldier"), TEXT("DA_NPC_Soldier")));
 
 	AHSAnimalActor* Deer = SpawnNamedActor<AHSAnimalActor>(World, TEXT("Animal_Deer_Prototype"), FVector(650.0f, -180.0f, 70.0f), FRotator(0.0f, -35.0f, 0.0f));
 	if (UHSAnimalDefinition* DeerDefinition = LoadObject<UHSAnimalDefinition>(nullptr, TEXT("/Game/Data/Animals/DA_Animal_Deer.DA_Animal_Deer")))
