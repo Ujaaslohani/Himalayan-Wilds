@@ -585,7 +585,7 @@ void AHSHUD::DrawPauseMenu(const AHSPlayerCharacter* PlayerCharacter)
 	}
 
 	const float PanelWidth = FMath::Min(420.0f, Canvas->ClipX - 48.0f);
-	const float PanelHeight = PlayerCharacter->IsPauseOptionsOpen() ? 310.0f : 240.0f;
+	const float PanelHeight = PlayerCharacter->IsPauseOptionsOpen() ? 350.0f : 240.0f;
 	const float PanelX = (Canvas->ClipX - PanelWidth) * 0.5f;
 	const float PanelY = (Canvas->ClipY - PanelHeight) * 0.5f;
 
@@ -606,6 +606,8 @@ void AHSHUD::DrawPauseMenu(const AHSPlayerCharacter* PlayerCharacter)
 	if (PlayerCharacter->IsPauseOptionsOpen())
 	{
 		MenuLines.Add(FString::Printf(TEXT("[6] Graphics: %s"), *PlayerCharacter->GetGraphicsQualityPresetName()));
+		MenuLines.Add(FString::Printf(TEXT("[7] Mouse: %s"), *PlayerCharacter->GetMouseSensitivityPresetName()));
+		MenuLines.Add(FString::Printf(TEXT("[8] Volume: %s"), *PlayerCharacter->GetMasterVolumePresetName()));
 	}
 
 	for (const FString& MenuLine : MenuLines)
@@ -619,9 +621,7 @@ void AHSHUD::DrawPauseMenu(const AHSPlayerCharacter* PlayerCharacter)
 		LineY += 12.0f;
 		DrawText(TEXT("Options"), FLinearColor(0.75f, 1.0f, 0.72f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.9f, false);
 		LineY += 28.0f;
-		DrawText(TEXT("Press 6 to cycle graphics preset."), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
-		LineY += 22.0f;
-		DrawText(TEXT("Audio and mouse sensitivity controls come later."), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
+		DrawText(TEXT("Press 6/7/8 to cycle option presets."), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
 	}
 
 	DrawPlayerMenuFeedback(PlayerCharacter, PanelY + PanelHeight - 22.0f);

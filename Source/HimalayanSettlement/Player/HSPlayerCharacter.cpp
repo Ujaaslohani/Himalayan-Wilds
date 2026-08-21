@@ -21,6 +21,7 @@
 #include "Interaction/HSInteractionSensorComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Misc/App.h"
 #include "Persistence/HSSettlementPersistenceComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
@@ -50,6 +51,8 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	, bBuildMenuOpen(false)
 	, SelectedInventoryIndex(0)
 	, GraphicsQualityPreset(0)
+	, MouseSensitivityPreset(1)
+	, MasterVolumePreset(2)
 	, bPerformanceOverlayEnabled(false)
 	, bEmergencyLowEndModeEnabled(false)
 	, MenuFeedbackDuration(4.0f)
@@ -233,6 +236,16 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	MenuUtilityAction->bTriggerWhenPaused = true;
 	PlayerMappingContext->MapKey(MenuUtilityAction, EKeys::Six);
 
+	MenuSensitivityAction = CreateDefaultSubobject<UInputAction>(TEXT("MenuSensitivityAction"));
+	MenuSensitivityAction->ValueType = EInputActionValueType::Boolean;
+	MenuSensitivityAction->bTriggerWhenPaused = true;
+	PlayerMappingContext->MapKey(MenuSensitivityAction, EKeys::Seven);
+
+	MenuVolumeAction = CreateDefaultSubobject<UInputAction>(TEXT("MenuVolumeAction"));
+	MenuVolumeAction->ValueType = EInputActionValueType::Boolean;
+	MenuVolumeAction->bTriggerWhenPaused = true;
+	PlayerMappingContext->MapKey(MenuVolumeAction, EKeys::Eight);
+
 	PerformanceOverlayAction = CreateDefaultSubobject<UInputAction>(TEXT("PerformanceOverlayAction"));
 	PerformanceOverlayAction->ValueType = EInputActionValueType::Boolean;
 	PerformanceOverlayAction->bTriggerWhenPaused = true;
@@ -305,6 +318,8 @@ void AHSPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	EnhancedInputComponent->BindAction(PauseMenuOptionsAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandlePauseMenuOptions);
 	EnhancedInputComponent->BindAction(PauseMenuExitAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandlePauseMenuExit);
 	EnhancedInputComponent->BindAction(MenuUtilityAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleMenuUtilityAction);
+	EnhancedInputComponent->BindAction(MenuSensitivityAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleMenuSensitivityAction);
+	EnhancedInputComponent->BindAction(MenuVolumeAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleMenuVolumeAction);
 	EnhancedInputComponent->BindAction(PerformanceOverlayAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandlePerformanceOverlayAction);
 	EnhancedInputComponent->BindAction(EmergencyLowEndModeAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleEmergencyLowEndModeAction);
 	EnhancedInputComponent->BindAction(EquipmentAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleEquipmentAction);
@@ -339,7 +354,7 @@ void AHSPlayerCharacter::Look(const FInputActionValue& InputValue)
 		return;
 	}
 
-	const FVector2D LookInput = InputValue.Get<FVector2D>();
+	const FVector2D LookInput = InputValue.Get<FVector2D>() * GetMouseSensitivityScale();
 	AddControllerYawInput(LookInput.X);
 	AddControllerPitchInput(LookInput.Y);
 }
@@ -593,6 +608,22 @@ void AHSPlayerCharacter::HandleMenuUtilityAction(const FInputActionValue& InputV
 	}
 }
 
+void AHSPlayerCharacter::HandleMenuSensitivityAction(const FInputActionValue& InputValue)
+{
+	if (bPauseMenuOpen && bPauseOptionsOpen)
+	{
+		CycleMouseSensitivityPreset();
+	}
+}
+
+void AHSPlayerCharacter::HandleMenuVolumeAction(const FInputActionValue& InputValue)
+{
+	if (bPauseMenuOpen && bPauseOptionsOpen)
+	{
+		CycleMasterVolumePreset();
+	}
+}
+
 void AHSPlayerCharacter::HandlePerformanceOverlayAction(const FInputActionValue& InputValue)
 {
 	TogglePerformanceOverlay();
@@ -714,6 +745,36 @@ bool AHSPlayerCharacter::HasActiveMenuFeedback() const
 FString AHSPlayerCharacter::GetGraphicsQualityPresetName() const
 {
 	switch (GraphicsQualityPreset)
+	{
+	case 0:
+		return TEXT("Low");
+	case 1:
+		return TEXT("Medium");
+	case 2:
+		return TEXT("High");
+	default:
+		return TEXT("Custom");
+	}
+}
+
+FString AHSPlayerCharacter::GetMouseSensitivityPresetName() const
+{
+	switch (MouseSensitivityPreset)
+	{
+	case 0:
+		return TEXT("Low");
+	case 1:
+		return TEXT("Medium");
+	case 2:
+		return TEXT("High");
+	default:
+		return TEXT("Custom");
+	}
+}
+
+FString AHSPlayerCharacter::GetMasterVolumePresetName() const
+{
+	switch (MasterVolumePreset)
 	{
 	case 0:
 		return TEXT("Low");
@@ -931,6 +992,23 @@ void AHSPlayerCharacter::CycleGraphicsQualityPreset()
 		FText::FromString(GetGraphicsQualityPresetName())));
 }
 
+void AHSPlayerCharacter::CycleMouseSensitivityPreset()
+{
+	MouseSensitivityPreset = (MouseSensitivityPreset + 1) % 3;
+	SetMenuFeedback(FText::Format(
+		NSLOCTEXT("HSPlayerCharacter", "MouseSensitivityChanged", "Mouse sensitivity: {0}."),
+		FText::FromString(GetMouseSensitivityPresetName())));
+}
+
+void AHSPlayerCharacter::CycleMasterVolumePreset()
+{
+	MasterVolumePreset = (MasterVolumePreset + 1) % 3;
+	ApplyMasterVolumePreset();
+	SetMenuFeedback(FText::Format(
+		NSLOCTEXT("HSPlayerCharacter", "MasterVolumeChanged", "Master volume: {0}."),
+		FText::FromString(GetMasterVolumePresetName())));
+}
+
 void AHSPlayerCharacter::TogglePerformanceOverlay()
 {
 	bPerformanceOverlayEnabled = !bPerformanceOverlayEnabled;
@@ -1047,6 +1125,41 @@ void AHSPlayerCharacter::HandlePlantEffectMovementChanged(const FHSPlantEffectSt
 void AHSPlayerCharacter::HandleBowEquippedChanged(bool bBowEquipped)
 {
 	RefreshBowVisuals();
+}
+
+float AHSPlayerCharacter::GetMouseSensitivityScale() const
+{
+	switch (MouseSensitivityPreset)
+	{
+	case 0:
+		return 0.65f;
+	case 1:
+		return 1.0f;
+	case 2:
+		return 1.35f;
+	default:
+		return 1.0f;
+	}
+}
+
+float AHSPlayerCharacter::GetMasterVolumeScale() const
+{
+	switch (MasterVolumePreset)
+	{
+	case 0:
+		return 0.45f;
+	case 1:
+		return 0.75f;
+	case 2:
+		return 1.0f;
+	default:
+		return 1.0f;
+	}
+}
+
+void AHSPlayerCharacter::ApplyMasterVolumePreset()
+{
+	FApp::SetVolumeMultiplier(GetMasterVolumeScale());
 }
 
 void AHSPlayerCharacter::RefreshBowVisuals()

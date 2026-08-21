@@ -72,7 +72,7 @@ The first quest handoff is intentionally small: `UHSQuestHandoffComponent` refer
 
 Pause menu presentation is currently native Canvas HUD. `Esc` cancels active build placement first; otherwise it pauses/unpauses the game and shows keyboard commands for Resume, Save, Load, Options, and Exit. This is the first functional menu layer and may later be replaced by richer UMG/Slate widgets without moving gameplay rules out of C++.
 
-Inventory and build menu presentation also live in the native Canvas HUD for now. `I`/`Tab` shows carried item stacks from `UHSResourceCarryComponent`; `Q`/`R` moves a highlighted selected stack, `[1]` inspects it, `[2]` drops one item from it, and `[3]` drops that stack for prototype cleanup. `B` opens a schema menu where `[1]` starts the Basic House free-placement preview only when native settlement/construction state allows it, while `[2]` starts Basic Campsite placement for a temporary one-use sleep point. The pause options panel can cycle a simple graphics scalability preset. `F10` toggles the FPS/unit performance overlays for profiling, and `F8` toggles an emergency low-end mode for weak hardware testing. These are first-pass control surfaces, not final visual UI.
+Inventory and build menu presentation also live in the native Canvas HUD for now. `I`/`Tab` shows carried item stacks from `UHSResourceCarryComponent`; `Q`/`R` moves a highlighted selected stack, `[1]` inspects it, `[2]` drops one item from it, and `[3]` drops that stack for prototype cleanup. `B` opens a schema menu where `[1]` starts the Basic House free-placement preview only when native settlement/construction state allows it, while `[2]` starts Basic Campsite placement for a temporary one-use sleep point. The pause options panel can cycle graphics, mouse sensitivity, and master-volume presets, and persistence stores those prototype option values alongside gameplay state. `F10` toggles the FPS/unit performance overlays for profiling, and `F8` toggles an emergency low-end mode for weak hardware testing. These are first-pass control surfaces, not final visual UI.
 
 ## Prototype Visual Markers
 
@@ -124,7 +124,7 @@ NPC services are coordinated by `UHSNPCServiceComponent`, a no-tick native compo
 
 ## Persistence
 
-`UHSSettlementSaveGame` is versioned and stores time, milestones, carried resources, bow equip state, emergency low-end mode state, settlement unlocks, schema state, construction jobs, hunter intel, and herbalist plant state. `UHSSettlementPersistenceComponent` snapshots and restores from native components and rejects unsupported save versions. Manual pause-menu saves use the default slot, while event-driven autosaves use a separate autosave slot so deliberate saves are not overwritten by sleep, milestone, or construction events.
+`UHSSettlementSaveGame` is versioned and stores time, milestones, carried resources, bow equip state, prototype option presets, emergency low-end mode state, settlement unlocks, schema state, construction jobs, hunter intel, and herbalist plant state. `UHSSettlementPersistenceComponent` snapshots and restores from native components and rejects unsupported save versions. Manual pause-menu saves use the default slot, while event-driven autosaves use a separate autosave slot so deliberate saves are not overwritten by sleep, milestone, or construction events.
 
 ## Performance Rules
 

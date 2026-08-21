@@ -114,6 +114,7 @@ Unreal Engine 5.5.4.
 - Build menu now explains blocked Basic House placement states such as missing settlement claim, pending schema, active construction, or completed house.
 - Build menu now includes `[2] Basic Campsite`, which enters free placement and spawns a one-use temporary shelter for sleep/time skipping.
 - Pause options can cycle a simple graphics scalability preset with `[6]`.
+- Pause options can cycle mouse sensitivity with `[7]` and master volume with `[8]`; these settings are stored in settlement saves.
 - Native `F10` shortcut toggles the FPS and unit performance overlays for live profiling.
 - Native `F8` shortcut toggles Emergency Low-End Mode for weak hardware testing.
 - Default low-end settings were tightened after hands-on FPS dropped from about 19 to about 7 during play.

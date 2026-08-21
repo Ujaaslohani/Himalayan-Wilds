@@ -101,6 +101,12 @@ public:
 	int32 GetGraphicsQualityPreset() const { return GraphicsQualityPreset; }
 
 	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	int32 GetMouseSensitivityPreset() const { return MouseSensitivityPreset; }
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	int32 GetMasterVolumePreset() const { return MasterVolumePreset; }
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
 	bool IsPerformanceOverlayEnabled() const { return bPerformanceOverlayEnabled; }
 
 	UFUNCTION(BlueprintPure, Category = "Player|Menu")
@@ -108,6 +114,12 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Player|Menu")
 	FString GetGraphicsQualityPresetName() const;
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	FString GetMouseSensitivityPresetName() const;
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	FString GetMasterVolumePresetName() const;
 
 	UFUNCTION(BlueprintPure, Category = "Player|Menu")
 	const FText& GetLastMenuFeedback() const { return LastMenuFeedback; }
@@ -165,6 +177,12 @@ public:
 	void CycleGraphicsQualityPreset();
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void CycleMouseSensitivityPreset();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void CycleMasterVolumePreset();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
 	void TogglePerformanceOverlay();
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
@@ -196,6 +214,8 @@ private:
 	void HandlePauseMenuOptions(const FInputActionValue& InputValue);
 	void HandlePauseMenuExit(const FInputActionValue& InputValue);
 	void HandleMenuUtilityAction(const FInputActionValue& InputValue);
+	void HandleMenuSensitivityAction(const FInputActionValue& InputValue);
+	void HandleMenuVolumeAction(const FInputActionValue& InputValue);
 	void HandlePerformanceOverlayAction(const FInputActionValue& InputValue);
 	void HandleEmergencyLowEndModeAction(const FInputActionValue& InputValue);
 	void HandleEquipmentAction(const FInputActionValue& InputValue);
@@ -212,6 +232,9 @@ private:
 	void SetMenuFeedback(FText Feedback);
 	void RefreshBowVisuals();
 	bool SpawnDroppedInventoryStack(const FHSItemStack& DroppedStack);
+	float GetMouseSensitivityScale() const;
+	float GetMasterVolumeScale() const;
+	void ApplyMasterVolumePreset();
 	void ClampSelectedInventoryIndex();
 
 	UFUNCTION()
@@ -341,6 +364,12 @@ private:
 	TObjectPtr<UInputAction> MenuUtilityAction;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> MenuSensitivityAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> MenuVolumeAction;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> PerformanceOverlayAction;
 
 	UPROPERTY(Transient)
@@ -402,6 +431,12 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
 	int32 GraphicsQualityPreset;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
+	int32 MouseSensitivityPreset;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
+	int32 MasterVolumePreset;
 
 	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
 	bool bPerformanceOverlayEnabled;

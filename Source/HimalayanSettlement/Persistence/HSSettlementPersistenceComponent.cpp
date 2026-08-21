@@ -63,6 +63,8 @@ bool UHSSettlementPersistenceComponent::CaptureToSaveGame(UHSSettlementSaveGame*
 	if (const AHSPlayerCharacter* PlayerCharacter = Cast<AHSPlayerCharacter>(Owner))
 	{
 		SaveGame->bEmergencyLowEndModeEnabled = PlayerCharacter->IsEmergencyLowEndModeEnabled();
+		SaveGame->MouseSensitivityPreset = PlayerCharacter->GetMouseSensitivityPreset();
+		SaveGame->MasterVolumePreset = PlayerCharacter->GetMasterVolumePreset();
 	}
 
 	if (const UHSSettlementUnlockComponent* Unlocks = Owner->FindComponentByClass<UHSSettlementUnlockComponent>())
@@ -130,6 +132,14 @@ bool UHSSettlementPersistenceComponent::RestoreFromSaveGame(const UHSSettlementS
 	if (AHSPlayerCharacter* PlayerCharacter = Cast<AHSPlayerCharacter>(Owner))
 	{
 		PlayerCharacter->SetEmergencyLowEndModeEnabled(SaveGame->bEmergencyLowEndModeEnabled);
+		while (PlayerCharacter->GetMouseSensitivityPreset() != FMath::Clamp(SaveGame->MouseSensitivityPreset, 0, 2))
+		{
+			PlayerCharacter->CycleMouseSensitivityPreset();
+		}
+		while (PlayerCharacter->GetMasterVolumePreset() != FMath::Clamp(SaveGame->MasterVolumePreset, 0, 2))
+		{
+			PlayerCharacter->CycleMasterVolumePreset();
+		}
 	}
 
 	if (UHSSettlementUnlockComponent* Unlocks = Owner->FindComponentByClass<UHSSettlementUnlockComponent>())

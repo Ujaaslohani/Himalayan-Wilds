@@ -17,7 +17,7 @@ class HIMALAYANSETTLEMENT_API UHSSettlementSaveGame : public USaveGame
 	GENERATED_BODY()
 
 public:
-	static constexpr int32 CurrentSaveVersion = 4;
+	static constexpr int32 CurrentSaveVersion = 5;
 
 	UHSSettlementSaveGame();
 
@@ -41,6 +41,12 @@ public:
 
 	UPROPERTY(VisibleAnywhere, Category = "Save|Options")
 	bool bEmergencyLowEndModeEnabled;
+
+	UPROPERTY(VisibleAnywhere, Category = "Save|Options")
+	int32 MouseSensitivityPreset;
+
+	UPROPERTY(VisibleAnywhere, Category = "Save|Options")
+	int32 MasterVolumePreset;
 
 	UPROPERTY(VisibleAnywhere, Category = "Save|Settlement")
 	FGameplayTagContainer GrantedUnlocks;

@@ -72,6 +72,8 @@ bool SeedPersistentSettlementState(AHSPlayerCharacter& Player, UHSWorldTimeCompo
 	Carry->AddStack(FHSItemStack{ TAG_HS_Item_Arrow_Basic, 6 });
 	Equipment->SetBowEquipped(true);
 	Player.SetEmergencyLowEndModeEnabled(true);
+	Player.CycleMouseSensitivityPreset();
+	Player.CycleMasterVolumePreset();
 	Unlocks->GrantUnlock(TAG_HS_Building_BasicHouse);
 	AnimalIntel->RequestDailyAnimalLead();
 	PlantEffect->LearnPlant(TAG_HS_Plant_SpeedHerb);
@@ -97,6 +99,8 @@ bool FHSSaveGameDefaultsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Default save should start with zero elapsed half-days."), SaveGame->ElapsedHalfDays, 0);
 	TestFalse(TEXT("Default save should not equip a bow."), SaveGame->bBowEquipped);
 	TestFalse(TEXT("Default save should not enable emergency low-end mode."), SaveGame->bEmergencyLowEndModeEnabled);
+	TestEqual(TEXT("Default save should use medium mouse sensitivity."), SaveGame->MouseSensitivityPreset, 1);
+	TestEqual(TEXT("Default save should use high master volume."), SaveGame->MasterVolumePreset, 2);
 
 	return true;
 }
@@ -156,6 +160,8 @@ bool FHSPersistenceSnapshotRestoresSettlementStateTest::RunTest(const FString& P
 	TestEqual(TEXT("Snapshot should store carried item stacks."), Snapshot->CarriedItems.Num(), 3);
 	TestTrue(TEXT("Snapshot should store bow equipped state."), Snapshot->bBowEquipped);
 	TestTrue(TEXT("Snapshot should store emergency low-end mode state."), Snapshot->bEmergencyLowEndModeEnabled);
+	TestEqual(TEXT("Snapshot should store mouse sensitivity preset."), Snapshot->MouseSensitivityPreset, SourcePlayer->GetMouseSensitivityPreset());
+	TestEqual(TEXT("Snapshot should store master volume preset."), Snapshot->MasterVolumePreset, SourcePlayer->GetMasterVolumePreset());
 	TestTrue(TEXT("Snapshot should store active animal lead."), Snapshot->ActiveAnimalLead.IsValid());
 	TestTrue(TEXT("Snapshot should store known speed herb."), Snapshot->KnownPlants.HasTagExact(TAG_HS_Plant_SpeedHerb));
 	TestTrue(TEXT("Snapshot should store active plant effect."), Snapshot->ActivePlantEffect.IsValid());
@@ -180,6 +186,8 @@ bool FHSPersistenceSnapshotRestoresSettlementStateTest::RunTest(const FString& P
 	TestEqual(TEXT("Restored carry should keep arrow quantity."), RestoredCarry ? RestoredCarry->GetQuantityForTag(TAG_HS_Item_Arrow_Basic) : 0, 6);
 	TestTrue(TEXT("Restored equipment should keep bow equipped."), RestoredEquipment && RestoredEquipment->IsBowEquipped());
 	TestTrue(TEXT("Restored player should keep emergency low-end mode."), RestoredPlayer->IsEmergencyLowEndModeEnabled());
+	TestEqual(TEXT("Restored player should keep mouse sensitivity preset."), RestoredPlayer->GetMouseSensitivityPreset(), SourcePlayer->GetMouseSensitivityPreset());
+	TestEqual(TEXT("Restored player should keep master volume preset."), RestoredPlayer->GetMasterVolumePreset(), SourcePlayer->GetMasterVolumePreset());
 	TestTrue(TEXT("Restored unlocks should keep house unlock."), RestoredUnlocks && RestoredUnlocks->HasUnlock(TAG_HS_Building_BasicHouse));
 	TestTrue(TEXT("Restored animal intel should keep active deer lead."), RestoredAnimalIntel && RestoredAnimalIntel->HasActiveLead() && RestoredAnimalIntel->GetActiveLead().AnimalTag == TAG_HS_Animal_Deer);
 	TestTrue(TEXT("Restored plant knowledge should keep speed herb."), RestoredPlantEffect && RestoredPlantEffect->HasPlantKnowledge(TAG_HS_Plant_SpeedHerb));

@@ -60,6 +60,20 @@ bool FHSPauseMenuStateTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Cycling graphics should produce visible menu feedback."), Player->HasActiveMenuFeedback());
 	TestTrue(TEXT("Graphics feedback should name the preset."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Graphics preset")));
 
+	const int32 InitialSensitivityPreset = Player->GetMouseSensitivityPreset();
+	const FString InitialSensitivityName = Player->GetMouseSensitivityPresetName();
+	Player->CycleMouseSensitivityPreset();
+	TestNotEqual(TEXT("Cycling mouse sensitivity should change preset index."), Player->GetMouseSensitivityPreset(), InitialSensitivityPreset);
+	TestNotEqual(TEXT("Cycling mouse sensitivity should change preset label."), Player->GetMouseSensitivityPresetName(), InitialSensitivityName);
+	TestTrue(TEXT("Mouse sensitivity feedback should name the setting."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Mouse sensitivity")));
+
+	const int32 InitialVolumePreset = Player->GetMasterVolumePreset();
+	const FString InitialVolumeName = Player->GetMasterVolumePresetName();
+	Player->CycleMasterVolumePreset();
+	TestNotEqual(TEXT("Cycling master volume should change preset index."), Player->GetMasterVolumePreset(), InitialVolumePreset);
+	TestNotEqual(TEXT("Cycling master volume should change preset label."), Player->GetMasterVolumePresetName(), InitialVolumeName);
+	TestTrue(TEXT("Master volume feedback should name the setting."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Master volume")));
+
 	TestFalse(TEXT("Performance overlay should start disabled."), Player->IsPerformanceOverlayEnabled());
 	Player->TogglePerformanceOverlay();
 	TestTrue(TEXT("Performance overlay should toggle on."), Player->IsPerformanceOverlayEnabled());
