@@ -30,6 +30,7 @@ Source/HimalayanSettlement/
   AI/
   Hunting/
   Herbalism/
+  Exploration/
   NPC/
   Settlement/
   Building/
@@ -70,6 +71,10 @@ The first quest handoff is intentionally small: `UHSQuestHandoffComponent` refer
 ## Prototype Visual Markers
 
 Native placeholder actors own simple non-colliding static mesh components using engine basic shapes. These markers make the current test map readable while real art, animation, and Blueprint visual setup remain out of scope for this milestone slice.
+
+## Exploration Markers
+
+`AHSExplorationMarkerActor` is a no-tick native landmark marker used for the first village/forest readability pass. Markers are gameplay-tagged as village, forest, trail, or animal area so tests and later navigation/HUD systems can query them without depending on actor labels.
 
 ## Animal Runtime
 

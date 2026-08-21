@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 9: NPC Role Framework: implementation complete; hands-on closeout pending.
+Milestone 10: Forest And Village Exploration Slice: implementation foundation complete; hands-on and performance closeout pending.
 
 ## Engine Version
 
@@ -86,6 +86,9 @@ Unreal Engine 5.5.4.
 - Builder, hunter, herbalist, and soldier services now expose consistent service tags and options.
 - NPC actors now delegate role-service prompts and interactions to the shared service component while preserving quest handoff priority rules.
 - Milestone 9 NPC role framework foundation compiles.
+- Native exploration marker actor added for cheap no-tick village, forest, trail, and animal-area landmarks.
+- One Morning Hunt map now has a readable village-to-forest route with trail markers, a forest edge marker, an animal ridge marker, and a village core marker.
+- Milestone 10 exploration foundation compiles.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
@@ -94,11 +97,11 @@ Unreal Engine 5.5.4.
 - Hands-on movement playtest passed for jump, crouch, and prone.
 - Milestone 3 settlement claim and house schema foundation compiles.
 - Content bootstrap succeeds with zero warnings and regenerates the basic house schema marker.
-- All 69 `HimalayanSettlement` automation tests pass.
+- All 70 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
-- Hands-on closeout for Milestone 6 hunter intel, Milestone 7 herbalist plant knowledge, Milestone 8 soldier weapon supplies, and Milestone 9 NPC service framework.
+- Hands-on closeout for Milestone 6 hunter intel, Milestone 7 herbalist plant knowledge, Milestone 8 soldier weapon supplies, Milestone 9 NPC service framework, and Milestone 10 exploration readability/performance.
 
 ## Known Blockers
 
@@ -123,5 +126,6 @@ Unreal Engine 5.5.4.
 3. Run hands-on soldier playtest: talk to Soldier, confirm bow and arrows are granted once, and confirm repeat interaction does not duplicate supplies.
 4. Run hands-on free-build playtest: claim settlement, press `B`, rotate with `Q/R`, place house with left mouse or `E`, ask Builder to start construction, then sleep until the 1-day build completes.
 5. Run hands-on service-framework sanity pass: confirm Builder/Hunter/Herbalist/Soldier prompts still appear only when their service is available.
-6. Run hands-on closeout for Milestones 3-5 if not already confirmed in-editor.
-7. Record numeric FPS using the low-end profile task before forest density increases.
+6. Run hands-on exploration pass: walk settlement to village core, follow trail markers to forest edge, find animal ridge, and confirm the route is readable without explanation.
+7. Run hands-on closeout for Milestones 3-5 if not already confirmed in-editor.
+8. Record numeric FPS using the low-end profile task before forest density increases.

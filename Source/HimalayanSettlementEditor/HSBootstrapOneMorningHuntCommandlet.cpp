@@ -13,6 +13,7 @@
 #include "Engine/SkyLight.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "Exploration/HSExplorationMarkerActor.h"
 #include "Factories/WorldFactory.h"
 #include "GameFramework/PlayerStart.h"
 #include "GameplayTagsManager.h"
@@ -244,6 +245,13 @@ T* SpawnNamedActor(UWorld* World, const TCHAR* Name, const FVector& Location, co
 	return Actor;
 }
 
+AHSExplorationMarkerActor* SpawnExplorationMarker(UWorld* World, const TCHAR* Name, const FVector& Location, const FText& DisplayName, const TCHAR* MarkerTag)
+{
+	AHSExplorationMarkerActor* Marker = SpawnNamedActor<AHSExplorationMarkerActor>(World, Name, Location);
+	Marker->ConfigureMarker(DisplayName, Tag(MarkerTag));
+	return Marker;
+}
+
 UWorld* CreateOrLoadMap()
 {
 	if (UWorld* ExistingWorld = LoadObject<UWorld>(nullptr, TEXT("/Game/Maps/L_OneMorningHunt.L_OneMorningHunt")))
@@ -321,6 +329,13 @@ void CreateMap()
 
 	AHSPlantActor* SpeedHerb = SpawnNamedActor<AHSPlantActor>(World, TEXT("Plant_SpeedHerb"), FVector(360.0f, 230.0f, 45.0f), FRotator::ZeroRotator);
 	SpeedHerb->SetPlantDefinition(GetOrCreateAsset<UHSPlantDefinition>(TEXT("/Game/Data/Plants/DA_Plant_SpeedHerb"), TEXT("DA_Plant_SpeedHerb")));
+
+	SpawnExplorationMarker(World, TEXT("Explore_Village_Core"), FVector(-640.0f, -230.0f, 100.0f), FText::FromString(TEXT("Village Core")), TEXT("Location.Village"));
+	SpawnExplorationMarker(World, TEXT("Explore_Forest_Edge"), FVector(900.0f, -360.0f, 100.0f), FText::FromString(TEXT("Forest Edge")), TEXT("Location.Forest"));
+	SpawnExplorationMarker(World, TEXT("Explore_Animal_Ridge"), FVector(720.0f, -420.0f, 100.0f), FText::FromString(TEXT("Animal Ridge")), TEXT("Location.AnimalArea"));
+	SpawnExplorationMarker(World, TEXT("Trail_Settlement_01"), FVector(-260.0f, -245.0f, 95.0f), FText::FromString(TEXT("Village Trail")), TEXT("Location.Trail"));
+	SpawnExplorationMarker(World, TEXT("Trail_Forest_02"), FVector(180.0f, -300.0f, 95.0f), FText::FromString(TEXT("Forest Trail")), TEXT("Location.Trail"));
+	SpawnExplorationMarker(World, TEXT("Trail_Forest_03"), FVector(560.0f, -340.0f, 95.0f), FText::FromString(TEXT("Ridge Trail")), TEXT("Location.Trail"));
 
 	World->MarkPackageDirty();
 	SaveMapPackage(World);

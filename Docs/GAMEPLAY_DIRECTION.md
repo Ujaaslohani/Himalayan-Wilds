@@ -58,6 +58,7 @@ Current implementation boundary:
 - The first herbalist slice teaches one speed herb, applies a temporary movement multiplier, expires through world time, and persists known plants/effects; it does not run a broad plant ecology simulation.
 - The first soldier slice grants one basic bow and one basic arrow bundle if the player does not already have a bow; it does not add a full equipment, training, or faction-threat system yet.
 - Role services now have a shared native query/execution path so Builder, Hunter, Herbalist, and Soldier can be checked consistently by service tag and refreshed by time changes.
+- The first exploration slice uses lightweight native markers for village core, forest edge, animal ridge, and trail readability; it does not add dense foliage or a large world yet.
 
 ## NPC Role Use Cases
 

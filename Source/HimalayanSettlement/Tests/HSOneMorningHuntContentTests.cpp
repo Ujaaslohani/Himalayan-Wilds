@@ -10,6 +10,7 @@
 #include "Engine/DirectionalLight.h"
 #include "Engine/SkyLight.h"
 #include "Engine/World.h"
+#include "Exploration/HSExplorationMarkerActor.h"
 #include "Herbalism/HSPlantActor.h"
 #include "Herbalism/HSPlantDefinition.h"
 #include "Interaction/HSInteractionTarget.h"
@@ -92,6 +93,10 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	bool bFoundRestPoint = false;
 	bool bFoundTemporaryShelter = false;
 	bool bFoundSettlementClaim = false;
+	bool bFoundVillageMarker = false;
+	bool bFoundForestMarker = false;
+	bool bFoundAnimalAreaMarker = false;
+	int32 TrailMarkerCount = 0;
 	bool bFoundCheapPrototypeSun = false;
 	bool bFoundCheapPrototypeSkyLight = false;
 	if (World && World->PersistentLevel)
@@ -121,6 +126,13 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 				bFoundSpeedHerb |= Plant->GetPlantDefinition()
 					&& Plant->GetPlantDefinition()->PlantTag == TAG_HS_Plant_SpeedHerb
 					&& !Plant->IsConsumed();
+			}
+			if (const AHSExplorationMarkerActor* ExplorationMarker = Cast<AHSExplorationMarkerActor>(Actor))
+			{
+				bFoundVillageMarker |= ExplorationMarker->GetMarkerTag() == TAG_HS_Location_Village && !ExplorationMarker->PrimaryActorTick.bCanEverTick;
+				bFoundForestMarker |= ExplorationMarker->GetMarkerTag() == TAG_HS_Location_Forest && !ExplorationMarker->PrimaryActorTick.bCanEverTick;
+				bFoundAnimalAreaMarker |= ExplorationMarker->GetMarkerTag() == TAG_HS_Location_AnimalArea && !ExplorationMarker->PrimaryActorTick.bCanEverTick;
+				TrailMarkerCount += ExplorationMarker->GetMarkerTag() == TAG_HS_Location_Trail && !ExplorationMarker->PrimaryActorTick.bCanEverTick ? 1 : 0;
 			}
 			bFoundInteractionTarget |= Actor && Actor->IsA<AHSInteractionTarget>();
 			bFoundRestPoint |= Actor && Actor->IsA<AHSRestPointActor>();
@@ -154,6 +166,10 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("One Morning Hunt map should contain a native end-of-day rest point."), bFoundRestPoint);
 	TestTrue(TEXT("One Morning Hunt map should contain a native temporary shelter marker."), bFoundTemporaryShelter);
 	TestTrue(TEXT("One Morning Hunt map should contain a native settlement claim marker."), bFoundSettlementClaim);
+	TestTrue(TEXT("One Morning Hunt map should contain a village exploration marker."), bFoundVillageMarker);
+	TestTrue(TEXT("One Morning Hunt map should contain a forest exploration marker."), bFoundForestMarker);
+	TestTrue(TEXT("One Morning Hunt map should contain an animal-area exploration marker."), bFoundAnimalAreaMarker);
+	TestTrue(TEXT("One Morning Hunt map should contain a readable trail route."), TrailMarkerCount >= 3);
 	TestTrue(TEXT("One Morning Hunt prototype sun should use the cheap no-shadow baseline."), bFoundCheapPrototypeSun);
 	TestTrue(TEXT("One Morning Hunt prototype skylight should use the cheap no-shadow baseline."), bFoundCheapPrototypeSkyLight);
 

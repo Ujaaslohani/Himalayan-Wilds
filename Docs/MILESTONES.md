@@ -196,6 +196,8 @@ Complete when:
 
 ## Milestone 10: Forest And Village Exploration Slice
 
+Status: Implementation foundation complete; hands-on and performance closeout pending.
+
 Player experience: The game begins to feel closer to a grounded forest/village exploration game: readable forest paths, settlement areas, animal signs, NPC services, and reasons to travel.
 
 Scope:
