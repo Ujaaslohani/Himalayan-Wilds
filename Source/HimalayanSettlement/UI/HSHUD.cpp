@@ -2,6 +2,7 @@
 
 #include "Engine/Canvas.h"
 #include "GameFramework/PlayerController.h"
+#include "Hunting/HSAnimalIntelComponent.h"
 #include "Interaction/HSInteractionSensorComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
 #include "Settlement/HSConstructionComponent.h"
@@ -27,6 +28,7 @@ void AHSHUD::DrawHUD()
 	}
 
 	BindProgressComponent();
+	BindAnimalIntelComponent();
 	BindSettlementPlanComponent();
 	BindConstructionComponent();
 
@@ -94,6 +96,16 @@ void AHSHUD::HandleConstructionJobCompleted(const FHSConstructionJob& Constructi
 	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "ConstructionComplete", "Construction complete: {Building}"), FText::FromString(ConstructionJob.BuildingTag.ToString())));
 }
 
+void AHSHUD::HandleAnimalLeadReported(const FHSAnimalLead& AnimalLead)
+{
+	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "AnimalLeadReported", "Animal spotted: {Animal}"), FText::FromString(AnimalLead.AnimalTag.ToString())));
+}
+
+void AHSHUD::HandleAnimalLeadExpired(const FHSAnimalLead& AnimalLead)
+{
+	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "AnimalLeadExpired", "Animal lead expired: {Animal}"), FText::FromString(AnimalLead.AnimalTag.ToString())));
+}
+
 void AHSHUD::BindProgressComponent()
 {
 	if (!PlayerOwner)
@@ -115,6 +127,31 @@ void AHSHUD::BindProgressComponent()
 
 	BoundProgressComponent = ProgressComponent;
 	ProgressComponent->OnMilestoneCompleted.AddUniqueDynamic(this, &AHSHUD::HandleMilestoneCompleted);
+}
+
+void AHSHUD::BindAnimalIntelComponent()
+{
+	if (!PlayerOwner)
+	{
+		return;
+	}
+
+	APawn* Pawn = PlayerOwner->GetPawn();
+	UHSAnimalIntelComponent* AnimalIntelComponent = Pawn ? Pawn->FindComponentByClass<UHSAnimalIntelComponent>() : nullptr;
+	if (!AnimalIntelComponent || BoundAnimalIntelComponent.Get() == AnimalIntelComponent)
+	{
+		return;
+	}
+
+	if (UHSAnimalIntelComponent* PreviousAnimalIntelComponent = BoundAnimalIntelComponent.Get())
+	{
+		PreviousAnimalIntelComponent->OnAnimalLeadReported.RemoveDynamic(this, &AHSHUD::HandleAnimalLeadReported);
+		PreviousAnimalIntelComponent->OnAnimalLeadExpired.RemoveDynamic(this, &AHSHUD::HandleAnimalLeadExpired);
+	}
+
+	BoundAnimalIntelComponent = AnimalIntelComponent;
+	AnimalIntelComponent->OnAnimalLeadReported.AddUniqueDynamic(this, &AHSHUD::HandleAnimalLeadReported);
+	AnimalIntelComponent->OnAnimalLeadExpired.AddUniqueDynamic(this, &AHSHUD::HandleAnimalLeadExpired);
 }
 
 void AHSHUD::BindSettlementPlanComponent()

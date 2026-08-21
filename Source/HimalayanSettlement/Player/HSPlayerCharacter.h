@@ -5,6 +5,7 @@
 #include "HSPlayerCharacter.generated.h"
 
 class UCameraComponent;
+class UHSAnimalIntelComponent;
 class UHSHuntingComponent;
 class UHSConstructionComponent;
 class UHSInteractionSensorComponent;
@@ -38,6 +39,7 @@ public:
 
 	UCameraComponent* GetFirstPersonCamera() const { return FirstPersonCamera; }
 	UHSInteractionSensorComponent* GetInteractionSensor() const { return InteractionSensor; }
+	UHSAnimalIntelComponent* GetAnimalIntelComponent() const { return AnimalIntelComponent; }
 	UHSHuntingComponent* GetHuntingComponent() const { return HuntingComponent; }
 	UHSConstructionComponent* GetConstructionComponent() const { return ConstructionComponent; }
 	UHSSettlementPersistenceComponent* GetSettlementPersistenceComponent() const { return SettlementPersistenceComponent; }
@@ -83,6 +85,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSInteractionSensorComponent> InteractionSensor;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player")
+	TObjectPtr<UHSAnimalIntelComponent> AnimalIntelComponent;
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSHuntingComponent> HuntingComponent;

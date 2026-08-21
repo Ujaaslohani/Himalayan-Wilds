@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/SaveGame.h"
 #include "GameplayTagContainer.h"
+#include "Hunting/HSAnimalIntelComponent.h"
 #include "Resources/HSItemStack.h"
 #include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
@@ -15,7 +16,7 @@ class HIMALAYANSETTLEMENT_API UHSSettlementSaveGame : public USaveGame
 	GENERATED_BODY()
 
 public:
-	static constexpr int32 CurrentSaveVersion = 1;
+	static constexpr int32 CurrentSaveVersion = 2;
 
 	UHSSettlementSaveGame();
 
@@ -54,6 +55,12 @@ public:
 
 	UPROPERTY(VisibleAnywhere, Category = "Save|NPC")
 	FGameplayTagContainer RecruitedNPCProfessionTags;
+
+	UPROPERTY(VisibleAnywhere, Category = "Save|Hunter")
+	FHSAnimalLead ActiveAnimalLead;
+
+	UPROPERTY(VisibleAnywhere, Category = "Save|Hunter")
+	int32 LastAnimalLeadReportDay;
 
 	bool IsSupportedVersion() const;
 };

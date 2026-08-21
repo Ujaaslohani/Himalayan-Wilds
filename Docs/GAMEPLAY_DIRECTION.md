@@ -54,6 +54,7 @@ Current implementation boundary:
 - Construction duration, builder assignment, and completion are intentionally reserved for the builder milestone.
 - The first builder slice starts with one builder, one active job, and a `1.0` day basic house duration.
 - The first persistence slice stores time, progress, carried resources, unlocks, settlement claim, pending schemas, construction jobs, and completed buildings through a versioned native SaveGame.
+- The first hunter intel slice gives one event-driven deer lead per in-game day and spawns a lightweight temporary marker; it does not run a broad ecology simulation.
 
 ## NPC Role Use Cases
 

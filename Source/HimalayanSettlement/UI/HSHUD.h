@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/HUD.h"
 #include "GameplayTagContainer.h"
+#include "Hunting/HSAnimalIntelComponent.h"
 #include "HSHUD.generated.h"
 
 struct FHSPendingBuildingSchema;
@@ -45,8 +46,15 @@ public:
 	UFUNCTION()
 	void HandleConstructionJobCompleted(const FHSConstructionJob& ConstructionJob);
 
+	UFUNCTION()
+	void HandleAnimalLeadReported(const FHSAnimalLead& AnimalLead);
+
+	UFUNCTION()
+	void HandleAnimalLeadExpired(const FHSAnimalLead& AnimalLead);
+
 private:
 	void BindProgressComponent();
+	void BindAnimalIntelComponent();
 	void BindSettlementPlanComponent();
 	void BindConstructionComponent();
 	void ShowCompletionMessage(FText Message);
@@ -63,6 +71,9 @@ private:
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<class UHSPlayerProgressComponent> BoundProgressComponent;
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<class UHSAnimalIntelComponent> BoundAnimalIntelComponent;
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<class UHSSettlementPlanComponent> BoundSettlementPlanComponent;

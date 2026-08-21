@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 5: Persistent Settlement State: in progress.
+Milestone 6: Hunter Role: Daily Animal Intel: in progress.
 
 ## Engine Version
 
@@ -65,6 +65,11 @@ Unreal Engine 5.5.4.
 - Native versioned settlement SaveGame added for time, milestones, resources, unlocks, settlement claim, pending schemas, construction jobs, completed buildings, and future NPC profession tags.
 - Native settlement persistence component added with snapshot restore plus manual F5 save / F9 load bindings.
 - Milestone 5 persistence foundation compiles.
+- Native hunter animal intel component added for one daily deer lead, lead expiry on day change, and persistence restore.
+- Native animal lead marker actor added as a lightweight temporary world marker.
+- Hunter NPC interaction now reports daily animal signs after quest handoff priority.
+- Native HUD feedback added for animal lead reported/expired.
+- Milestone 6 hunter daily animal intel foundation compiles.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
@@ -73,11 +78,11 @@ Unreal Engine 5.5.4.
 - Hands-on movement playtest passed for jump, crouch, and prone.
 - Milestone 3 settlement claim and house schema foundation compiles.
 - Content bootstrap succeeds with zero warnings and regenerates the basic house schema marker.
-- All 53 `HimalayanSettlement` automation tests pass.
+- All 57 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
-- Milestone 5 hands-on save/load playtest.
+- Milestone 6 automation and hands-on hunter intel playtest.
 
 ## Known Blockers
 
@@ -97,6 +102,7 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Run hands-on playtest: build settlement state, press F5, alter state, press F9, and confirm time/construction/resources restore.
-2. Run hands-on closeout for Milestones 3 and 4 if not already confirmed in-editor.
-3. Record numeric FPS using the low-end profile task before forest density increases.
+1. Run automation for hunter daily animal intel.
+2. Run hands-on playtest: ask hunter for animal signs, confirm marker appears, sleep into next day, and confirm a fresh report is available.
+3. Run hands-on closeout for Milestones 3-5 if not already confirmed in-editor.
+4. Record numeric FPS using the low-end profile task before forest density increases.

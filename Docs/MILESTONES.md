@@ -94,7 +94,7 @@ Complete when:
 
 ## Milestone 5: Persistent Settlement State
 
-Status: In progress.
+Status: Implementation complete; hands-on closeout pending.
 
 Player experience: The house, time state, recruited NPCs, construction progress, and completed milestones persist across sessions.
 
@@ -112,6 +112,8 @@ Complete when:
 - Automation covers serialization of tags, time, construction jobs, and settlement records.
 
 ## Milestone 6: Hunter Role: Daily Animal Intel
+
+Status: In progress.
 
 Player experience: A recruited hunter becomes useful every day by reporting nearby animal activity. The player gets one daily lead, such as "deer spotted near the ridge," and a temporary marker appears.
 

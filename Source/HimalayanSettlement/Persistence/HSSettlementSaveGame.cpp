@@ -6,6 +6,7 @@ UHSSettlementSaveGame::UHSSettlementSaveGame()
 	, ElapsedHalfDays(0)
 	, bHasSettlementClaim(false)
 	, SettlementClaimCenter(FVector::ZeroVector)
+	, LastAnimalLeadReportDay(INDEX_NONE)
 {
 }
 

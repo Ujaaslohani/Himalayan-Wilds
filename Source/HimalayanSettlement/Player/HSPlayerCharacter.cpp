@@ -12,6 +12,7 @@
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
 #include "InputCoreTypes.h"
+#include "Hunting/HSAnimalIntelComponent.h"
 #include "Hunting/HSHuntingComponent.h"
 #include "Interaction/HSInteractionSensorComponent.h"
 #include "Persistence/HSSettlementPersistenceComponent.h"
@@ -51,6 +52,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	FirstPersonCamera->bUsePawnControlRotation = true;
 
 	InteractionSensor = CreateDefaultSubobject<UHSInteractionSensorComponent>(TEXT("InteractionSensor"));
+	AnimalIntelComponent = CreateDefaultSubobject<UHSAnimalIntelComponent>(TEXT("AnimalIntelComponent"));
 	HuntingComponent = CreateDefaultSubobject<UHSHuntingComponent>(TEXT("HuntingComponent"));
 	ConstructionComponent = CreateDefaultSubobject<UHSConstructionComponent>(TEXT("ConstructionComponent"));
 	SettlementPersistenceComponent = CreateDefaultSubobject<UHSSettlementPersistenceComponent>(TEXT("SettlementPersistenceComponent"));

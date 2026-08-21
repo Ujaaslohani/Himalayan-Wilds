@@ -2,6 +2,7 @@
 
 #include "Core/HSLogCategories.h"
 #include "Engine/World.h"
+#include "Hunting/HSAnimalIntelComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Persistence/HSSettlementSaveGame.h"
 #include "Progression/HSPlayerProgressComponent.h"
@@ -68,6 +69,12 @@ bool UHSSettlementPersistenceComponent::CaptureToSaveGame(UHSSettlementSaveGame*
 		SaveGame->CompletedBuildings = Construction->GetCompletedBuildings();
 	}
 
+	if (const UHSAnimalIntelComponent* AnimalIntel = Owner->FindComponentByClass<UHSAnimalIntelComponent>())
+	{
+		SaveGame->ActiveAnimalLead = AnimalIntel->GetActiveLead();
+		SaveGame->LastAnimalLeadReportDay = AnimalIntel->GetLastReportDay();
+	}
+
 	return true;
 }
 
@@ -109,6 +116,12 @@ bool UHSSettlementPersistenceComponent::RestoreFromSaveGame(const UHSSettlementS
 	{
 		Construction->RestoreConstructionState(SaveGame->ConstructionJobs, SaveGame->CompletedBuildings);
 		Construction->BindToWorldTime();
+	}
+
+	if (UHSAnimalIntelComponent* AnimalIntel = Owner->FindComponentByClass<UHSAnimalIntelComponent>())
+	{
+		AnimalIntel->RestoreAnimalIntelState(SaveGame->ActiveAnimalLead, SaveGame->LastAnimalLeadReportDay);
+		AnimalIntel->BindToWorldTime();
 	}
 
 	return true;

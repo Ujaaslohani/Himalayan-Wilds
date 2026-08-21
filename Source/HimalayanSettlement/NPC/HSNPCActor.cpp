@@ -4,6 +4,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Core/HSGameplayTags.h"
 #include "Core/HSLogCategories.h"
+#include "Hunting/HSAnimalIntelComponent.h"
 #include "NPC/HSNPCDefinition.h"
 #include "Quests/HSQuestHandoffComponent.h"
 #include "Settlement/HSConstructionComponent.h"
@@ -19,6 +20,11 @@ bool IsBuilderNPC(const AHSNPCActor& NPC)
 	return NPC.GetProfessionTag() == TAG_HS_NPC_Profession_Builder;
 }
 
+bool IsHunterNPC(const AHSNPCActor& NPC)
+{
+	return NPC.GetProfessionTag() == TAG_HS_NPC_Profession_Hunter;
+}
+
 bool TryStartBuilderConstruction(const AHSNPCActor& Builder, AActor* Interactor)
 {
 	if (!IsBuilderNPC(Builder) || !Interactor)
@@ -29,6 +35,17 @@ bool TryStartBuilderConstruction(const AHSNPCActor& Builder, AActor* Interactor)
 	UHSConstructionComponent* ConstructionComponent = Interactor->FindComponentByClass<UHSConstructionComponent>();
 	UHSSettlementPlanComponent* SettlementPlanComponent = Interactor->FindComponentByClass<UHSSettlementPlanComponent>();
 	return ConstructionComponent && SettlementPlanComponent && ConstructionComponent->StartNextPendingSchema(SettlementPlanComponent);
+}
+
+bool TryReportHunterAnimalLead(const AHSNPCActor& Hunter, AActor* Interactor)
+{
+	if (!IsHunterNPC(Hunter) || !Interactor)
+	{
+		return false;
+	}
+
+	UHSAnimalIntelComponent* AnimalIntelComponent = Interactor->FindComponentByClass<UHSAnimalIntelComponent>();
+	return AnimalIntelComponent && AnimalIntelComponent->RequestDailyAnimalLead();
 }
 }
 
@@ -104,6 +121,15 @@ FText AHSNPCActor::GetInteractionPrompt_Implementation(const AActor* Interactor)
 		}
 	}
 
+	if (IsHunterNPC(*this))
+	{
+		const UHSAnimalIntelComponent* AnimalIntelComponent = Interactor ? Interactor->FindComponentByClass<UHSAnimalIntelComponent>() : nullptr;
+		if (AnimalIntelComponent && AnimalIntelComponent->CanRequestDailyAnimalLead())
+		{
+			return LOCTEXT("AskHunterAnimalSignsPrompt", "Ask about animal signs");
+		}
+	}
+
 	FFormatNamedArguments Arguments;
 	Arguments.Add(TEXT("Name"), GetDisplayName());
 	return FText::Format(InteractionPromptFormat, Arguments);
@@ -119,14 +145,16 @@ void AHSNPCActor::Interact_Implementation(AActor* Interactor)
 	++InteractionCount;
 	const bool bStartedConstruction = TryStartBuilderConstruction(*this, Interactor);
 	const bool bAdvancedQuest = !bStartedConstruction && QuestHandoffComponent && QuestHandoffComponent->TryAdvanceQuest(Interactor);
+	const bool bReportedAnimalLead = !bStartedConstruction && !bAdvancedQuest && TryReportHunterAnimalLead(*this, Interactor);
 	UE_LOG(
 		LogHSInteraction,
 		Log,
-		TEXT("%s started conversation with %s. Construction started: %s. Quest advanced: %s. Interaction count: %d."),
+		TEXT("%s started conversation with %s. Construction started: %s. Quest advanced: %s. Animal lead reported: %s. Interaction count: %d."),
 		*GetNameSafe(Interactor),
 		*GetNameSafe(this),
 		bStartedConstruction ? TEXT("true") : TEXT("false"),
 		bAdvancedQuest ? TEXT("true") : TEXT("false"),
+		bReportedAnimalLead ? TEXT("true") : TEXT("false"),
 		InteractionCount);
 }
 

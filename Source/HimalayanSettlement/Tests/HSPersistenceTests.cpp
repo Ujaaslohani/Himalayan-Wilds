@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "Building/HSBuildingDefinition.h"
 #include "Core/HSGameplayTags.h"
+#include "Hunting/HSAnimalIntelComponent.h"
 #include "Persistence/HSSettlementPersistenceComponent.h"
 #include "Persistence/HSSettlementSaveGame.h"
 #include "Player/HSPlayerCharacter.h"
@@ -31,7 +32,8 @@ bool SeedPersistentSettlementState(AHSPlayerCharacter& Player, UHSWorldTimeCompo
 	UHSPlayerProgressComponent* Progress = Player.GetPlayerProgressComponent();
 	UHSResourceCarryComponent* Carry = Player.GetResourceCarryComponent();
 	UHSSettlementUnlockComponent* Unlocks = Player.GetSettlementUnlockComponent();
-	if (!SettlementPlan || !Construction || !Progress || !Carry || !Unlocks)
+	UHSAnimalIntelComponent* AnimalIntel = Player.GetAnimalIntelComponent();
+	if (!SettlementPlan || !Construction || !Progress || !Carry || !Unlocks || !AnimalIntel)
 	{
 		return false;
 	}
@@ -51,6 +53,7 @@ bool SeedPersistentSettlementState(AHSPlayerCharacter& Player, UHSWorldTimeCompo
 	Progress->MarkMilestoneCompleted(TAG_HS_Milestone_OneMorningHunt_DayEnded);
 	Carry->AddStack(FHSItemStack{ TAG_HS_Resource_Meat_Deer, 3 });
 	Unlocks->GrantUnlock(TAG_HS_Building_BasicHouse);
+	AnimalIntel->RequestDailyAnimalLead();
 
 	return bSeededSettlement;
 }
@@ -127,6 +130,7 @@ bool FHSPersistenceSnapshotRestoresSettlementStateTest::RunTest(const FString& P
 	TestEqual(TEXT("Snapshot should store one pending schema."), Snapshot->PendingSchemas.Num(), 1);
 	TestEqual(TEXT("Snapshot should store one construction job."), Snapshot->ConstructionJobs.Num(), 1);
 	TestEqual(TEXT("Snapshot should store carried meat."), Snapshot->CarriedItems.Num(), 1);
+	TestTrue(TEXT("Snapshot should store active animal lead."), Snapshot->ActiveAnimalLead.IsValid());
 
 	TestTrue(TEXT("Snapshot should restore successfully."), RestoredPersistence->RestoreFromSaveGame(Snapshot));
 
@@ -135,6 +139,7 @@ bool FHSPersistenceSnapshotRestoresSettlementStateTest::RunTest(const FString& P
 	UHSPlayerProgressComponent* RestoredProgress = RestoredPlayer->GetPlayerProgressComponent();
 	UHSResourceCarryComponent* RestoredCarry = RestoredPlayer->GetResourceCarryComponent();
 	UHSSettlementUnlockComponent* RestoredUnlocks = RestoredPlayer->GetSettlementUnlockComponent();
+	UHSAnimalIntelComponent* RestoredAnimalIntel = RestoredPlayer->GetAnimalIntelComponent();
 
 	TestTrue(TEXT("Restored plan should keep settlement claim."), RestoredPlan && RestoredPlan->HasSettlementClaim());
 	TestTrue(TEXT("Restored plan should keep pending drying rack schema."), RestoredPlan && RestoredPlan->HasPendingSchema(TAG_HS_Building_BasicDryingRack));
@@ -143,6 +148,7 @@ bool FHSPersistenceSnapshotRestoresSettlementStateTest::RunTest(const FString& P
 	TestTrue(TEXT("Restored progress should keep completed milestone."), RestoredProgress && RestoredProgress->HasCompletedMilestone(TAG_HS_Milestone_OneMorningHunt_DayEnded));
 	TestEqual(TEXT("Restored carry should keep meat quantity."), RestoredCarry ? RestoredCarry->GetQuantityForTag(TAG_HS_Resource_Meat_Deer) : 0, 3);
 	TestTrue(TEXT("Restored unlocks should keep house unlock."), RestoredUnlocks && RestoredUnlocks->HasUnlock(TAG_HS_Building_BasicHouse));
+	TestTrue(TEXT("Restored animal intel should keep active deer lead."), RestoredAnimalIntel && RestoredAnimalIntel->HasActiveLead() && RestoredAnimalIntel->GetActiveLead().AnimalTag == TAG_HS_Animal_Deer);
 
 	WorldTime->AdvanceHalfDay();
 	TestTrue(TEXT("Restored active construction should complete after another half-day."), RestoredConstruction && RestoredConstruction->HasCompletedBuilding(TAG_HS_Building_BasicHouse));
