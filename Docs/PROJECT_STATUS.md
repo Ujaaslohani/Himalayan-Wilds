@@ -56,6 +56,8 @@ Unreal Engine 5.5.4.
 - Native settlement planning component added for permanent claim state and pending building schemas.
 - Native settlement claim marker and basic house schema marker added for the first permanent building intent flow.
 - Native HUD feedback added for settlement claim and pending schema placement.
+- Native free-build placement component added for The Forest-style house schema preview, rotate, confirm, and cancel controls.
+- Basic house placement now starts from player build mode instead of relying on a fixed map schema marker.
 - Basic house building definition and `Building.BasicHouse` / `Settlement.Stage.Claimed` tags added.
 - Native construction component added for one active builder job, half-day time progress, and completed building state.
 - Builder profession tag, builder data asset, and builder NPC bootstrap path added.
@@ -85,7 +87,7 @@ Unreal Engine 5.5.4.
 - Hands-on movement playtest passed for jump, crouch, and prone.
 - Milestone 3 settlement claim and house schema foundation compiles.
 - Content bootstrap succeeds with zero warnings and regenerates the basic house schema marker.
-- All 61 `HimalayanSettlement` automation tests pass.
+- All 63 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
@@ -111,5 +113,6 @@ Unreal Engine 5.5.4.
 
 1. Run hands-on hunter intel playtest: ask hunter for animal signs, confirm marker appears, sleep into next day, and confirm a fresh report is available.
 2. Run hands-on herbalist playtest: talk to Herbalist, use Speed Herb, confirm movement is faster, sleep/advance time, and confirm the effect expires.
-3. Run hands-on closeout for Milestones 3-5 if not already confirmed in-editor.
-4. Record numeric FPS using the low-end profile task before forest density increases.
+3. Run hands-on free-build playtest: claim settlement, press `B`, rotate with `Q/R`, place house with left mouse or `E`, ask Builder to start construction, then sleep until the 1-day build completes.
+4. Run hands-on closeout for Milestones 3-5 if not already confirmed in-editor.
+5. Record numeric FPS using the low-end profile task before forest density increases.

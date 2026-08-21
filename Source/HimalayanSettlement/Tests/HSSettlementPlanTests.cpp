@@ -3,9 +3,11 @@
 #include "Misc/AutomationTest.h"
 #include "Building/HSBuildingDefinition.h"
 #include "Core/HSGameplayTags.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Interaction/HSInteractable.h"
 #include "Player/HSPlayerCharacter.h"
+#include "Settlement/HSBuildPlacementComponent.h"
 #include "Settlement/HSBuildingSchemaActor.h"
 #include "Settlement/HSSettlementClaimActor.h"
 #include "Settlement/HSSettlementPlanComponent.h"
@@ -89,6 +91,107 @@ bool FHSSettlementPlanBlocksInvalidPlacementTest::RunTest(const FString& Paramet
 	TestTrue(TEXT("First valid house schema should place."), SettlementPlan->PlaceSchema(BasicHouse, FVector(250.0f, 0.0f, 0.0f), 0.0f, PendingSchema));
 	TestFalse(TEXT("Duplicate house schema should be blocked while pending."), SettlementPlan->CanPlaceSchema(BasicHouse, FVector(350.0f, 0.0f, 0.0f)));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSFreeBuildPlacementRecordsHouseSchemaTest,
+	"HimalayanSettlement.Settlement.FreeBuildPlacementRecordsHouseSchema",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSFreeBuildPlacementRecordsHouseSchemaTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Transient test world should be created."), World);
+	if (!World)
+	{
+		return false;
+	}
+	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+	WorldContext.SetCurrentWorld(World);
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	AHSPlayerCharacter* Player = World->SpawnActor<AHSPlayerCharacter>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+	UHSBuildingDefinition* BasicHouse = CreateValidBasicHouseDefinition();
+	UHSSettlementPlanComponent* SettlementPlan = Player ? Player->GetSettlementPlanComponent() : nullptr;
+	UHSBuildPlacementComponent* BuildPlacement = Player ? Player->GetBuildPlacementComponent() : nullptr;
+
+	TestNotNull(TEXT("Player should spawn."), Player);
+	TestNotNull(TEXT("Player should own settlement plan component."), SettlementPlan);
+	TestNotNull(TEXT("Player should own free-build placement component."), BuildPlacement);
+	if (!Player || !SettlementPlan || !BuildPlacement)
+	{
+		World->DestroyWorld(false);
+		GEngine->DestroyWorldContext(World);
+		return false;
+	}
+
+	TestFalse(TEXT("Free-build placement should start inactive."), BuildPlacement->IsPlacementActive());
+	TestFalse(TEXT("Free-build placement component should not tick while inactive."), BuildPlacement->IsComponentTickEnabled());
+	TestTrue(TEXT("Settlement claim should succeed."), SettlementPlan->ClaimSettlement(FVector::ZeroVector));
+	TestTrue(TEXT("Free-build placement should start for basic house."), BuildPlacement->StartPlacement(BasicHouse));
+	TestTrue(TEXT("Free-build placement should become active."), BuildPlacement->IsPlacementActive());
+	TestTrue(TEXT("Free-build placement component should tick only while active."), BuildPlacement->IsComponentTickEnabled());
+	TestTrue(TEXT("House placement should be confirmable inside claim."), BuildPlacement->CanConfirmPlacement());
+
+	const float InitialYaw = BuildPlacement->GetPreviewYawDegrees();
+	BuildPlacement->RotatePlacement(1.0f);
+	TestNotEqual(TEXT("Rotating placement should change yaw."), BuildPlacement->GetPreviewYawDegrees(), InitialYaw);
+
+	TestTrue(TEXT("Confirming free-build placement should record a pending schema."), BuildPlacement->ConfirmPlacement());
+	TestFalse(TEXT("Free-build placement should deactivate after confirm."), BuildPlacement->IsPlacementActive());
+	TestFalse(TEXT("Free-build placement component should stop ticking after confirm."), BuildPlacement->IsComponentTickEnabled());
+	TestTrue(TEXT("House should be pending after free-build confirmation."), SettlementPlan->HasPendingSchema(TAG_HS_Building_BasicHouse));
+	TestEqual(TEXT("Exactly one pending schema should be stored."), SettlementPlan->GetPendingSchemas().Num(), 1);
+
+	World->DestroyWorld(false);
+	GEngine->DestroyWorldContext(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSFreeBuildPlacementBlocksBeforeSettlementClaimTest,
+	"HimalayanSettlement.Settlement.FreeBuildPlacementBlocksBeforeClaim",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSFreeBuildPlacementBlocksBeforeSettlementClaimTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Transient test world should be created."), World);
+	if (!World)
+	{
+		return false;
+	}
+	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+	WorldContext.SetCurrentWorld(World);
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	AHSPlayerCharacter* Player = World->SpawnActor<AHSPlayerCharacter>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+	UHSBuildingDefinition* BasicHouse = CreateValidBasicHouseDefinition();
+	UHSBuildPlacementComponent* BuildPlacement = Player ? Player->GetBuildPlacementComponent() : nullptr;
+
+	TestNotNull(TEXT("Player should spawn."), Player);
+	TestNotNull(TEXT("Player should own free-build placement component."), BuildPlacement);
+	if (!Player || !BuildPlacement)
+	{
+		World->DestroyWorld(false);
+		GEngine->DestroyWorldContext(World);
+		return false;
+	}
+
+	TestTrue(TEXT("Free-build placement can preview before claim."), BuildPlacement->StartPlacement(BasicHouse));
+	TestFalse(TEXT("House placement should not be confirmable before claim."), BuildPlacement->CanConfirmPlacement());
+	TestFalse(TEXT("Confirming before claim should be blocked."), BuildPlacement->ConfirmPlacement());
+	TestTrue(TEXT("Blocked placement should remain active for adjustment."), BuildPlacement->IsPlacementActive());
+	BuildPlacement->CancelPlacement();
+	TestFalse(TEXT("Cancel should stop blocked placement."), BuildPlacement->IsPlacementActive());
+
+	World->DestroyWorld(false);
+	GEngine->DestroyWorldContext(World);
 	return true;
 }
 

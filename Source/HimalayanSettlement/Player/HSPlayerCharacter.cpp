@@ -19,6 +19,7 @@
 #include "Persistence/HSSettlementPersistenceComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
+#include "Settlement/HSBuildPlacementComponent.h"
 #include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
 #include "Settlement/HSSettlementUnlockComponent.h"
@@ -54,6 +55,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 
 	InteractionSensor = CreateDefaultSubobject<UHSInteractionSensorComponent>(TEXT("InteractionSensor"));
 	AnimalIntelComponent = CreateDefaultSubobject<UHSAnimalIntelComponent>(TEXT("AnimalIntelComponent"));
+	BuildPlacementComponent = CreateDefaultSubobject<UHSBuildPlacementComponent>(TEXT("BuildPlacementComponent"));
 	PlantEffectComponent = CreateDefaultSubobject<UHSPlantEffectComponent>(TEXT("PlantEffectComponent"));
 	HuntingComponent = CreateDefaultSubobject<UHSHuntingComponent>(TEXT("HuntingComponent"));
 	ConstructionComponent = CreateDefaultSubobject<UHSConstructionComponent>(TEXT("ConstructionComponent"));
@@ -106,6 +108,23 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	PlayerMappingContext->MapKey(ProneAction, EKeys::Z);
 	PlayerMappingContext->MapKey(ProneAction, EKeys::Gamepad_FaceButton_Right);
 
+	BuildPlacementAction = CreateDefaultSubobject<UInputAction>(TEXT("BuildPlacementAction"));
+	BuildPlacementAction->ValueType = EInputActionValueType::Boolean;
+	PlayerMappingContext->MapKey(BuildPlacementAction, EKeys::B);
+	PlayerMappingContext->MapKey(BuildPlacementAction, EKeys::Gamepad_Special_Right);
+
+	RotateBuildLeftAction = CreateDefaultSubobject<UInputAction>(TEXT("RotateBuildLeftAction"));
+	RotateBuildLeftAction->ValueType = EInputActionValueType::Boolean;
+	PlayerMappingContext->MapKey(RotateBuildLeftAction, EKeys::Q);
+
+	RotateBuildRightAction = CreateDefaultSubobject<UInputAction>(TEXT("RotateBuildRightAction"));
+	RotateBuildRightAction->ValueType = EInputActionValueType::Boolean;
+	PlayerMappingContext->MapKey(RotateBuildRightAction, EKeys::R);
+
+	CancelBuildPlacementAction = CreateDefaultSubobject<UInputAction>(TEXT("CancelBuildPlacementAction"));
+	CancelBuildPlacementAction->ValueType = EInputActionValueType::Boolean;
+	PlayerMappingContext->MapKey(CancelBuildPlacementAction, EKeys::Escape);
+
 	SaveAction = CreateDefaultSubobject<UInputAction>(TEXT("SaveAction"));
 	SaveAction->ValueType = EInputActionValueType::Boolean;
 	PlayerMappingContext->MapKey(SaveAction, EKeys::F5);
@@ -145,6 +164,10 @@ void AHSPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &AHSPlayerCharacter::StopJump);
 	EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::ToggleCrouchStance);
 	EnhancedInputComponent->BindAction(ProneAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::ToggleProneStance);
+	EnhancedInputComponent->BindAction(BuildPlacementAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::ToggleBuildPlacement);
+	EnhancedInputComponent->BindAction(RotateBuildLeftAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::RotateBuildPlacementLeft);
+	EnhancedInputComponent->BindAction(RotateBuildRightAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::RotateBuildPlacementRight);
+	EnhancedInputComponent->BindAction(CancelBuildPlacementAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::CancelBuildPlacement);
 	EnhancedInputComponent->BindAction(SaveAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::SaveSettlementState);
 	EnhancedInputComponent->BindAction(LoadAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::LoadSettlementState);
 }
@@ -173,6 +196,12 @@ void AHSPlayerCharacter::Look(const FInputActionValue& InputValue)
 
 void AHSPlayerCharacter::Interact(const FInputActionValue& InputValue)
 {
+	if (BuildPlacementComponent && BuildPlacementComponent->IsPlacementActive())
+	{
+		BuildPlacementComponent->ConfirmPlacement();
+		return;
+	}
+
 	if (InteractionSensor)
 	{
 		InteractionSensor->TryInteract();
@@ -185,6 +214,12 @@ void AHSPlayerCharacter::Interact(const FInputActionValue& InputValue)
 
 void AHSPlayerCharacter::Hunt(const FInputActionValue& InputValue)
 {
+	if (BuildPlacementComponent && BuildPlacementComponent->IsPlacementActive())
+	{
+		BuildPlacementComponent->ConfirmPlacement();
+		return;
+	}
+
 	if (HuntingComponent)
 	{
 		HuntingComponent->TryHunt();
@@ -218,6 +253,47 @@ void AHSPlayerCharacter::ToggleCrouchStance(const FInputActionValue& InputValue)
 void AHSPlayerCharacter::ToggleProneStance(const FInputActionValue& InputValue)
 {
 	SetPlayerStance(PlayerStance == EHSPlayerStance::Prone ? EHSPlayerStance::Standing : EHSPlayerStance::Prone);
+}
+
+void AHSPlayerCharacter::ToggleBuildPlacement(const FInputActionValue& InputValue)
+{
+	if (!BuildPlacementComponent)
+	{
+		return;
+	}
+
+	if (BuildPlacementComponent->IsPlacementActive())
+	{
+		BuildPlacementComponent->CancelPlacement();
+	}
+	else
+	{
+		BuildPlacementComponent->StartBasicHousePlacement();
+	}
+}
+
+void AHSPlayerCharacter::RotateBuildPlacementLeft(const FInputActionValue& InputValue)
+{
+	if (BuildPlacementComponent)
+	{
+		BuildPlacementComponent->RotatePlacement(-1.0f);
+	}
+}
+
+void AHSPlayerCharacter::RotateBuildPlacementRight(const FInputActionValue& InputValue)
+{
+	if (BuildPlacementComponent)
+	{
+		BuildPlacementComponent->RotatePlacement(1.0f);
+	}
+}
+
+void AHSPlayerCharacter::CancelBuildPlacement(const FInputActionValue& InputValue)
+{
+	if (BuildPlacementComponent)
+	{
+		BuildPlacementComponent->CancelPlacement();
+	}
 }
 
 void AHSPlayerCharacter::SaveSettlementState(const FInputActionValue& InputValue)

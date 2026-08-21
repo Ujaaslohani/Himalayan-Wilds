@@ -53,7 +53,7 @@ Player experience: The player chooses a permanent settlement spot and places a h
 
 Scope:
 
-- Native schema placement actor/component.
+- Native free-build schema placement component.
 - Native settlement claim marker.
 - One permanent schema: basic house.
 - Schema validates placement and records pending construction.
@@ -66,6 +66,7 @@ Complete when:
 - Player can place a house schema in a valid area.
 - Invalid placement is blocked.
 - Placed schema is recorded as pending construction.
+- Player-facing placement uses a movable/rotatable ghost preview instead of a fixed map marker.
 - Automation covers valid/invalid schema placement.
 
 ## Milestone 4: Builder NPC And Construction Time

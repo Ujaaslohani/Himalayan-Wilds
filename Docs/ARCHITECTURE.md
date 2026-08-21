@@ -95,6 +95,10 @@ Native placeholder actors own simple non-colliding static mesh components using 
 
 NPC services are currently direct native role slices rather than a broad role framework. Builder starts pending schema construction, Hunter reports one daily animal lead, and Herbalist teaches one known plant. Each slice stays event-driven and can later move behind a shared role-service interface when duplication becomes real.
 
+## Build Placement
+
+`UHSBuildPlacementComponent` owns the player-facing free-build schema placement flow. It starts disabled, ticks only while a placement preview is active, drives a lightweight no-tick preview actor, validates against `UHSSettlementPlanComponent`, and records a pending schema when confirmed. Builder construction still consumes the pending schema and takes the configured time to complete it.
+
 ## Herbalism
 
 `UHSPlantEffectComponent` stores known plants and one active temporary effect on the player. `AHSPlantActor` is a no-tick interactable that applies a known plant definition and consumes itself. Plant effects expire from `UHSWorldTimeComponent` events, not per-frame checks.

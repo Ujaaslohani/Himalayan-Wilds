@@ -7,6 +7,7 @@
 
 class UCameraComponent;
 class UHSAnimalIntelComponent;
+class UHSBuildPlacementComponent;
 class UHSHuntingComponent;
 class UHSConstructionComponent;
 class UHSInteractionSensorComponent;
@@ -42,6 +43,7 @@ public:
 	UCameraComponent* GetFirstPersonCamera() const { return FirstPersonCamera; }
 	UHSInteractionSensorComponent* GetInteractionSensor() const { return InteractionSensor; }
 	UHSAnimalIntelComponent* GetAnimalIntelComponent() const { return AnimalIntelComponent; }
+	UHSBuildPlacementComponent* GetBuildPlacementComponent() const { return BuildPlacementComponent; }
 	UHSPlantEffectComponent* GetPlantEffectComponent() const { return PlantEffectComponent; }
 	UHSHuntingComponent* GetHuntingComponent() const { return HuntingComponent; }
 	UHSConstructionComponent* GetConstructionComponent() const { return ConstructionComponent; }
@@ -78,6 +80,10 @@ private:
 	void StopJump(const FInputActionValue& InputValue);
 	void ToggleCrouchStance(const FInputActionValue& InputValue);
 	void ToggleProneStance(const FInputActionValue& InputValue);
+	void ToggleBuildPlacement(const FInputActionValue& InputValue);
+	void RotateBuildPlacementLeft(const FInputActionValue& InputValue);
+	void RotateBuildPlacementRight(const FInputActionValue& InputValue);
+	void CancelBuildPlacement(const FInputActionValue& InputValue);
 	void SaveSettlementState(const FInputActionValue& InputValue);
 	void LoadSettlementState(const FInputActionValue& InputValue);
 	void ApplyInputMappingContext();
@@ -94,6 +100,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSAnimalIntelComponent> AnimalIntelComponent;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player")
+	TObjectPtr<UHSBuildPlacementComponent> BuildPlacementComponent;
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSPlantEffectComponent> PlantEffectComponent;
@@ -142,6 +151,18 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> ProneAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> BuildPlacementAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> RotateBuildLeftAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> RotateBuildRightAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> CancelBuildPlacementAction;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> SaveAction;

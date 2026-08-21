@@ -6,6 +6,7 @@
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "Interaction/HSInteractionSensorComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
+#include "Settlement/HSBuildPlacementComponent.h"
 #include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
 #include "World/HSGameState.h"
@@ -31,6 +32,7 @@ void AHSHUD::DrawHUD()
 	BindProgressComponent();
 	BindAnimalIntelComponent();
 	BindPlantEffectComponent();
+	BindBuildPlacementComponent();
 	BindSettlementPlanComponent();
 	BindConstructionComponent();
 
@@ -44,15 +46,25 @@ void AHSHUD::DrawHUD()
 	}
 
 	const APawn* Pawn = PlayerOwner->GetPawn();
-	const UHSInteractionSensorComponent* Sensor = Pawn ? Pawn->FindComponentByClass<UHSInteractionSensorComponent>() : nullptr;
-	if (Sensor)
+	const UHSBuildPlacementComponent* BuildPlacementComponent = Pawn ? Pawn->FindComponentByClass<UHSBuildPlacementComponent>() : nullptr;
+	if (BuildPlacementComponent && BuildPlacementComponent->IsPlacementActive())
 	{
-		const FText Prompt = Sensor->GetFocusedInteractionPrompt();
-		if (!Prompt.IsEmpty())
+		const FString BuildText = FString::Printf(TEXT("[Left Mouse/E] Place house   [Q/R] Rotate   [Esc/B] Cancel   %s"), *BuildPlacementComponent->GetPlacementStatusText().ToString());
+		const float BuildY = FMath::Max(0.0f, Canvas->ClipY - PromptVerticalOffset);
+		DrawCenteredTextLine(BuildText, BuildY, 0.95f, BuildPlacementComponent->CanConfirmPlacement() ? FLinearColor(0.55f, 1.0f, 0.55f, 1.0f) : FLinearColor(1.0f, 0.55f, 0.45f, 1.0f));
+	}
+	else
+	{
+		const UHSInteractionSensorComponent* Sensor = Pawn ? Pawn->FindComponentByClass<UHSInteractionSensorComponent>() : nullptr;
+		if (Sensor)
 		{
-			const FString PromptText = FString::Printf(TEXT("[E] %s"), *Prompt.ToString());
-			const float PromptY = FMath::Max(0.0f, Canvas->ClipY - PromptVerticalOffset);
-			DrawCenteredTextLine(PromptText, PromptY, PromptScale, FLinearColor::White);
+			const FText Prompt = Sensor->GetFocusedInteractionPrompt();
+			if (!Prompt.IsEmpty())
+			{
+				const FString PromptText = FString::Printf(TEXT("[E] %s"), *Prompt.ToString());
+				const float PromptY = FMath::Max(0.0f, Canvas->ClipY - PromptVerticalOffset);
+				DrawCenteredTextLine(PromptText, PromptY, PromptScale, FLinearColor::White);
+			}
 		}
 	}
 
@@ -121,6 +133,26 @@ void AHSHUD::HandlePlantEffectApplied(const FHSPlantEffectState& PlantEffect)
 void AHSHUD::HandlePlantEffectExpired(const FHSPlantEffectState& PlantEffect)
 {
 	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "PlantEffectExpired", "Plant effect expired: {0}"), FText::FromString(PlantEffect.EffectTag.ToString())));
+}
+
+void AHSHUD::HandleBuildPlacementStarted(FText Message)
+{
+	ShowCompletionMessage(Message);
+}
+
+void AHSHUD::HandleBuildPlacementCanceled(FText Message)
+{
+	ShowCompletionMessage(Message);
+}
+
+void AHSHUD::HandleBuildPlacementBlocked(FText Message)
+{
+	ShowCompletionMessage(Message);
+}
+
+void AHSHUD::HandleBuildPlacementConfirmed(const FHSPendingBuildingSchema& PendingSchema)
+{
+	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "BuildPlacementConfirmed", "Schema placed: {0}"), FText::FromString(PendingSchema.BuildingTag.ToString())));
 }
 
 void AHSHUD::BindProgressComponent()
@@ -196,6 +228,35 @@ void AHSHUD::BindPlantEffectComponent()
 	PlantEffectComponent->OnPlantKnowledgeLearned.AddUniqueDynamic(this, &AHSHUD::HandlePlantKnowledgeLearned);
 	PlantEffectComponent->OnPlantEffectApplied.AddUniqueDynamic(this, &AHSHUD::HandlePlantEffectApplied);
 	PlantEffectComponent->OnPlantEffectExpired.AddUniqueDynamic(this, &AHSHUD::HandlePlantEffectExpired);
+}
+
+void AHSHUD::BindBuildPlacementComponent()
+{
+	if (!PlayerOwner)
+	{
+		return;
+	}
+
+	APawn* Pawn = PlayerOwner->GetPawn();
+	UHSBuildPlacementComponent* BuildPlacementComponent = Pawn ? Pawn->FindComponentByClass<UHSBuildPlacementComponent>() : nullptr;
+	if (!BuildPlacementComponent || BoundBuildPlacementComponent.Get() == BuildPlacementComponent)
+	{
+		return;
+	}
+
+	if (UHSBuildPlacementComponent* PreviousBuildPlacementComponent = BoundBuildPlacementComponent.Get())
+	{
+		PreviousBuildPlacementComponent->OnBuildPlacementStarted.RemoveDynamic(this, &AHSHUD::HandleBuildPlacementStarted);
+		PreviousBuildPlacementComponent->OnBuildPlacementCanceled.RemoveDynamic(this, &AHSHUD::HandleBuildPlacementCanceled);
+		PreviousBuildPlacementComponent->OnBuildPlacementBlocked.RemoveDynamic(this, &AHSHUD::HandleBuildPlacementBlocked);
+		PreviousBuildPlacementComponent->OnBuildPlacementConfirmed.RemoveDynamic(this, &AHSHUD::HandleBuildPlacementConfirmed);
+	}
+
+	BoundBuildPlacementComponent = BuildPlacementComponent;
+	BuildPlacementComponent->OnBuildPlacementStarted.AddUniqueDynamic(this, &AHSHUD::HandleBuildPlacementStarted);
+	BuildPlacementComponent->OnBuildPlacementCanceled.AddUniqueDynamic(this, &AHSHUD::HandleBuildPlacementCanceled);
+	BuildPlacementComponent->OnBuildPlacementBlocked.AddUniqueDynamic(this, &AHSHUD::HandleBuildPlacementBlocked);
+	BuildPlacementComponent->OnBuildPlacementConfirmed.AddUniqueDynamic(this, &AHSHUD::HandleBuildPlacementConfirmed);
 }
 
 void AHSHUD::BindSettlementPlanComponent()

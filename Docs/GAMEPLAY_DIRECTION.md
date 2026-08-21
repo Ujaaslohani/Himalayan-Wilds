@@ -34,7 +34,7 @@ Building direction is schema-based.
 Player-facing flow:
 
 1. Player chooses a schema, such as a house.
-2. Player places the schema/ghost in a valid location.
+2. Player enters free-build placement mode and moves a schema/ghost in the world.
 3. Builder NPC starts construction.
 4. Time passes through sleep/day changes.
 5. Building completes after its configured duration.
@@ -49,9 +49,9 @@ Important rule: the player should not spend most of the game cutting trees, coll
 
 Current implementation boundary:
 
-- The first settlement slice records a permanent claim marker and one pending `Basic House` schema.
+- The first settlement slice records a permanent claim marker and one free-placed pending `Basic House` schema.
 - Pending means the player has chosen intent; it is not a finished house.
-- Construction duration, builder assignment, and completion are intentionally reserved for the builder milestone.
+- The player starts house placement with `B`, rotates the preview with `Q/R`, confirms with left mouse or `E`, and cancels with `Esc` or `B`.
 - The first builder slice starts with one builder, one active job, and a `1.0` day basic house duration.
 - The first persistence slice stores time, progress, carried resources, unlocks, settlement claim, pending schemas, construction jobs, and completed buildings through a versioned native SaveGame.
 - The first hunter intel slice gives one event-driven deer lead per in-game day and spawns a lightweight temporary marker; it does not run a broad ecology simulation.

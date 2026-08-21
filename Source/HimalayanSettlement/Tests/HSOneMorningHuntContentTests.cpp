@@ -18,7 +18,6 @@
 #include "Quests/HSQuestDefinition.h"
 #include "Quests/HSQuestHandoffComponent.h"
 #include "Resources/HSItemDefinition.h"
-#include "Settlement/HSBuildingSchemaActor.h"
 #include "Settlement/HSRestPointActor.h"
 #include "Settlement/HSSettlementClaimActor.h"
 #include "Settlement/HSTemporaryShelterActor.h"
@@ -90,7 +89,6 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	bool bFoundRestPoint = false;
 	bool bFoundTemporaryShelter = false;
 	bool bFoundSettlementClaim = false;
-	bool bFoundBasicHouseSchema = false;
 	bool bFoundCheapPrototypeSun = false;
 	bool bFoundCheapPrototypeSkyLight = false;
 	if (World && World->PersistentLevel)
@@ -124,12 +122,6 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 			bFoundRestPoint |= Actor && Actor->IsA<AHSRestPointActor>();
 			bFoundTemporaryShelter |= Actor && Actor->IsA<AHSTemporaryShelterActor>();
 			bFoundSettlementClaim |= Actor && Actor->IsA<AHSSettlementClaimActor>();
-			if (const AHSBuildingSchemaActor* SchemaActor = Cast<AHSBuildingSchemaActor>(Actor))
-			{
-				bFoundBasicHouseSchema |= SchemaActor->GetBuildingDefinition()
-					&& SchemaActor->GetBuildingDefinition()->BuildingTag == TAG_HS_Building_BasicHouse
-					&& !SchemaActor->IsSchemaPlaced();
-			}
 			if (const ADirectionalLight* Sun = Cast<ADirectionalLight>(Actor))
 			{
 				const ULightComponent* SunComponent = Sun->GetLightComponent();
@@ -157,7 +149,6 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("One Morning Hunt map should contain a native end-of-day rest point."), bFoundRestPoint);
 	TestTrue(TEXT("One Morning Hunt map should contain a native temporary shelter marker."), bFoundTemporaryShelter);
 	TestTrue(TEXT("One Morning Hunt map should contain a native settlement claim marker."), bFoundSettlementClaim);
-	TestTrue(TEXT("One Morning Hunt map should contain a pending basic house schema marker."), bFoundBasicHouseSchema);
 	TestTrue(TEXT("One Morning Hunt prototype sun should use the cheap no-shadow baseline."), bFoundCheapPrototypeSun);
 	TestTrue(TEXT("One Morning Hunt prototype skylight should use the cheap no-shadow baseline."), bFoundCheapPrototypeSkyLight);
 

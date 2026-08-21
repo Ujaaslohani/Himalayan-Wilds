@@ -62,10 +62,23 @@ public:
 	UFUNCTION()
 	void HandlePlantEffectExpired(const FHSPlantEffectState& PlantEffect);
 
+	UFUNCTION()
+	void HandleBuildPlacementStarted(FText Message);
+
+	UFUNCTION()
+	void HandleBuildPlacementCanceled(FText Message);
+
+	UFUNCTION()
+	void HandleBuildPlacementBlocked(FText Message);
+
+	UFUNCTION()
+	void HandleBuildPlacementConfirmed(const FHSPendingBuildingSchema& PendingSchema);
+
 private:
 	void BindProgressComponent();
 	void BindAnimalIntelComponent();
 	void BindPlantEffectComponent();
+	void BindBuildPlacementComponent();
 	void BindSettlementPlanComponent();
 	void BindConstructionComponent();
 	void ShowCompletionMessage(FText Message);
@@ -88,6 +101,9 @@ private:
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<class UHSPlantEffectComponent> BoundPlantEffectComponent;
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<class UHSBuildPlacementComponent> BoundBuildPlacementComponent;
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<class UHSSettlementPlanComponent> BoundSettlementPlanComponent;

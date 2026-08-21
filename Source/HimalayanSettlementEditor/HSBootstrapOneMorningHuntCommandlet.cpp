@@ -26,7 +26,6 @@
 #include "Quests/HSQuestDefinition.h"
 #include "Resources/HSItemDefinition.h"
 #include "Settlement/HSRestPointActor.h"
-#include "Settlement/HSBuildingSchemaActor.h"
 #include "Settlement/HSSettlementClaimActor.h"
 #include "Settlement/HSTemporaryShelterActor.h"
 #include "UObject/SavePackage.h"
@@ -309,8 +308,6 @@ void CreateMap()
 	SpawnNamedActor<AHSRestPointActor>(World, TEXT("Camp_RestPoint_EndMorning"), FVector(-80.0f, 220.0f, 45.0f), FRotator::ZeroRotator);
 	SpawnNamedActor<AHSTemporaryShelterActor>(World, TEXT("Temporary_Shelter_Sleep"), FVector(-230.0f, 220.0f, 55.0f), FRotator(0.0f, 25.0f, 0.0f));
 	SpawnNamedActor<AHSSettlementClaimActor>(World, TEXT("Settlement_Claim_Marker"), FVector(-80.0f, -260.0f, 55.0f), FRotator::ZeroRotator);
-	AHSBuildingSchemaActor* HouseSchema = SpawnNamedActor<AHSBuildingSchemaActor>(World, TEXT("Schema_BasicHouse_Pending"), FVector(260.0f, -300.0f, 75.0f), FRotator(0.0f, 18.0f, 0.0f));
-	HouseSchema->SetBuildingDefinition(GetOrCreateAsset<UHSBuildingDefinition>(TEXT("/Game/Data/Buildings/DA_Building_BasicHouse"), TEXT("DA_Building_BasicHouse")));
 
 	AHSPlantActor* SpeedHerb = SpawnNamedActor<AHSPlantActor>(World, TEXT("Plant_SpeedHerb"), FVector(360.0f, 230.0f, 45.0f), FRotator::ZeroRotator);
 	SpeedHerb->SetPlantDefinition(GetOrCreateAsset<UHSPlantDefinition>(TEXT("/Game/Data/Plants/DA_Plant_SpeedHerb"), TEXT("DA_Plant_SpeedHerb")));
