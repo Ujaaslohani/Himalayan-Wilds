@@ -17,6 +17,8 @@ UHSHuntingComponent::UHSHuntingComponent()
 	, ArrowProjectileClass(AHSArrowProjectileActor::StaticClass())
 	, ArrowSpeed(3200.0f)
 	, ArrowSpawnForwardOffset(45.0f)
+	, ShotCooldown(1.2f)
+	, LastShotTime(-TNumericLimits<double>::Max())
 {
 	PrimaryComponentTick.bCanEverTick = false;
 }
@@ -29,6 +31,14 @@ bool UHSHuntingComponent::TryHunt()
 	{
 		OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "BowRequired", "Equip a bow and arrows first."));
 		UE_LOG(LogHSAI, Verbose, TEXT("%s tried to hunt without an equipped bow and arrows."), *GetNameSafe(GetOwner()));
+		return false;
+	}
+
+	if (!IsShotReady())
+	{
+		OnHuntingFeedback.Broadcast(FText::Format(
+			NSLOCTEXT("HSHuntingComponent", "BowNocking", "Nocking arrow: {0}s."),
+			FText::AsNumber(GetShotCooldownRemaining())));
 		return false;
 	}
 
@@ -63,8 +73,15 @@ bool UHSHuntingComponent::TryHunt()
 		return false;
 	}
 
+	LastShotTime = GetWorld() ? GetWorld()->GetTimeSeconds() : FPlatformTime::Seconds();
 	OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "ArrowLoosed", "Arrow loosed."));
 	return true;
+}
+
+float UHSHuntingComponent::GetShotCooldownRemaining() const
+{
+	const double CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : FPlatformTime::Seconds();
+	return FMath::Max(0.0f, ShotCooldown - static_cast<float>(CurrentTime - LastShotTime));
 }
 
 AHSAnimalActor* UHSHuntingComponent::FindHuntTarget(FHitResult& OutHit) const

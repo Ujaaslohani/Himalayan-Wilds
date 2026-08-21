@@ -44,6 +44,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Hunting")
 	TSubclassOf<AHSArrowProjectileActor> GetArrowProjectileClass() const { return ArrowProjectileClass; }
 
+	UFUNCTION(BlueprintPure, Category = "Hunting")
+	float GetShotCooldown() const { return ShotCooldown; }
+
+	UFUNCTION(BlueprintPure, Category = "Hunting")
+	float GetShotCooldownRemaining() const;
+
+	UFUNCTION(BlueprintPure, Category = "Hunting")
+	bool IsShotReady() const { return GetShotCooldownRemaining() <= 0.0f; }
+
 	UPROPERTY(BlueprintAssignable, Category = "Hunting")
 	FHSHuntingFeedbackSignature OnHuntingFeedback;
 
@@ -71,4 +80,9 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Hunting", meta = (ClampMin = "0.0", Units = "cm"))
 	float ArrowSpawnForwardOffset;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Hunting", meta = (ClampMin = "0.0", Units = "s"))
+	float ShotCooldown;
+
+	double LastShotTime;
 };

@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 11: Vertical Slice Closeout: implementation continues with basic native HUD status/objective overlay, sleep/time feedback, pause menu, manual save/load, autosave foundation, first inventory actions, build schema/campsite menu feedback, first options control, bow/ammo equipment rules, visible arrow projectiles, animal reaction states, and clearer prototype visuals; hands-on closeout pending.
+Milestone 11: Vertical Slice Closeout: implementation continues with basic native HUD status/objective overlay, sleep/time feedback, pause menu, manual save/load, autosave foundation, first inventory actions, build schema/campsite menu feedback, first options control, bow/ammo equipment rules, visible arrow projectiles, bow shot cooldown, animal reaction states, and clearer prototype visuals; hands-on closeout pending.
 
 ## Engine Version
 
@@ -86,8 +86,9 @@ Unreal Engine 5.5.4.
 - Soldier weapon service now auto-equips the first granted bow while still preventing duplicate weapon bundles.
 - Hunting now requires an equipped bow and at least one arrow, consumes one arrow on valid animal shots, and reports hit/no-target/no-ammo feedback through the HUD.
 - Native visible arrow projectile actor added; hunting now looses an arrow that flies forward, traces while in flight, stops on impact, and applies hunting damage when it hits an animal.
+- Bow firing now has a short native cooldown to prevent instant arrow spam and make shots easier to read.
 - Animal runtime state now distinguishes idle, alert, fleeing, and dead so wounded animals can support later tracking/AI behavior.
-- HUD status lines now show bow equip state and current arrow count.
+- HUD status lines now show bow equip state, current arrow count, and whether the bow is ready or nocking.
 - Versioned SaveGame now stores bow equipped state and emergency low-end mode state.
 - Milestone 8 soldier weapon-supply foundation compiles.
 - Native NPC service component added for shared role service query, prompt, execution, and time-refresh signaling.
@@ -126,7 +127,7 @@ Unreal Engine 5.5.4.
 - Hands-on milestone pass reported complete by the project owner after the 40 FPS stable retest.
 - Milestone 3 settlement claim and house schema foundation compiles.
 - Content bootstrap succeeds with zero warnings and regenerates the basic house schema marker.
-- All 84 `HimalayanSettlement` automation tests pass.
+- All 85 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 

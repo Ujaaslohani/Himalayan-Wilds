@@ -40,6 +40,7 @@ bool FHSHuntingComponentDefaultsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Hunting traces should use visibility by default."), Hunting->GetTraceChannel().GetValue(), static_cast<uint8>(ECC_Visibility));
 	TestNotNull(TEXT("Hunting component should spawn native arrow projectiles."), Hunting->GetArrowProjectileClass().Get());
 	TestEqual(TEXT("Prototype arrow speed should stay readable."), Hunting->GetArrowSpeed(), 3200.0f);
+	TestEqual(TEXT("Prototype bow cooldown should keep shots readable."), Hunting->GetShotCooldown(), 1.2f);
 
 	return true;
 }
@@ -114,6 +115,56 @@ bool FHSArrowProjectileDamagesAnimalOnImpactTest::RunTest(const FString& Paramet
 	Arrow->Tick(0.1f);
 	TestTrue(TEXT("Arrow impact should kill the deer."), Deer->IsDead());
 	TestFalse(TEXT("Arrow should stop after impact."), Arrow->IsFlying());
+
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSHuntingShotCooldownBlocksArrowSpamTest,
+	"HimalayanSettlement.Hunting.ShotCooldownBlocksArrowSpam",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSHuntingShotCooldownBlocksArrowSpamTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Transient test world should be created."), World);
+	if (!World)
+	{
+		return false;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	AHSPlayerCharacter* Player = World->SpawnActor<AHSPlayerCharacter>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+	AHSAnimalActor* Deer = World->SpawnActor<AHSAnimalActor>(FVector(500.0f, 0.0f, 64.0f), FRotator::ZeroRotator, SpawnParameters);
+
+	UHSHuntingComponent* Hunting = Player ? Player->GetHuntingComponent() : nullptr;
+	UHSPlayerEquipmentComponent* Equipment = Player ? Player->GetPlayerEquipmentComponent() : nullptr;
+	UHSResourceCarryComponent* Carry = Player ? Player->GetResourceCarryComponent() : nullptr;
+
+	TestNotNull(TEXT("Player should spawn."), Player);
+	TestNotNull(TEXT("Deer should spawn."), Deer);
+	TestNotNull(TEXT("Player should own hunting component."), Hunting);
+	TestNotNull(TEXT("Player should own equipment component."), Equipment);
+	TestNotNull(TEXT("Player should own resource carry component."), Carry);
+	if (!Player || !Deer || !Hunting || !Equipment || !Carry)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	Deer->SetAnimalDefinition(CreateHuntingTestDeer(Deer));
+	Carry->AddStack(FHSItemStack{ TAG_HS_Item_Bow_Basic, 1 });
+	Carry->AddStack(FHSItemStack{ TAG_HS_Item_Arrow_Basic, 2 });
+	Equipment->SetBowEquipped(true);
+
+	TestTrue(TEXT("First aimed shot should fire."), Hunting->TryHunt());
+	TestGreaterThan(TEXT("Shot cooldown should start after firing."), Hunting->GetShotCooldownRemaining(), 0.0f);
+	TestEqual(TEXT("First shot should consume one arrow."), Carry->GetQuantityForTag(TAG_HS_Item_Arrow_Basic), 1);
+	TestFalse(TEXT("Immediate second shot should be blocked by cooldown."), Hunting->TryHunt());
+	TestEqual(TEXT("Blocked cooldown shot should not consume another arrow."), Carry->GetQuantityForTag(TAG_HS_Item_Arrow_Basic), 1);
 
 	World->DestroyWorld(false);
 	return true;

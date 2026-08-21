@@ -135,7 +135,12 @@ TArray<FString> AHSHUD::BuildStatusLines(const AHSGameState* GameState, const AP
 	if (EquipmentComponent)
 	{
 		const FString BowState = EquipmentComponent->IsBowEquipped() ? TEXT("equipped") : TEXT("stored");
-		Lines.Add(FString::Printf(TEXT("Equipment: Bow %s, arrows %d"), *BowState, EquipmentComponent->GetArrowCount()));
+		const UHSHuntingComponent* HuntingComponent = Pawn ? Pawn->FindComponentByClass<UHSHuntingComponent>() : nullptr;
+		const float CooldownRemaining = HuntingComponent ? HuntingComponent->GetShotCooldownRemaining() : 0.0f;
+		const FString ReadyState = EquipmentComponent->CanUseBow()
+			? (CooldownRemaining > 0.0f ? FString::Printf(TEXT("nocking %.1fs"), CooldownRemaining) : TEXT("ready"))
+			: TEXT("not ready");
+		Lines.Add(FString::Printf(TEXT("Equipment: Bow %s, arrows %d, %s"), *BowState, EquipmentComponent->GetArrowCount(), *ReadyState));
 	}
 
 	if (ResourceCarryComponent)

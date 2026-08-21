@@ -11,7 +11,7 @@ Target split:
 
 ## Scope Boundary
 
-Current milestone: early vertical-slice foundations through One Morning Hunt, temporary sleep, settlement schema, builder construction, persistence, hunter intel, herbalist plant knowledge, soldier weapon supply, bow/ammo equipment rules, visible arrow projectiles, exploration markers, basic native HUD status/objective overlay, and first native inventory/build/options menu controls.
+Current milestone: early vertical-slice foundations through One Morning Hunt, temporary sleep, settlement schema, builder construction, persistence, hunter intel, herbalist plant knowledge, soldier weapon supply, bow/ammo equipment rules, visible arrow projectiles, basic shot rhythm, exploration markers, basic native HUD status/objective overlay, and first native inventory/build/options menu controls.
 
 The player starts in a primitive settlement, talks to one hunter NPC, receives a deer-hunting task, tracks and hunts a deer, harvests resources, returns to the NPC, unlocks early settlement progression, places a house schema, uses specialist NPC services, and advances time through sleep.
 
@@ -88,7 +88,7 @@ Native placeholder actors own simple non-colliding static mesh components using 
 
 ## Hunting
 
-`UHSHuntingComponent` is the first player hunting action. It performs an on-demand camera visibility trace, requires `UHSPlayerEquipmentComponent` to have a bow equipped and at least one basic arrow, consumes one arrow only when a valid live animal target is found, spawns a visible `AHSArrowProjectileActor`, and broadcasts lightweight HUD feedback. `AHSArrowProjectileActor` ticks only while flying, sweeps along its path with a visibility trace, stops on impact, and applies prototype hunting damage when it hits a live animal. It is not yet animation, weapon-skill, miss-spread, or advanced ballistics.
+`UHSHuntingComponent` is the first player hunting action. It performs an on-demand camera visibility trace, requires `UHSPlayerEquipmentComponent` to have a bow equipped and at least one basic arrow, blocks instant arrow spam with a short shot cooldown, consumes one arrow only when a valid live animal target is found, spawns a visible `AHSArrowProjectileActor`, and broadcasts lightweight HUD feedback. `AHSArrowProjectileActor` ticks only while flying, sweeps along its path with a visibility trace, stops on impact, and applies prototype hunting damage when it hits a live animal. It is not yet animation, weapon-skill, miss-spread, or advanced ballistics.
 
 ## Equipment
 
