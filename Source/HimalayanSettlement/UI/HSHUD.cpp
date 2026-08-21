@@ -6,6 +6,7 @@
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "Interaction/HSInteractionSensorComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
+#include "Resources/HSResourceCarryComponent.h"
 #include "Settlement/HSBuildPlacementComponent.h"
 #include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
@@ -16,6 +17,10 @@ AHSHUD::AHSHUD()
 	: PromptVerticalOffset(120.0f)
 	, PromptScale(1.15f)
 	, CompletionMessageDuration(4.0f)
+	, StatusPanelX(24.0f)
+	, StatusPanelY(24.0f)
+	, StatusLineHeight(20.0f)
+	, StatusScale(0.85f)
 	, CompletionMessageExpireTime(0.0)
 {
 }
@@ -36,16 +41,15 @@ void AHSHUD::DrawHUD()
 	BindSettlementPlanComponent();
 	BindConstructionComponent();
 
-	if (const AHSGameState* GameState = GetWorld() ? GetWorld()->GetGameState<AHSGameState>() : nullptr)
+	const AHSGameState* GameState = GetWorld() ? GetWorld()->GetGameState<AHSGameState>() : nullptr;
+	const APawn* Pawn = PlayerOwner->GetPawn();
+
+	const TArray<FString> StatusLines = BuildStatusLines(GameState, Pawn);
+	for (int32 LineIndex = 0; LineIndex < StatusLines.Num(); ++LineIndex)
 	{
-		if (const UHSWorldTimeComponent* WorldTime = GameState->GetWorldTimeComponent())
-		{
-			const FString TimeText = FString::Printf(TEXT("Time: %s"), *WorldTime->GetTimePhaseText().ToString());
-			DrawCenteredTextLine(TimeText, 28.0f, 1.0f, FLinearColor(0.85f, 0.92f, 1.0f, 1.0f));
-		}
+		DrawStatusTextLine(StatusLines[LineIndex], StatusPanelY + (StatusLineHeight * LineIndex), FLinearColor(0.85f, 0.92f, 1.0f, 1.0f));
 	}
 
-	const APawn* Pawn = PlayerOwner->GetPawn();
 	const UHSBuildPlacementComponent* BuildPlacementComponent = Pawn ? Pawn->FindComponentByClass<UHSBuildPlacementComponent>() : nullptr;
 	if (BuildPlacementComponent && BuildPlacementComponent->IsPlacementActive())
 	{
@@ -78,6 +82,71 @@ void AHSHUD::DrawHUD()
 bool AHSHUD::HasActiveCompletionMessage() const
 {
 	return !CompletionMessage.IsEmpty() && FPlatformTime::Seconds() < CompletionMessageExpireTime;
+}
+
+TArray<FString> AHSHUD::BuildStatusLines(const AHSGameState* GameState, const APawn* Pawn) const
+{
+	TArray<FString> Lines;
+
+	if (const UHSWorldTimeComponent* WorldTime = GameState ? GameState->GetWorldTimeComponent() : nullptr)
+	{
+		Lines.Add(FString::Printf(TEXT("Time: %s  Day %.1f"), *WorldTime->GetTimePhaseText().ToString(), WorldTime->GetElapsedDays()));
+	}
+
+	const UHSResourceCarryComponent* ResourceCarryComponent = Pawn ? Pawn->FindComponentByClass<UHSResourceCarryComponent>() : nullptr;
+	if (ResourceCarryComponent)
+	{
+		const TArray<FHSItemStack>& CarriedItems = ResourceCarryComponent->GetCarriedItems();
+		if (CarriedItems.Num() > 0)
+		{
+			TArray<FString> ResourceParts;
+			for (const FHSItemStack& Stack : CarriedItems)
+			{
+				if (Stack.IsValidStack())
+				{
+					ResourceParts.Add(FString::Printf(TEXT("%s x%d"), *Stack.ItemTag.ToString(), Stack.Quantity));
+				}
+			}
+
+			if (ResourceParts.Num() > 0)
+			{
+				Lines.Add(FString::Printf(TEXT("Carry: %s"), *FString::Join(ResourceParts, TEXT(", "))));
+			}
+		}
+	}
+
+	const UHSAnimalIntelComponent* AnimalIntelComponent = Pawn ? Pawn->FindComponentByClass<UHSAnimalIntelComponent>() : nullptr;
+	if (AnimalIntelComponent && AnimalIntelComponent->HasActiveLead())
+	{
+		const FHSAnimalLead& Lead = AnimalIntelComponent->GetActiveLead();
+		Lines.Add(FString::Printf(TEXT("Lead: %s near %.0f, %.0f"), *Lead.AnimalTag.ToString(), Lead.Location.X, Lead.Location.Y));
+	}
+
+	const UHSPlantEffectComponent* PlantEffectComponent = Pawn ? Pawn->FindComponentByClass<UHSPlantEffectComponent>() : nullptr;
+	if (PlantEffectComponent && PlantEffectComponent->HasActiveEffect())
+	{
+		const FHSPlantEffectState& PlantEffect = PlantEffectComponent->GetActiveEffect();
+		const UHSWorldTimeComponent* WorldTime = GameState ? GameState->GetWorldTimeComponent() : nullptr;
+		const float CurrentElapsedDays = WorldTime ? WorldTime->GetElapsedDays() : PlantEffect.StartElapsedDays;
+		const float RemainingDays = FMath::Max(0.0f, PlantEffect.DurationDays - (CurrentElapsedDays - PlantEffect.StartElapsedDays));
+		Lines.Add(FString::Printf(TEXT("Plant: %s %.1fx %.1fd"), *PlantEffect.EffectTag.ToString(), PlantEffect.MovementSpeedMultiplier, RemainingDays));
+	}
+
+	const UHSConstructionComponent* ConstructionComponent = Pawn ? Pawn->FindComponentByClass<UHSConstructionComponent>() : nullptr;
+	if (ConstructionComponent)
+	{
+		for (const FHSConstructionJob& Job : ConstructionComponent->GetConstructionJobs())
+		{
+			if (Job.State == EHSConstructionJobState::Active)
+			{
+				const float Percent = Job.RequiredDays > 0.0f ? FMath::Clamp(Job.ProgressDays / Job.RequiredDays, 0.0f, 1.0f) * 100.0f : 0.0f;
+				Lines.Add(FString::Printf(TEXT("Build: %s %.0f%%"), *Job.BuildingTag.ToString(), Percent));
+				break;
+			}
+		}
+	}
+
+	return Lines;
 }
 
 void AHSHUD::HandleMilestoneCompleted(FGameplayTag MilestoneTag)
@@ -323,4 +392,9 @@ void AHSHUD::DrawCenteredTextLine(const FString& Text, float Y, float Scale, con
 
 	const float X = (Canvas->ClipX - TextWidth) * 0.5f;
 	DrawText(Text, Color, X, Y, GEngine->GetMediumFont(), Scale, false);
+}
+
+void AHSHUD::DrawStatusTextLine(const FString& Text, float Y, const FLinearColor& Color)
+{
+	DrawText(Text, Color, StatusPanelX, Y, GEngine->GetSmallFont(), StatusScale, false);
 }

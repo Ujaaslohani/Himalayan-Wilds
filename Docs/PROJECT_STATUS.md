@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 10: Forest And Village Exploration Slice: implementation foundation complete; hands-on and performance closeout pending.
+Milestone 11: Vertical Slice Closeout: implementation started with basic native HUD status overlay; hands-on closeout and performance pass pending.
 
 ## Engine Version
 
@@ -89,6 +89,7 @@ Unreal Engine 5.5.4.
 - Native exploration marker actor added for cheap no-tick village, forest, trail, and animal-area landmarks.
 - One Morning Hunt map now has a readable village-to-forest route with trail markers, a forest edge marker, an animal ridge marker, and a village core marker.
 - Milestone 10 exploration foundation compiles.
+- Native HUD status overlay added for vertical-slice testing: time/day, carried resources, active animal lead, active plant effect, and construction progress.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
@@ -97,11 +98,11 @@ Unreal Engine 5.5.4.
 - Hands-on movement playtest passed for jump, crouch, and prone.
 - Milestone 3 settlement claim and house schema foundation compiles.
 - Content bootstrap succeeds with zero warnings and regenerates the basic house schema marker.
-- All 70 `HimalayanSettlement` automation tests pass.
+- All 71 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
-- Hands-on closeout for Milestone 6 hunter intel, Milestone 7 herbalist plant knowledge, Milestone 8 soldier weapon supplies, Milestone 9 NPC service framework, and Milestone 10 exploration readability/performance.
+- Hands-on closeout for Milestone 6 hunter intel, Milestone 7 herbalist plant knowledge, Milestone 8 soldier weapon supplies, Milestone 9 NPC service framework, Milestone 10 exploration readability/performance, and Milestone 11 HUD/objective readability.
 
 ## Known Blockers
 
@@ -129,3 +130,4 @@ Unreal Engine 5.5.4.
 6. Run hands-on exploration pass: walk settlement to village core, follow trail markers to forest edge, find animal ridge, and confirm the route is readable without explanation.
 7. Run hands-on closeout for Milestones 3-5 if not already confirmed in-editor.
 8. Record numeric FPS using the low-end profile task before forest density increases.
+9. Run hands-on HUD pass: confirm time, resources, animal lead, plant effect, and builder progress appear clearly without blocking the center interaction prompt.

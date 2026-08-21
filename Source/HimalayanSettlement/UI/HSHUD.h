@@ -9,6 +9,7 @@
 
 struct FHSPendingBuildingSchema;
 struct FHSConstructionJob;
+class AHSGameState;
 
 UCLASS()
 class HIMALAYANSETTLEMENT_API AHSHUD : public AHUD
@@ -31,6 +32,8 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "HUD")
 	bool HasActiveCompletionMessage() const;
+
+	TArray<FString> BuildStatusLines(const AHSGameState* GameState, const APawn* Pawn) const;
 
 	UFUNCTION()
 	void HandleMilestoneCompleted(FGameplayTag MilestoneTag);
@@ -83,6 +86,7 @@ private:
 	void BindConstructionComponent();
 	void ShowCompletionMessage(FText Message);
 	void DrawCenteredTextLine(const FString& Text, float Y, float Scale, const FLinearColor& Color);
+	void DrawStatusTextLine(const FString& Text, float Y, const FLinearColor& Color);
 
 	UPROPERTY(EditDefaultsOnly, Category = "HUD", meta = (ClampMin = "0.0"))
 	float PromptVerticalOffset;
@@ -92,6 +96,18 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "HUD", meta = (ClampMin = "0.1", Units = "s"))
 	float CompletionMessageDuration;
+
+	UPROPERTY(EditDefaultsOnly, Category = "HUD", meta = (ClampMin = "0.0"))
+	float StatusPanelX;
+
+	UPROPERTY(EditDefaultsOnly, Category = "HUD", meta = (ClampMin = "0.0"))
+	float StatusPanelY;
+
+	UPROPERTY(EditDefaultsOnly, Category = "HUD", meta = (ClampMin = "0.1"))
+	float StatusLineHeight;
+
+	UPROPERTY(EditDefaultsOnly, Category = "HUD", meta = (ClampMin = "0.1"))
+	float StatusScale;
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<class UHSPlayerProgressComponent> BoundProgressComponent;
