@@ -175,6 +175,8 @@ Complete when:
 
 ## Milestone 9: NPC Role Framework
 
+Status: Implementation complete; hands-on closeout pending.
+
 Player experience: NPCs are no longer just quest givers. Different people make different settlement systems possible.
 
 Scope:

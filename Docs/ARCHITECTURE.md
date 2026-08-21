@@ -93,7 +93,7 @@ Native placeholder actors own simple non-colliding static mesh components using 
 
 ## Specialist Role Services
 
-NPC services are currently direct native role slices rather than a broad role framework. Builder starts pending schema construction, Hunter reports one daily animal lead, Herbalist teaches one known plant, and Soldier grants basic weapon supplies. Each slice stays event-driven and can later move behind a shared role-service interface when duplication becomes real.
+NPC services are coordinated by `UHSNPCServiceComponent`, a no-tick native component on NPC actors. It exposes service options by gameplay tag, selects prompts by priority, executes the requested service, and broadcasts refreshes when world time advances. Builder starts pending schema construction, Hunter reports one daily animal lead, Herbalist teaches one known plant, and Soldier grants basic weapon supplies through this shared query/execution path.
 
 ## Build Placement
 

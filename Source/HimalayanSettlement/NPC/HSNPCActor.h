@@ -9,6 +9,7 @@
 class UHSNPCDefinition;
 class UHSQuestDefinition;
 class UHSQuestHandoffComponent;
+class UHSNPCServiceComponent;
 class UStaticMeshComponent;
 
 UCLASS()
@@ -43,6 +44,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Quest")
 	UHSQuestHandoffComponent* GetQuestHandoffComponent() const { return QuestHandoffComponent; }
 
+	UFUNCTION(BlueprintPure, Category = "NPC")
+	UHSNPCServiceComponent* GetNPCServiceComponent() const { return NPCServiceComponent; }
+
 	UFUNCTION(BlueprintCallable, Category = "Quest")
 	void SetOfferedQuest(UHSQuestDefinition* NewQuestDefinition);
 
@@ -67,6 +71,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Quest")
 	TObjectPtr<UHSQuestHandoffComponent> QuestHandoffComponent;
+
+	UPROPERTY(VisibleAnywhere, Category = "NPC")
+	TObjectPtr<UHSNPCServiceComponent> NPCServiceComponent;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "NPC", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UHSNPCDefinition> NPCDefinition;
