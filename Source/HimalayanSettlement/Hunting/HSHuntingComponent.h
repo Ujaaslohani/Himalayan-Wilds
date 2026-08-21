@@ -27,6 +27,9 @@ public:
 	bool ReleaseBowShot();
 
 	UFUNCTION(BlueprintCallable, Category = "Hunting")
+	bool TrySpearThrust();
+
+	UFUNCTION(BlueprintCallable, Category = "Hunting")
 	AHSAnimalActor* FindHuntTarget(FHitResult& OutHit) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Hunting")
@@ -40,6 +43,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Hunting")
 	float GetHuntDamage() const { return HuntDamage; }
+
+	UFUNCTION(BlueprintPure, Category = "Hunting")
+	float GetSpearDamage() const { return SpearDamage; }
 
 	UFUNCTION(BlueprintPure, Category = "Hunting")
 	TEnumAsByte<ECollisionChannel> GetTraceChannel() const { return TraceChannel; }
@@ -77,6 +83,12 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Hunting", meta = (ClampMin = "0.0"))
 	float HuntDamage;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Hunting", meta = (ClampMin = "0.0"))
+	float SpearDamage;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Hunting", meta = (ClampMin = "50.0", Units = "cm"))
+	float SpearRange;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Hunting")
 	TEnumAsByte<ECollisionChannel> TraceChannel;

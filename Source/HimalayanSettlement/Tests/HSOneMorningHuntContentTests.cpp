@@ -48,6 +48,8 @@ bool FHSOneMorningHuntDefinitionsValidateTest::RunTest(const FString& Parameters
 	const UHSItemDefinition* Meat = LoadRequiredAsset<UHSItemDefinition>(*this, TEXT("/Game/Data/Items/DA_Item_DeerMeat.DA_Item_DeerMeat"));
 	const UHSItemDefinition* Hide = LoadRequiredAsset<UHSItemDefinition>(*this, TEXT("/Game/Data/Items/DA_Item_DeerHide.DA_Item_DeerHide"));
 	const UHSAnimalDefinition* Deer = LoadRequiredAsset<UHSAnimalDefinition>(*this, TEXT("/Game/Data/Animals/DA_Animal_Deer.DA_Animal_Deer"));
+	const UHSAnimalDefinition* Boar = LoadRequiredAsset<UHSAnimalDefinition>(*this, TEXT("/Game/Data/Animals/DA_Animal_Boar.DA_Animal_Boar"));
+	const UHSAnimalDefinition* Hare = LoadRequiredAsset<UHSAnimalDefinition>(*this, TEXT("/Game/Data/Animals/DA_Animal_Hare.DA_Animal_Hare"));
 	const UHSNPCDefinition* Hunter = LoadRequiredAsset<UHSNPCDefinition>(*this, TEXT("/Game/Data/NPCs/DA_NPC_Hunter.DA_NPC_Hunter"));
 	const UHSNPCDefinition* Builder = LoadRequiredAsset<UHSNPCDefinition>(*this, TEXT("/Game/Data/NPCs/DA_NPC_Builder.DA_NPC_Builder"));
 	const UHSNPCDefinition* Herbalist = LoadRequiredAsset<UHSNPCDefinition>(*this, TEXT("/Game/Data/NPCs/DA_NPC_Herbalist.DA_NPC_Herbalist"));
@@ -62,6 +64,8 @@ bool FHSOneMorningHuntDefinitionsValidateTest::RunTest(const FString& Parameters
 	if (Meat) { TestTrue(TEXT("Deer meat definition should validate."), Meat->IsDefinitionValid()); }
 	if (Hide) { TestTrue(TEXT("Deer hide definition should validate."), Hide->IsDefinitionValid()); }
 	if (Deer) { TestTrue(TEXT("Deer definition should validate."), Deer->IsDefinitionValid()); }
+	if (Boar) { TestTrue(TEXT("Boar definition should validate."), Boar->IsDefinitionValid()); }
+	if (Hare) { TestTrue(TEXT("Hare definition should validate."), Hare->IsDefinitionValid()); }
 	if (Hunter) { TestTrue(TEXT("Hunter definition should validate."), Hunter->IsDefinitionValid()); }
 	if (Builder) { TestTrue(TEXT("Builder definition should validate."), Builder->IsDefinitionValid()); }
 	if (Herbalist) { TestTrue(TEXT("Herbalist definition should validate."), Herbalist->IsDefinitionValid()); }
@@ -91,6 +95,8 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	bool bFoundSoldier = false;
 	bool bFoundSpeedHerb = false;
 	bool bFoundConfiguredDeer = false;
+	bool bFoundConfiguredBoar = false;
+	bool bFoundConfiguredHare = false;
 	bool bFoundInteractionTarget = false;
 	bool bFoundRestPoint = false;
 	bool bFoundTemporaryShelter = false;
@@ -98,6 +104,10 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	bool bFoundVillageMarker = false;
 	bool bFoundForestMarker = false;
 	bool bFoundAnimalAreaMarker = false;
+	bool bFoundRoadMarker = false;
+	bool bFoundRiverMarker = false;
+	bool bFoundLandmarkMarker = false;
+	bool bFoundPlantPatchMarker = false;
 	int32 TrailMarkerCount = 0;
 	bool bFoundCheapPrototypeSun = false;
 	bool bFoundCheapPrototypeSkyLight = false;
@@ -124,6 +134,12 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 				bFoundConfiguredDeer |= Deer->GetAnimalDefinition()
 					&& Deer->GetSpeciesTag() == TAG_HS_Animal_Deer
 					&& Deer->GetRuntimeState() == EHSAnimalRuntimeState::Idle;
+				bFoundConfiguredBoar |= Deer->GetAnimalDefinition()
+					&& Deer->GetSpeciesTag() == TAG_HS_Animal_Boar
+					&& Deer->GetRuntimeState() == EHSAnimalRuntimeState::Idle;
+				bFoundConfiguredHare |= Deer->GetAnimalDefinition()
+					&& Deer->GetSpeciesTag() == TAG_HS_Animal_Hare
+					&& Deer->GetRuntimeState() == EHSAnimalRuntimeState::Idle;
 			}
 			if (const AHSPlantActor* Plant = Cast<AHSPlantActor>(Actor))
 			{
@@ -136,6 +152,10 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 				bFoundVillageMarker |= ExplorationMarker->GetMarkerTag() == TAG_HS_Location_Village && !ExplorationMarker->PrimaryActorTick.bCanEverTick;
 				bFoundForestMarker |= ExplorationMarker->GetMarkerTag() == TAG_HS_Location_Forest && !ExplorationMarker->PrimaryActorTick.bCanEverTick;
 				bFoundAnimalAreaMarker |= ExplorationMarker->GetMarkerTag() == TAG_HS_Location_AnimalArea && !ExplorationMarker->PrimaryActorTick.bCanEverTick;
+				bFoundRoadMarker |= ExplorationMarker->GetMarkerTag() == TAG_HS_Location_Road && !ExplorationMarker->PrimaryActorTick.bCanEverTick;
+				bFoundRiverMarker |= ExplorationMarker->GetMarkerTag() == TAG_HS_Location_River && !ExplorationMarker->PrimaryActorTick.bCanEverTick;
+				bFoundLandmarkMarker |= ExplorationMarker->GetMarkerTag() == TAG_HS_Location_Landmark && !ExplorationMarker->PrimaryActorTick.bCanEverTick;
+				bFoundPlantPatchMarker |= ExplorationMarker->GetMarkerTag() == TAG_HS_Location_PlantPatch && !ExplorationMarker->PrimaryActorTick.bCanEverTick;
 				TrailMarkerCount += ExplorationMarker->GetMarkerTag() == TAG_HS_Location_Trail && !ExplorationMarker->PrimaryActorTick.bCanEverTick ? 1 : 0;
 			}
 			if (const AHSPrototypeVisualActor* PrototypeVisual = Cast<AHSPrototypeVisualActor>(Actor))
@@ -174,6 +194,8 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("One Morning Hunt map should contain a native soldier NPC actor."), bFoundSoldier);
 	TestTrue(TEXT("One Morning Hunt map should contain a configured native speed herb actor."), bFoundSpeedHerb);
 	TestTrue(TEXT("One Morning Hunt map should contain a configured native deer actor."), bFoundConfiguredDeer);
+	TestTrue(TEXT("One Morning Hunt map should contain a configured native boar actor."), bFoundConfiguredBoar);
+	TestTrue(TEXT("One Morning Hunt map should contain a configured native hare actor."), bFoundConfiguredHare);
 	TestTrue(TEXT("One Morning Hunt map should contain a native interaction target."), bFoundInteractionTarget);
 	TestTrue(TEXT("One Morning Hunt map should contain a native end-of-day rest point."), bFoundRestPoint);
 	TestTrue(TEXT("One Morning Hunt map should contain a native temporary shelter marker."), bFoundTemporaryShelter);
@@ -181,6 +203,10 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("One Morning Hunt map should contain a village exploration marker."), bFoundVillageMarker);
 	TestTrue(TEXT("One Morning Hunt map should contain a forest exploration marker."), bFoundForestMarker);
 	TestTrue(TEXT("One Morning Hunt map should contain an animal-area exploration marker."), bFoundAnimalAreaMarker);
+	TestTrue(TEXT("One Morning Hunt map should contain a road exploration marker."), bFoundRoadMarker);
+	TestTrue(TEXT("One Morning Hunt map should contain a river exploration marker."), bFoundRiverMarker);
+	TestTrue(TEXT("One Morning Hunt map should contain a landmark exploration marker."), bFoundLandmarkMarker);
+	TestTrue(TEXT("One Morning Hunt map should contain a plant-patch exploration marker."), bFoundPlantPatchMarker);
 	TestTrue(TEXT("One Morning Hunt map should contain a readable trail route."), TrailMarkerCount >= 3);
 	TestTrue(TEXT("Expanded map should contain cheap native prototype visuals."), PrototypeVisualCount >= 30);
 	TestTrue(TEXT("Prototype visuals should stay no-tick and no-collision."), bPrototypeVisualsAreCheap);

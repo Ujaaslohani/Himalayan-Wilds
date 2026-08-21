@@ -32,12 +32,18 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Hunting|Arrow")
 	float GetSpeed() const { return Speed; }
 
+	UFUNCTION(BlueprintPure, Category = "Hunting|Arrow")
+	bool HasImpacted() const { return bImpacted; }
+
+	UFUNCTION(BlueprintPure, Category = "Hunting|Arrow")
+	FVector GetImpactLocation() const { return ImpactLocation; }
+
 	UPROPERTY(BlueprintAssignable, Category = "Hunting|Arrow")
 	FHSArrowFeedbackSignature OnArrowFeedback;
 
 private:
 	void HandleTraceHit(const FHitResult& Hit);
-	void StopFlightAt(FVector ImpactLocation);
+	void StopFlightAt(FVector NewImpactLocation);
 
 	UPROPERTY(VisibleAnywhere, Category = "Visual")
 	TObjectPtr<USceneComponent> ArrowRoot;
@@ -54,6 +60,9 @@ private:
 	UPROPERTY(VisibleAnywhere, Category = "Visual")
 	TObjectPtr<UStaticMeshComponent> ArrowFletchingSideMesh;
 
+	UPROPERTY(VisibleAnywhere, Category = "Visual")
+	TObjectPtr<UStaticMeshComponent> ArrowTrailMesh;
+
 	UPROPERTY(Transient)
 	TWeakObjectPtr<AActor> Shooter;
 
@@ -64,4 +73,6 @@ private:
 	float Speed;
 	float DistanceTraveled;
 	bool bFlying;
+	bool bImpacted;
+	FVector ImpactLocation;
 };

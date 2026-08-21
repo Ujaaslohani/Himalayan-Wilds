@@ -3,11 +3,14 @@
 #include "CoreMinimal.h"
 #include "GameFramework/SaveGame.h"
 #include "GameplayTagContainer.h"
+#include "Equipment/HSPlayerEquipmentComponent.h"
+#include "Exploration/HSExplorationStateComponent.h"
 #include "Herbalism/HSPlantEffectComponent.h"
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "Resources/HSItemStack.h"
 #include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
+#include "Settlement/HSSettlementPopulationComponent.h"
 #include "World/HSWorldTimeComponent.h"
 #include "HSSettlementSaveGame.generated.h"
 
@@ -17,7 +20,7 @@ class HIMALAYANSETTLEMENT_API UHSSettlementSaveGame : public USaveGame
 	GENERATED_BODY()
 
 public:
-	static constexpr int32 CurrentSaveVersion = 6;
+	static constexpr int32 CurrentSaveVersion = 7;
 
 	UHSSettlementSaveGame();
 
@@ -42,8 +45,17 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "Save|Equipment")
 	bool bBowEquipped;
 
+	UPROPERTY(VisibleAnywhere, Category = "Save|Equipment")
+	EHSPlayerWeaponMode EquippedWeaponMode;
+
 	UPROPERTY(VisibleAnywhere, Category = "Save|Options")
 	bool bEmergencyLowEndModeEnabled;
+
+	UPROPERTY(VisibleAnywhere, Category = "Save|Options")
+	bool bLowEndStreamingEnabled;
+
+	UPROPERTY(VisibleAnywhere, Category = "Save|Options")
+	int32 GraphicsQualityPreset;
 
 	UPROPERTY(VisibleAnywhere, Category = "Save|Options")
 	int32 MouseSensitivityPreset;
@@ -71,6 +83,24 @@ public:
 
 	UPROPERTY(VisibleAnywhere, Category = "Save|NPC")
 	FGameplayTagContainer RecruitedNPCProfessionTags;
+
+	UPROPERTY(VisibleAnywhere, Category = "Save|NPC")
+	TArray<FHSNPCSettlementAssignment> NPCSettlementAssignments;
+
+	UPROPERTY(VisibleAnywhere, Category = "Save|Settlement")
+	int32 HouseCapacity;
+
+	UPROPERTY(VisibleAnywhere, Category = "Save|Settlement")
+	int32 VillageExpansionDay;
+
+	UPROPERTY(VisibleAnywhere, Category = "Save|Settlement")
+	bool bDefenseSystemEnabled;
+
+	UPROPERTY(VisibleAnywhere, Category = "Save|Settlement")
+	bool bRaidSystemEnabled;
+
+	UPROPERTY(VisibleAnywhere, Category = "Save|Exploration")
+	TArray<FHSDiscoveredLocation> DiscoveredLocations;
 
 	UPROPERTY(VisibleAnywhere, Category = "Save|Hunter")
 	FHSAnimalLead ActiveAnimalLead;

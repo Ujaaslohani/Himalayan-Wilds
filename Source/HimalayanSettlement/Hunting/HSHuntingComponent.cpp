@@ -13,6 +13,8 @@
 UHSHuntingComponent::UHSHuntingComponent()
 	: HuntDistance(1200.0f)
 	, HuntDamage(75.0f)
+	, SpearDamage(45.0f)
+	, SpearRange(180.0f)
 	, TraceChannel(ECC_Visibility)
 	, ArrowProjectileClass(AHSArrowProjectileActor::StaticClass())
 	, ArrowSpeed(3200.0f)
@@ -27,6 +29,13 @@ UHSHuntingComponent::UHSHuntingComponent()
 
 bool UHSHuntingComponent::TryHunt()
 {
+	const AActor* Owner = GetOwner();
+	const UHSPlayerEquipmentComponent* Equipment = Owner ? Owner->FindComponentByClass<UHSPlayerEquipmentComponent>() : nullptr;
+	if (Equipment && Equipment->GetEquippedWeaponMode() == EHSPlayerWeaponMode::Spear)
+	{
+		return TrySpearThrust();
+	}
+
 	return StartBowDraw() && ReleaseBowShot();
 }
 
@@ -90,6 +99,53 @@ bool UHSHuntingComponent::ReleaseBowShot()
 	LastShotTime = GetWorld() ? GetWorld()->GetTimeSeconds() : FPlatformTime::Seconds();
 	OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "ArrowLoosed", "Arrow loosed."));
 	return true;
+}
+
+bool UHSHuntingComponent::TrySpearThrust()
+{
+	const AActor* Owner = GetOwner();
+	const UHSPlayerEquipmentComponent* Equipment = Owner ? Owner->FindComponentByClass<UHSPlayerEquipmentComponent>() : nullptr;
+	if (!Equipment || Equipment->GetEquippedWeaponMode() != EHSPlayerWeaponMode::Spear)
+	{
+		OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "SpearRequired", "Equip a spear first."));
+		return false;
+	}
+
+	FVector TraceStart = FVector::ZeroVector;
+	FVector TraceDirection = FVector::ForwardVector;
+	if (!ResolveTraceView(TraceStart, TraceDirection))
+	{
+		OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "SpearNoAim", "No clear thrust."));
+		return false;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	FHitResult Hit;
+	const FVector TraceEnd = TraceStart + TraceDirection.GetSafeNormal() * SpearRange;
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(HSSpearTrace), false, GetOwner());
+	if (!World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, TraceChannel, QueryParams))
+	{
+		OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "SpearMiss", "Spear missed."));
+		return false;
+	}
+
+	AHSAnimalActor* Animal = Cast<AHSAnimalActor>(Hit.GetActor());
+	if (!Animal || Animal->IsDead())
+	{
+		OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "SpearHitWorld", "Spear struck."));
+		return true;
+	}
+
+	const float AppliedDamage = Animal->ApplyHuntingDamage(SpearDamage, GetOwner());
+	OnHuntingFeedback.Broadcast(Animal->IsDead()
+		? FText::Format(LOCTEXT("SpearKilledAnimal", "Spear killed {0}."), Animal->GetDisplayName())
+		: FText::Format(LOCTEXT("SpearHitAnimal", "Spear hit {0}."), Animal->GetDisplayName()));
+	return AppliedDamage > 0.0f;
 }
 
 float UHSHuntingComponent::GetShotCooldownRemaining() const

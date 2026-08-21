@@ -3,6 +3,7 @@
 #include "Core/HSLogCategories.h"
 #include "Engine/World.h"
 #include "Equipment/HSPlayerEquipmentComponent.h"
+#include "Exploration/HSExplorationStateComponent.h"
 #include "Herbalism/HSPlantEffectComponent.h"
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "Kismet/GameplayStatics.h"
@@ -13,6 +14,7 @@
 #include "Resources/HSResourceCarryComponent.h"
 #include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
+#include "Settlement/HSSettlementPopulationComponent.h"
 #include "Settlement/HSSettlementUnlockComponent.h"
 #include "World/HSGameState.h"
 #include "World/HSWorldTimeComponent.h"
@@ -64,11 +66,13 @@ bool UHSSettlementPersistenceComponent::CaptureToSaveGame(UHSSettlementSaveGame*
 	if (const UHSPlayerEquipmentComponent* Equipment = Owner->FindComponentByClass<UHSPlayerEquipmentComponent>())
 	{
 		SaveGame->bBowEquipped = Equipment->IsBowEquipped();
+		SaveGame->EquippedWeaponMode = Equipment->GetEquippedWeaponMode();
 	}
 
 	if (const AHSPlayerCharacter* PlayerCharacter = Cast<AHSPlayerCharacter>(Owner))
 	{
 		SaveGame->bEmergencyLowEndModeEnabled = PlayerCharacter->IsEmergencyLowEndModeEnabled();
+		SaveGame->GraphicsQualityPreset = PlayerCharacter->GetGraphicsQualityPreset();
 		SaveGame->MouseSensitivityPreset = PlayerCharacter->GetMouseSensitivityPreset();
 		SaveGame->MasterVolumePreset = PlayerCharacter->GetMasterVolumePreset();
 	}
@@ -91,6 +95,15 @@ bool UHSSettlementPersistenceComponent::CaptureToSaveGame(UHSSettlementSaveGame*
 		SaveGame->CompletedBuildings = Construction->GetCompletedBuildings();
 	}
 
+	if (const UHSSettlementPopulationComponent* Population = Owner->FindComponentByClass<UHSSettlementPopulationComponent>())
+	{
+		SaveGame->NPCSettlementAssignments = Population->GetAssignments();
+		SaveGame->HouseCapacity = Population->GetHouseCapacity();
+		SaveGame->VillageExpansionDay = Population->GetVillageExpansionDay();
+		SaveGame->bDefenseSystemEnabled = Population->IsDefenseSystemEnabled();
+		SaveGame->bRaidSystemEnabled = Population->IsRaidSystemEnabled();
+	}
+
 	if (const UHSAnimalIntelComponent* AnimalIntel = Owner->FindComponentByClass<UHSAnimalIntelComponent>())
 	{
 		SaveGame->ActiveAnimalLead = AnimalIntel->GetActiveLead();
@@ -101,6 +114,12 @@ bool UHSSettlementPersistenceComponent::CaptureToSaveGame(UHSSettlementSaveGame*
 	{
 		SaveGame->KnownPlants = PlantEffect->GetKnownPlants();
 		SaveGame->ActivePlantEffect = PlantEffect->GetActiveEffect();
+	}
+
+	if (const UHSExplorationStateComponent* Exploration = Owner->FindComponentByClass<UHSExplorationStateComponent>())
+	{
+		SaveGame->DiscoveredLocations = Exploration->GetDiscoveredLocations();
+		SaveGame->bLowEndStreamingEnabled = Exploration->IsLowEndStreamingEnabled();
 	}
 
 	return true;
@@ -139,12 +158,23 @@ bool UHSSettlementPersistenceComponent::RestoreFromSaveGame(const UHSSettlementS
 
 	if (UHSPlayerEquipmentComponent* Equipment = Owner->FindComponentByClass<UHSPlayerEquipmentComponent>())
 	{
-		Equipment->SetBowEquipped(SaveGame->bBowEquipped);
+		if (SaveGame->SaveVersion < 7)
+		{
+			Equipment->SetBowEquipped(SaveGame->bBowEquipped);
+		}
+		else if (!Equipment->SetWeaponMode(SaveGame->EquippedWeaponMode))
+		{
+			Equipment->SetBowEquipped(SaveGame->bBowEquipped);
+		}
 	}
 
 	if (AHSPlayerCharacter* PlayerCharacter = Cast<AHSPlayerCharacter>(Owner))
 	{
 		PlayerCharacter->SetEmergencyLowEndModeEnabled(SaveGame->bEmergencyLowEndModeEnabled);
+		while (PlayerCharacter->GetGraphicsQualityPreset() != FMath::Clamp(SaveGame->GraphicsQualityPreset, 0, 2))
+		{
+			PlayerCharacter->CycleGraphicsQualityPreset();
+		}
 		while (PlayerCharacter->GetMouseSensitivityPreset() != FMath::Clamp(SaveGame->MouseSensitivityPreset, 0, 2))
 		{
 			PlayerCharacter->CycleMouseSensitivityPreset();
@@ -171,6 +201,11 @@ bool UHSSettlementPersistenceComponent::RestoreFromSaveGame(const UHSSettlementS
 		Construction->BindToWorldTime();
 	}
 
+	if (UHSSettlementPopulationComponent* Population = Owner->FindComponentByClass<UHSSettlementPopulationComponent>())
+	{
+		Population->RestoreSettlementPopulation(SaveGame->NPCSettlementAssignments, SaveGame->HouseCapacity, SaveGame->VillageExpansionDay, SaveGame->bDefenseSystemEnabled, SaveGame->bRaidSystemEnabled);
+	}
+
 	if (UHSAnimalIntelComponent* AnimalIntel = Owner->FindComponentByClass<UHSAnimalIntelComponent>())
 	{
 		AnimalIntel->RestoreAnimalIntelState(SaveGame->ActiveAnimalLead, SaveGame->LastAnimalLeadReportDay);
@@ -181,6 +216,11 @@ bool UHSSettlementPersistenceComponent::RestoreFromSaveGame(const UHSSettlementS
 	{
 		PlantEffect->RestorePlantState(SaveGame->KnownPlants, SaveGame->ActivePlantEffect);
 		PlantEffect->BindToWorldTime();
+	}
+
+	if (UHSExplorationStateComponent* Exploration = Owner->FindComponentByClass<UHSExplorationStateComponent>())
+	{
+		Exploration->RestoreExplorationState(SaveGame->DiscoveredLocations, SaveGame->bLowEndStreamingEnabled);
 	}
 
 	return true;

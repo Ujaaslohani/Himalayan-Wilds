@@ -4,6 +4,7 @@
 #include "Building/HSBuildingDefinition.h"
 #include "Core/HSGameplayTags.h"
 #include "Equipment/HSPlayerEquipmentComponent.h"
+#include "Exploration/HSExplorationStateComponent.h"
 #include "Herbalism/HSPlantDefinition.h"
 #include "Herbalism/HSPlantEffectComponent.h"
 #include "Hunting/HSAnimalIntelComponent.h"
@@ -15,6 +16,7 @@
 #include "Resources/HSResourceCarryComponent.h"
 #include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
+#include "Settlement/HSSettlementPopulationComponent.h"
 #include "Settlement/HSSettlementUnlockComponent.h"
 #include "World/HSGameState.h"
 #include "World/HSWorldTimeComponent.h"
@@ -51,7 +53,9 @@ bool SeedPersistentSettlementState(AHSPlayerCharacter& Player, UHSWorldTimeCompo
 	UHSSettlementUnlockComponent* Unlocks = Player.GetSettlementUnlockComponent();
 	UHSAnimalIntelComponent* AnimalIntel = Player.GetAnimalIntelComponent();
 	UHSPlantEffectComponent* PlantEffect = Player.GetPlantEffectComponent();
-	if (!SettlementPlan || !Construction || !Progress || !Carry || !Health || !Equipment || !Unlocks || !AnimalIntel || !PlantEffect)
+	UHSSettlementPopulationComponent* Population = Player.GetSettlementPopulationComponent();
+	UHSExplorationStateComponent* Exploration = Player.GetExplorationStateComponent();
+	if (!SettlementPlan || !Construction || !Progress || !Carry || !Health || !Equipment || !Unlocks || !AnimalIntel || !PlantEffect || !Population || !Exploration)
 	{
 		return false;
 	}
@@ -72,15 +76,25 @@ bool SeedPersistentSettlementState(AHSPlayerCharacter& Player, UHSWorldTimeCompo
 	Carry->AddStack(FHSItemStack{ TAG_HS_Resource_Meat_Deer, 3 });
 	Carry->AddStack(FHSItemStack{ TAG_HS_Item_Bow_Basic, 1 });
 	Carry->AddStack(FHSItemStack{ TAG_HS_Item_Arrow_Basic, 6 });
+	Carry->AddStack(FHSItemStack{ TAG_HS_Item_Spear_Basic, 1 });
 	Health->ApplyHealthDamage(35.0f);
-	Equipment->SetBowEquipped(true);
+	Equipment->SetSpearEquipped(true);
 	Player.SetEmergencyLowEndModeEnabled(true);
+	Player.CycleGraphicsQualityPreset();
 	Player.CycleMouseSensitivityPreset();
 	Player.CycleMasterVolumePreset();
 	Unlocks->GrantUnlock(TAG_HS_Building_BasicHouse);
 	AnimalIntel->RequestDailyAnimalLead();
 	PlantEffect->LearnPlant(TAG_HS_Plant_SpeedHerb);
 	PlantEffect->ApplyPlantEffect(CreatePersistenceTestPlant(&Player));
+	Population->RecruitNPC(TEXT("Hunter_01"), TAG_HS_NPC_Profession_Hunter);
+	Population->AssignNPCToBuilding(TEXT("Hunter_01"), TAG_HS_Building_BasicHouse);
+	FGameplayTagContainer CompletedBuildings;
+	CompletedBuildings.AddTag(TAG_HS_Building_BasicHouse);
+	CompletedBuildings.AddTag(TAG_HS_Building_WatchPost);
+	Population->RefreshFromCompletedBuildings(CompletedBuildings);
+	Population->AdvanceSettlementDay(1.0f);
+	Exploration->DiscoverLocation(TEXT("Road_01"), FText::FromString(TEXT("Road")), TAG_HS_Location_Road, FVector(800.0f, -120.0f, 0.0f));
 
 	return bSeededSettlement;
 }
@@ -102,7 +116,10 @@ bool FHSSaveGameDefaultsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Default save should start with zero elapsed half-days."), SaveGame->ElapsedHalfDays, 0);
 	TestEqual(TEXT("Default save should start with full player health."), SaveGame->PlayerHealth, 100.0f);
 	TestFalse(TEXT("Default save should not equip a bow."), SaveGame->bBowEquipped);
+	TestEqual(TEXT("Default save should start unarmed."), SaveGame->EquippedWeaponMode, EHSPlayerWeaponMode::Unarmed);
 	TestFalse(TEXT("Default save should not enable emergency low-end mode."), SaveGame->bEmergencyLowEndModeEnabled);
+	TestTrue(TEXT("Default save should keep low-end streaming conservative."), SaveGame->bLowEndStreamingEnabled);
+	TestEqual(TEXT("Default save should use low graphics preset."), SaveGame->GraphicsQualityPreset, 0);
 	TestEqual(TEXT("Default save should use medium mouse sensitivity."), SaveGame->MouseSensitivityPreset, 1);
 	TestEqual(TEXT("Default save should use high master volume."), SaveGame->MasterVolumePreset, 2);
 
@@ -161,15 +178,23 @@ bool FHSPersistenceSnapshotRestoresSettlementStateTest::RunTest(const FString& P
 	TestTrue(TEXT("Snapshot should store settlement claim."), Snapshot->bHasSettlementClaim);
 	TestEqual(TEXT("Snapshot should store one pending schema."), Snapshot->PendingSchemas.Num(), 1);
 	TestEqual(TEXT("Snapshot should store one construction job."), Snapshot->ConstructionJobs.Num(), 1);
-	TestEqual(TEXT("Snapshot should store carried item stacks."), Snapshot->CarriedItems.Num(), 3);
+	TestEqual(TEXT("Snapshot should store carried item stacks."), Snapshot->CarriedItems.Num(), 4);
 	TestEqual(TEXT("Snapshot should store player health."), Snapshot->PlayerHealth, 65.0f);
-	TestTrue(TEXT("Snapshot should store bow equipped state."), Snapshot->bBowEquipped);
+	TestFalse(TEXT("Snapshot should store legacy bow flag as false for spear mode."), Snapshot->bBowEquipped);
+	TestEqual(TEXT("Snapshot should store equipped spear mode."), Snapshot->EquippedWeaponMode, EHSPlayerWeaponMode::Spear);
 	TestTrue(TEXT("Snapshot should store emergency low-end mode state."), Snapshot->bEmergencyLowEndModeEnabled);
+	TestTrue(TEXT("Snapshot should store low-end streaming state."), Snapshot->bLowEndStreamingEnabled);
+	TestEqual(TEXT("Snapshot should store graphics quality preset."), Snapshot->GraphicsQualityPreset, SourcePlayer->GetGraphicsQualityPreset());
 	TestEqual(TEXT("Snapshot should store mouse sensitivity preset."), Snapshot->MouseSensitivityPreset, SourcePlayer->GetMouseSensitivityPreset());
 	TestEqual(TEXT("Snapshot should store master volume preset."), Snapshot->MasterVolumePreset, SourcePlayer->GetMasterVolumePreset());
 	TestTrue(TEXT("Snapshot should store active animal lead."), Snapshot->ActiveAnimalLead.IsValid());
 	TestTrue(TEXT("Snapshot should store known speed herb."), Snapshot->KnownPlants.HasTagExact(TAG_HS_Plant_SpeedHerb));
 	TestTrue(TEXT("Snapshot should store active plant effect."), Snapshot->ActivePlantEffect.IsValid());
+	TestEqual(TEXT("Snapshot should store NPC assignment state."), Snapshot->NPCSettlementAssignments.Num(), 1);
+	TestEqual(TEXT("Snapshot should store house capacity."), Snapshot->HouseCapacity, 2);
+	TestEqual(TEXT("Snapshot should store village expansion day."), Snapshot->VillageExpansionDay, 1);
+	TestTrue(TEXT("Snapshot should store defense foundation state."), Snapshot->bDefenseSystemEnabled);
+	TestEqual(TEXT("Snapshot should store discovered locations."), Snapshot->DiscoveredLocations.Num(), 1);
 
 	TestTrue(TEXT("Snapshot should restore successfully."), RestoredPersistence->RestoreFromSaveGame(Snapshot));
 
@@ -182,6 +207,8 @@ bool FHSPersistenceSnapshotRestoresSettlementStateTest::RunTest(const FString& P
 	UHSSettlementUnlockComponent* RestoredUnlocks = RestoredPlayer->GetSettlementUnlockComponent();
 	UHSAnimalIntelComponent* RestoredAnimalIntel = RestoredPlayer->GetAnimalIntelComponent();
 	UHSPlantEffectComponent* RestoredPlantEffect = RestoredPlayer->GetPlantEffectComponent();
+	UHSSettlementPopulationComponent* RestoredPopulation = RestoredPlayer->GetSettlementPopulationComponent();
+	UHSExplorationStateComponent* RestoredExploration = RestoredPlayer->GetExplorationStateComponent();
 
 	TestTrue(TEXT("Restored plan should keep settlement claim."), RestoredPlan && RestoredPlan->HasSettlementClaim());
 	TestTrue(TEXT("Restored plan should keep pending drying rack schema."), RestoredPlan && RestoredPlan->HasPendingSchema(TAG_HS_Building_BasicDryingRack));
@@ -190,15 +217,23 @@ bool FHSPersistenceSnapshotRestoresSettlementStateTest::RunTest(const FString& P
 	TestTrue(TEXT("Restored progress should keep completed milestone."), RestoredProgress && RestoredProgress->HasCompletedMilestone(TAG_HS_Milestone_OneMorningHunt_DayEnded));
 	TestEqual(TEXT("Restored carry should keep meat quantity."), RestoredCarry ? RestoredCarry->GetQuantityForTag(TAG_HS_Resource_Meat_Deer) : 0, 3);
 	TestEqual(TEXT("Restored carry should keep arrow quantity."), RestoredCarry ? RestoredCarry->GetQuantityForTag(TAG_HS_Item_Arrow_Basic) : 0, 6);
+	TestEqual(TEXT("Restored carry should keep spear quantity."), RestoredCarry ? RestoredCarry->GetQuantityForTag(TAG_HS_Item_Spear_Basic) : 0, 1);
 	TestEqual(TEXT("Restored health should keep saved current health."), RestoredHealth ? RestoredHealth->GetCurrentHealth() : 0.0f, 65.0f);
-	TestTrue(TEXT("Restored equipment should keep bow equipped."), RestoredEquipment && RestoredEquipment->IsBowEquipped());
+	TestTrue(TEXT("Restored equipment should keep spear equipped."), RestoredEquipment && RestoredEquipment->IsSpearEquipped());
 	TestTrue(TEXT("Restored player should keep emergency low-end mode."), RestoredPlayer->IsEmergencyLowEndModeEnabled());
+	TestEqual(TEXT("Restored player should keep graphics quality preset."), RestoredPlayer->GetGraphicsQualityPreset(), SourcePlayer->GetGraphicsQualityPreset());
 	TestEqual(TEXT("Restored player should keep mouse sensitivity preset."), RestoredPlayer->GetMouseSensitivityPreset(), SourcePlayer->GetMouseSensitivityPreset());
 	TestEqual(TEXT("Restored player should keep master volume preset."), RestoredPlayer->GetMasterVolumePreset(), SourcePlayer->GetMasterVolumePreset());
 	TestTrue(TEXT("Restored unlocks should keep house unlock."), RestoredUnlocks && RestoredUnlocks->HasUnlock(TAG_HS_Building_BasicHouse));
 	TestTrue(TEXT("Restored animal intel should keep active deer lead."), RestoredAnimalIntel && RestoredAnimalIntel->HasActiveLead() && RestoredAnimalIntel->GetActiveLead().AnimalTag == TAG_HS_Animal_Deer);
 	TestTrue(TEXT("Restored plant knowledge should keep speed herb."), RestoredPlantEffect && RestoredPlantEffect->HasPlantKnowledge(TAG_HS_Plant_SpeedHerb));
 	TestTrue(TEXT("Restored plant effect should keep active speed effect."), RestoredPlantEffect && RestoredPlantEffect->HasActiveEffect() && RestoredPlantEffect->GetActiveEffect().EffectTag == TAG_HS_Effect_Plant_Speed);
+	TestEqual(TEXT("Restored population should keep one assignment."), RestoredPopulation ? RestoredPopulation->GetPopulation() : 0, 1);
+	TestEqual(TEXT("Restored population should keep house capacity."), RestoredPopulation ? RestoredPopulation->GetHouseCapacity() : 0, 2);
+	TestEqual(TEXT("Restored population should keep expansion day."), RestoredPopulation ? RestoredPopulation->GetVillageExpansionDay() : 0, 1);
+	TestTrue(TEXT("Restored population should keep defense state."), RestoredPopulation && RestoredPopulation->IsDefenseSystemEnabled());
+	TestEqual(TEXT("Restored exploration should keep discovered road."), RestoredExploration ? RestoredExploration->CountDiscoveredByTag(TAG_HS_Location_Road) : 0, 1);
+	TestTrue(TEXT("Restored exploration should keep low-end streaming enabled."), RestoredExploration && RestoredExploration->IsLowEndStreamingEnabled());
 
 	WorldTime->AdvanceHalfDay();
 	TestTrue(TEXT("Restored active construction should complete after another half-day."), RestoredConstruction && RestoredConstruction->HasCompletedBuilding(TAG_HS_Building_BasicHouse));

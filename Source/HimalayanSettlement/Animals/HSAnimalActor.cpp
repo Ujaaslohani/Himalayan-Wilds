@@ -18,10 +18,13 @@ AHSAnimalActor::AHSAnimalActor()
 	, CurrentHealth(1.0f)
 	, RuntimeState(EHSAnimalRuntimeState::Idle)
 	, bHarvested(false)
+	, HitReactionCount(0)
+	, LastDamageTaken(0.0f)
 	, AlertStepDistance(60.0f)
 	, FleeStepDistance(180.0f)
 	, WoundClueClass(AHSWoundClueActor::StaticClass())
 	, WoundClueLifetimeSeconds(45.0f)
+	, MaxFleePathPoints(8)
 {
 	PrimaryActorTick.bCanEverTick = false;
 
@@ -70,10 +73,13 @@ float AHSAnimalActor::ApplyHuntingDamage(float DamageAmount, AActor* DamageInsti
 	const float PreviousHealth = CurrentHealth;
 	CurrentHealth = FMath::Max(0.0f, CurrentHealth - DamageAmount);
 	const float AppliedDamage = PreviousHealth - CurrentHealth;
+	LastDamageTaken = AppliedDamage;
+	++HitReactionCount;
 
 	if (CurrentHealth <= 0.0f)
 	{
 		RuntimeState = EHSAnimalRuntimeState::Dead;
+		SpawnTrackingClue(GetActorLocation(), TAG_HS_Tracking_Blood);
 		if (PrototypeMesh)
 		{
 			PrototypeMesh->SetRelativeRotation(FRotator(0.0f, 0.0f, 90.0f));
@@ -85,7 +91,7 @@ float AHSAnimalActor::ApplyHuntingDamage(float DamageAmount, AActor* DamageInsti
 	{
 		const FVector WoundClueLocation = GetActorLocation();
 		RuntimeState = CurrentHealth <= (GetMaxHealth() * 0.5f) ? EHSAnimalRuntimeState::Fleeing : EHSAnimalRuntimeState::Alert;
-		SpawnWoundClue(WoundClueLocation);
+		SpawnTrackingClue(WoundClueLocation, TAG_HS_Tracking_Blood);
 		ReactToNonlethalDamage(DamageInstigator);
 		UE_LOG(LogHSAI, Verbose, TEXT("%s wounded %s; state is now %d."), *GetNameSafe(DamageInstigator), *GetNameSafe(this), static_cast<int32>(RuntimeState));
 	}
@@ -157,6 +163,9 @@ void AHSAnimalActor::ResetRuntimeStateFromDefinition()
 	RuntimeState = EHSAnimalRuntimeState::Idle;
 	bHarvested = false;
 	HarvestedDrops.Reset();
+	HitReactionCount = 0;
+	LastDamageTaken = 0.0f;
+	RecentFleePath.Reset();
 	if (PrototypeMesh)
 	{
 		PrototypeMesh->SetRelativeRotation(FRotator::ZeroRotator);
@@ -191,10 +200,13 @@ void AHSAnimalActor::ReactToNonlethalDamage(AActor* DamageInstigator)
 
 	SetActorRotation(ReactionDirection.Rotation());
 	const float StepDistance = RuntimeState == EHSAnimalRuntimeState::Fleeing ? FleeStepDistance : AlertStepDistance;
+	RecordFleePathPoint(GetActorLocation());
 	AddActorWorldOffset(ReactionDirection * StepDistance, true);
+	RecordFleePathPoint(GetActorLocation());
+	SpawnTrackingClue(GetActorLocation(), RuntimeState == EHSAnimalRuntimeState::Fleeing ? TAG_HS_Tracking_BrokenGrass : TAG_HS_Tracking_Footprint);
 }
 
-void AHSAnimalActor::SpawnWoundClue(FVector ClueLocation)
+void AHSAnimalActor::SpawnTrackingClue(FVector ClueLocation, FGameplayTag ClueTag)
 {
 	UWorld* World = GetWorld();
 	if (!World || !WoundClueClass)
@@ -209,11 +221,20 @@ void AHSAnimalActor::SpawnWoundClue(FVector ClueLocation)
 	AHSWoundClueActor* WoundClue = World->SpawnActor<AHSWoundClueActor>(WoundClueClass, ClueLocation, FRotator::ZeroRotator, SpawnParameters);
 	if (WoundClue)
 	{
-		WoundClue->ConfigureWoundClue(this, WoundClueLifetimeSeconds);
+		WoundClue->ConfigureTrackingClue(this, ClueTag, WoundClueLifetimeSeconds);
 		if (UHSWorldCleanupSubsystem* CleanupSubsystem = World->GetSubsystem<UHSWorldCleanupSubsystem>())
 		{
-			CleanupSubsystem->RegisterTemporaryActor(WoundClue, WoundClueLifetimeSeconds, TEXT("WoundClue"));
+			CleanupSubsystem->RegisterTemporaryActor(WoundClue, WoundClueLifetimeSeconds, TEXT("TrackingClue"));
 		}
+	}
+}
+
+void AHSAnimalActor::RecordFleePathPoint(FVector Point)
+{
+	RecentFleePath.Add(Point);
+	while (RecentFleePath.Num() > FMath::Max(1, MaxFleePathPoints))
+	{
+		RecentFleePath.RemoveAt(0);
 	}
 }
 

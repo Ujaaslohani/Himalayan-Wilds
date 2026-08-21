@@ -1,6 +1,8 @@
 #include "Core/HSGameplayTags.h"
 
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Animal_Deer, "Animal.Deer");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Animal_Boar, "Animal.Boar");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Animal_Hare, "Animal.Hare");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Animal_State_Alert, "Animal.State.Alert");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Animal_State_Dead, "Animal.State.Dead");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Animal_State_Feeding, "Animal.State.Feeding");
@@ -28,8 +30,15 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Knowledge_Hunting_Basic, "Knowledge.Hunting.Basic"
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Knowledge_Settlement_BasicCrafting, "Knowledge.Settlement.BasicCrafting");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Location_AnimalArea, "Location.AnimalArea");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Location_Forest, "Location.Forest");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Location_Landmark, "Location.Landmark");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Location_PlantPatch, "Location.PlantPatch");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Location_Road, "Location.Road");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Location_River, "Location.River");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Location_Trail, "Location.Trail");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Location_Village, "Location.Village");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Tracking_Blood, "Tracking.Blood");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Tracking_BrokenGrass, "Tracking.BrokenGrass");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Tracking_Footprint, "Tracking.Footprint");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Milestone_OneMorningHunt_DayEnded, "Milestone.OneMorningHunt.DayEnded");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Milestone_TemporaryShelter_Slept, "Milestone.TemporaryShelter.Slept");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_NPC_Profession_Hunter, "NPC.Profession.Hunter");

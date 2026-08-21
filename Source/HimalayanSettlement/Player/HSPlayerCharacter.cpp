@@ -8,6 +8,7 @@
 #include "Equipment/HSPlayerEquipmentComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "Exploration/HSExplorationStateComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Herbalism/HSPlantEffectComponent.h"
@@ -32,6 +33,7 @@
 #include "Settlement/HSBuildPlacementComponent.h"
 #include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
+#include "Settlement/HSSettlementPopulationComponent.h"
 #include "Settlement/HSSettlementUnlockComponent.h"
 #include "UObject/ConstructorHelpers.h"
 #include "World/HSGameState.h"
@@ -180,6 +182,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 
 	InteractionSensor = CreateDefaultSubobject<UHSInteractionSensorComponent>(TEXT("InteractionSensor"));
 	AnimalIntelComponent = CreateDefaultSubobject<UHSAnimalIntelComponent>(TEXT("AnimalIntelComponent"));
+	ExplorationStateComponent = CreateDefaultSubobject<UHSExplorationStateComponent>(TEXT("ExplorationStateComponent"));
 	BuildPlacementComponent = CreateDefaultSubobject<UHSBuildPlacementComponent>(TEXT("BuildPlacementComponent"));
 	PlantEffectComponent = CreateDefaultSubobject<UHSPlantEffectComponent>(TEXT("PlantEffectComponent"));
 	HuntingComponent = CreateDefaultSubobject<UHSHuntingComponent>(TEXT("HuntingComponent"));
@@ -190,6 +193,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	ResourceCarryComponent = CreateDefaultSubobject<UHSResourceCarryComponent>(TEXT("ResourceCarryComponent"));
 	SettlementPlanComponent = CreateDefaultSubobject<UHSSettlementPlanComponent>(TEXT("SettlementPlanComponent"));
 	SettlementUnlockComponent = CreateDefaultSubobject<UHSSettlementUnlockComponent>(TEXT("SettlementUnlockComponent"));
+	SettlementPopulationComponent = CreateDefaultSubobject<UHSSettlementPopulationComponent>(TEXT("SettlementPopulationComponent"));
 	PlayerEquipmentComponent = CreateDefaultSubobject<UHSPlayerEquipmentComponent>(TEXT("PlayerEquipmentComponent"));
 	ResourcePickupActorClass = AHSResourcePickupActor::StaticClass();
 
@@ -343,6 +347,13 @@ void AHSPlayerCharacter::BeginPlay()
 	}
 
 	RefreshBowVisuals();
+	if (SettlementPopulationComponent)
+	{
+		SettlementPopulationComponent->RecruitNPC(TEXT("Hunter"), TAG_HS_NPC_Profession_Hunter);
+		SettlementPopulationComponent->RecruitNPC(TEXT("Builder"), TAG_HS_NPC_Profession_Builder);
+		SettlementPopulationComponent->RecruitNPC(TEXT("Herbalist"), TAG_HS_NPC_Profession_Herbalist);
+		SettlementPopulationComponent->RecruitNPC(TEXT("Soldier"), TAG_HS_NPC_Profession_Soldier);
+	}
 	BindAutosaveSources();
 }
 
@@ -798,16 +809,32 @@ void AHSPlayerCharacter::HandleEquipmentAction(const FInputActionValue& InputVal
 		return;
 	}
 
-	const bool bWasEquipped = PlayerEquipmentComponent->IsBowEquipped();
-	if (!PlayerEquipmentComponent->ToggleBowEquipped())
+	const EHSPlayerWeaponMode PreviousWeaponMode = PlayerEquipmentComponent->GetEquippedWeaponMode();
+	if (!PlayerEquipmentComponent->CycleWeaponMode())
 	{
-		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "BowEquipMissing", "No bow available."));
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "WeaponCycleMissing", "No weapon available."));
 		return;
 	}
 
-	SetMenuFeedback(!bWasEquipped
-		? NSLOCTEXT("HSPlayerCharacter", "BowEquipped", "Bow equipped.")
-		: NSLOCTEXT("HSPlayerCharacter", "BowUnequipped", "Bow stored."));
+	const EHSPlayerWeaponMode NewWeaponMode = PlayerEquipmentComponent->GetEquippedWeaponMode();
+	if (NewWeaponMode == PreviousWeaponMode)
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "WeaponUnchanged", "Weapon unchanged."));
+		return;
+	}
+
+	if (NewWeaponMode == EHSPlayerWeaponMode::Bow)
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "BowEquipped", "Bow equipped."));
+	}
+	else if (NewWeaponMode == EHSPlayerWeaponMode::Spear)
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "SpearEquipped", "Spear equipped."));
+	}
+	else
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "WeaponStored", "Weapon stored."));
+	}
 }
 
 void AHSPlayerCharacter::HandlePauseMenuExit(const FInputActionValue& InputValue)
@@ -1131,6 +1158,11 @@ bool AHSPlayerCharacter::CanStartBuildMenuEntry(int32 EntryIndex, FText* OutReas
 		return false;
 	}
 
+	if (SettlementPopulationComponent && ConstructionComponent && !SettlementPopulationComponent->CanSupportBuilding(Entry->BuildingTag, ConstructionComponent->GetCompletedBuildings(), OutReason))
+	{
+		return false;
+	}
+
 	if (ConstructionComponent && ConstructionComponent->HasCompletedBuilding(Entry->BuildingTag))
 	{
 		if (OutReason)
@@ -1251,6 +1283,18 @@ bool AHSPlayerCharacter::UseSelectedInventoryStack()
 		return false;
 	}
 
+	if (Stack.ItemTag == TAG_HS_Item_Spear_Basic)
+	{
+		if (PlayerEquipmentComponent && PlayerEquipmentComponent->SetSpearEquipped(true))
+		{
+			SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "InventoryUseSpearEquipped", "Spear equipped."));
+			return true;
+		}
+
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "InventoryUseSpearFailed", "Could not equip spear."));
+		return false;
+	}
+
 	SetMenuFeedback(FText::Format(
 		NSLOCTEXT("HSPlayerCharacter", "InventoryUseUnsupported", "{0} cannot be used yet."),
 		FText::FromString(Stack.ItemTag.ToString())));
@@ -1345,6 +1389,10 @@ void AHSPlayerCharacter::ToggleEmergencyLowEndMode()
 void AHSPlayerCharacter::SetEmergencyLowEndModeEnabled(bool bNewEnabled)
 {
 	bEmergencyLowEndModeEnabled = bNewEnabled;
+	if (ExplorationStateComponent)
+	{
+		ExplorationStateComponent->SetLowEndStreamingEnabled(bEmergencyLowEndModeEnabled);
+	}
 
 	if (GetWorld())
 	{
@@ -1691,12 +1739,20 @@ void AHSPlayerCharacter::HandleAutosaveMilestoneCompleted(FGameplayTag Milestone
 
 void AHSPlayerCharacter::HandleAutosaveConstructionChanged(const FHSConstructionJob& ConstructionJob)
 {
+	if (SettlementPopulationComponent && ConstructionComponent)
+	{
+		SettlementPopulationComponent->RefreshFromCompletedBuildings(ConstructionComponent->GetCompletedBuildings());
+	}
 	AutosaveSettlementState(FString::Printf(TEXT("construction %s"), *ConstructionJob.BuildingTag.ToString()));
 }
 
 void AHSPlayerCharacter::HandleAutosaveTimeAdvanced(EHSTimePhase NewTimePhase, float ElapsedDays)
 {
 	(void)NewTimePhase;
+	if (SettlementPopulationComponent)
+	{
+		SettlementPopulationComponent->AdvanceSettlementDay(0.5f);
+	}
 	AutosaveSettlementState(FString::Printf(TEXT("time %.1f days"), ElapsedDays));
 }
 

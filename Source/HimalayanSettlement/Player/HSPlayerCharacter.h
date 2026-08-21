@@ -13,10 +13,12 @@ class UCameraComponent;
 class UStaticMeshComponent;
 class UHSAnimalIntelComponent;
 class UHSBuildPlacementComponent;
+class UHSExplorationStateComponent;
 class UHSPlayerEquipmentComponent;
 class UHSHuntingComponent;
 class UHSInteractionSensorComponent;
 class UHSSettlementPersistenceComponent;
+class UHSSettlementPopulationComponent;
 class UHSPlayerHealthComponent;
 class UHSPlayerProgressComponent;
 class UHSResourceCarryComponent;
@@ -50,6 +52,7 @@ public:
 	UCameraComponent* GetFirstPersonCamera() const { return FirstPersonCamera; }
 	UHSInteractionSensorComponent* GetInteractionSensor() const { return InteractionSensor; }
 	UHSAnimalIntelComponent* GetAnimalIntelComponent() const { return AnimalIntelComponent; }
+	UHSExplorationStateComponent* GetExplorationStateComponent() const { return ExplorationStateComponent; }
 	UHSBuildPlacementComponent* GetBuildPlacementComponent() const { return BuildPlacementComponent; }
 	UHSPlantEffectComponent* GetPlantEffectComponent() const { return PlantEffectComponent; }
 	UHSHuntingComponent* GetHuntingComponent() const { return HuntingComponent; }
@@ -60,6 +63,7 @@ public:
 	UHSResourceCarryComponent* GetResourceCarryComponent() const { return ResourceCarryComponent; }
 	UHSSettlementPlanComponent* GetSettlementPlanComponent() const { return SettlementPlanComponent; }
 	UHSSettlementUnlockComponent* GetSettlementUnlockComponent() const { return SettlementUnlockComponent; }
+	UHSSettlementPopulationComponent* GetSettlementPopulationComponent() const { return SettlementPopulationComponent; }
 	UHSPlayerEquipmentComponent* GetPlayerEquipmentComponent() const { return PlayerEquipmentComponent; }
 	UStaticMeshComponent* GetBowGripMesh() const { return BowGripMesh; }
 	UStaticMeshComponent* GetBowUpperLimbMesh() const { return BowUpperLimbMesh; }
@@ -332,6 +336,9 @@ private:
 	TObjectPtr<UHSAnimalIntelComponent> AnimalIntelComponent;
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
+	TObjectPtr<UHSExplorationStateComponent> ExplorationStateComponent;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSBuildPlacementComponent> BuildPlacementComponent;
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
@@ -360,6 +367,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSSettlementUnlockComponent> SettlementUnlockComponent;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player")
+	TObjectPtr<UHSSettlementPopulationComponent> SettlementPopulationComponent;
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSPlayerEquipmentComponent> PlayerEquipmentComponent;

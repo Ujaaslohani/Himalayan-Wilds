@@ -18,6 +18,8 @@ AHSArrowProjectileActor::AHSArrowProjectileActor()
 	, Speed(3200.0f)
 	, DistanceTraveled(0.0f)
 	, bFlying(false)
+	, bImpacted(false)
+	, ImpactLocation(FVector::ZeroVector)
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
@@ -71,6 +73,18 @@ AHSArrowProjectileActor::AHSArrowProjectileActor()
 		ArrowFletchingSideMesh->SetStaticMesh(CubeMesh.Object);
 	}
 
+	ArrowTrailMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ArrowTrailMesh"));
+	ArrowTrailMesh->SetupAttachment(ArrowRoot);
+	ArrowTrailMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ArrowTrailMesh->SetGenerateOverlapEvents(false);
+	ArrowTrailMesh->SetRelativeLocation(FVector(-78.0f, 0.0f, 0.0f));
+	ArrowTrailMesh->SetRelativeScale3D(FVector(0.7f, 0.006f, 0.006f));
+	ArrowTrailMesh->SetHiddenInGame(true);
+	if (CubeMesh.Succeeded())
+	{
+		ArrowTrailMesh->SetStaticMesh(CubeMesh.Object);
+	}
+
 	SetLifeSpan(8.0f);
 }
 
@@ -88,11 +102,17 @@ void AHSArrowProjectileActor::LaunchArrow(AActor* NewShooter, FVector StartLocat
 	Speed = FMath::Max(50.0f, NewSpeed);
 	DistanceTraveled = 0.0f;
 	bFlying = true;
+	bImpacted = false;
+	ImpactLocation = FVector::ZeroVector;
 
 	SetActorLocation(StartLocation);
 	SetActorRotation(FlightDirection.Rotation());
 	PreviousLocation = StartLocation;
 	SetActorTickEnabled(true);
+	if (ArrowTrailMesh)
+	{
+		ArrowTrailMesh->SetHiddenInGame(false);
+	}
 	if (UWorld* World = GetWorld())
 	{
 		if (UHSWorldCleanupSubsystem* CleanupSubsystem = World->GetSubsystem<UHSWorldCleanupSubsystem>())
@@ -163,12 +183,18 @@ void AHSArrowProjectileActor::HandleTraceHit(const FHitResult& Hit)
 		: FText::Format(LOCTEXT("ArrowHitAnimal", "Arrow hit {0}."), Animal->GetDisplayName()));
 }
 
-void AHSArrowProjectileActor::StopFlightAt(FVector ImpactLocation)
+void AHSArrowProjectileActor::StopFlightAt(FVector NewImpactLocation)
 {
 	bFlying = false;
+	bImpacted = true;
+	ImpactLocation = NewImpactLocation;
 	SetActorTickEnabled(false);
-	SetActorLocation(ImpactLocation);
-	PreviousLocation = ImpactLocation;
+	SetActorLocation(NewImpactLocation);
+	PreviousLocation = NewImpactLocation;
+	if (ArrowTrailMesh)
+	{
+		ArrowTrailMesh->SetHiddenInGame(true);
+	}
 	SetLifeSpan(4.0f);
 	if (UWorld* World = GetWorld())
 	{

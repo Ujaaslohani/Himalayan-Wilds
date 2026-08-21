@@ -3,6 +3,7 @@
 #include "Core/HSGameplayTags.h"
 #include "Engine/Canvas.h"
 #include "Equipment/HSPlayerEquipmentComponent.h"
+#include "Exploration/HSExplorationStateComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Herbalism/HSPlantEffectComponent.h"
 #include "Hunting/HSAnimalIntelComponent.h"
@@ -15,6 +16,7 @@
 #include "Settlement/HSBuildPlacementComponent.h"
 #include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
+#include "Settlement/HSSettlementPopulationComponent.h"
 #include "World/HSGameState.h"
 #include "World/HSWorldTimeComponent.h"
 
@@ -158,13 +160,15 @@ TArray<FString> AHSHUD::BuildStatusLines(const AHSGameState* GameState, const AP
 	const UHSPlayerEquipmentComponent* EquipmentComponent = Pawn ? Pawn->FindComponentByClass<UHSPlayerEquipmentComponent>() : nullptr;
 	if (EquipmentComponent)
 	{
-		const FString BowState = EquipmentComponent->IsBowEquipped() ? TEXT("equipped") : TEXT("stored");
+		const FString WeaponState = EquipmentComponent->GetEquippedWeaponMode() == EHSPlayerWeaponMode::Bow
+			? TEXT("Bow")
+			: (EquipmentComponent->GetEquippedWeaponMode() == EHSPlayerWeaponMode::Spear ? TEXT("Spear") : TEXT("Unarmed"));
 		const UHSHuntingComponent* HuntingComponent = Pawn ? Pawn->FindComponentByClass<UHSHuntingComponent>() : nullptr;
 		const float CooldownRemaining = HuntingComponent ? HuntingComponent->GetShotCooldownRemaining() : 0.0f;
 		const FString ReadyState = EquipmentComponent->CanUseBow()
 			? (CooldownRemaining > 0.0f ? FString::Printf(TEXT("nocking %.1fs"), CooldownRemaining) : TEXT("ready"))
-			: TEXT("not ready");
-		Lines.Add(FString::Printf(TEXT("Equipment: Bow %s, arrows %d, %s"), *BowState, EquipmentComponent->GetArrowCount(), *ReadyState));
+			: (EquipmentComponent->IsSpearEquipped() ? TEXT("melee ready") : TEXT("not ready"));
+		Lines.Add(FString::Printf(TEXT("Equipment: %s, arrows %d, %s"), *WeaponState, EquipmentComponent->GetArrowCount(), *ReadyState));
 	}
 
 	if (ResourceCarryComponent)
@@ -223,6 +227,18 @@ TArray<FString> AHSHUD::BuildStatusLines(const AHSGameState* GameState, const AP
 				break;
 			}
 		}
+	}
+
+	const UHSSettlementPopulationComponent* PopulationComponent = Pawn ? Pawn->FindComponentByClass<UHSSettlementPopulationComponent>() : nullptr;
+	if (PopulationComponent)
+	{
+		Lines.Add(PopulationComponent->GetSettlementStatusText().ToString());
+	}
+
+	const UHSExplorationStateComponent* ExplorationComponent = Pawn ? Pawn->FindComponentByClass<UHSExplorationStateComponent>() : nullptr;
+	if (ExplorationComponent)
+	{
+		Lines.Add(ExplorationComponent->GetExplorationStatusText().ToString());
 	}
 
 	return Lines;
@@ -649,7 +665,7 @@ void AHSHUD::DrawPauseMenu(const AHSPlayerCharacter* PlayerCharacter)
 	}
 
 	const float PanelWidth = FMath::Min(420.0f, Canvas->ClipX - 48.0f);
-	const float PanelHeight = PlayerCharacter->IsPauseOptionsOpen() ? 380.0f : 240.0f;
+	const float PanelHeight = PlayerCharacter->IsPauseOptionsOpen() ? 440.0f : 240.0f;
 	const float PanelX = (Canvas->ClipX - PanelWidth) * 0.5f;
 	const float PanelY = (Canvas->ClipY - PanelHeight) * 0.5f;
 
@@ -673,6 +689,8 @@ void AHSHUD::DrawPauseMenu(const AHSPlayerCharacter* PlayerCharacter)
 		MenuLines.Add(FString::Printf(TEXT("[7] Mouse: %s"), *PlayerCharacter->GetMouseSensitivityPresetName()));
 		MenuLines.Add(FString::Printf(TEXT("[8] Volume: %s"), *PlayerCharacter->GetMasterVolumePresetName()));
 		MenuLines.Add(FString::Printf(TEXT("[9] Save Slot: %s"), *PlayerCharacter->GetSelectedManualSaveSlotLabel()));
+		MenuLines.Add(FString::Printf(TEXT("[F8] Low-end: %s"), PlayerCharacter->IsEmergencyLowEndModeEnabled() ? TEXT("On") : TEXT("Off")));
+		MenuLines.Add(FString::Printf(TEXT("[F10] FPS overlay: %s"), PlayerCharacter->IsPerformanceOverlayEnabled() ? TEXT("On") : TEXT("Off")));
 	}
 
 	for (const FString& MenuLine : MenuLines)
@@ -686,7 +704,7 @@ void AHSHUD::DrawPauseMenu(const AHSPlayerCharacter* PlayerCharacter)
 		LineY += 12.0f;
 		DrawText(TEXT("Options"), FLinearColor(0.75f, 1.0f, 0.72f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.9f, false);
 		LineY += 28.0f;
-		DrawText(TEXT("6/7/8 options   9 save slot"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
+		DrawText(TEXT("6/7/8 options   9 save slot   F8/F10 performance"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
 	}
 
 	DrawPlayerMenuFeedback(PlayerCharacter, PanelY + PanelHeight - 22.0f);

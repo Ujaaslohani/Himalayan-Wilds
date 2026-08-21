@@ -172,6 +172,26 @@ void CreateDefinitions()
 	Deer->HarvestDrops = { Stack(TEXT("Resource.Meat.Deer"), 2), Stack(TEXT("Resource.Hide.Deer"), 1) };
 	SaveAssetPackage(Deer);
 
+	UHSAnimalDefinition* Boar = ConfigureAsset<UHSAnimalDefinition>(TEXT("/Game/Data/Animals/DA_Animal_Boar"), TEXT("DA_Animal_Boar"));
+	Boar->DisplayName = FText::FromString(TEXT("Boar"));
+	Boar->SpeciesTag = Tag(TEXT("Animal.Boar"));
+	Boar->MaxHealth = 115.0f;
+	Boar->WalkSpeed = 145.0f;
+	Boar->FleeSpeed = 500.0f;
+	Boar->SightRadius = 1450.0f;
+	Boar->HarvestDrops = { Stack(TEXT("Resource.Meat.Deer"), 3), Stack(TEXT("Resource.Hide.Deer"), 1) };
+	SaveAssetPackage(Boar);
+
+	UHSAnimalDefinition* Hare = ConfigureAsset<UHSAnimalDefinition>(TEXT("/Game/Data/Animals/DA_Animal_Hare"), TEXT("DA_Animal_Hare"));
+	Hare->DisplayName = FText::FromString(TEXT("Hare"));
+	Hare->SpeciesTag = Tag(TEXT("Animal.Hare"));
+	Hare->MaxHealth = 25.0f;
+	Hare->WalkSpeed = 240.0f;
+	Hare->FleeSpeed = 720.0f;
+	Hare->SightRadius = 900.0f;
+	Hare->HarvestDrops = { Stack(TEXT("Resource.Meat.Deer"), 1) };
+	SaveAssetPackage(Hare);
+
 	UHSNPCDefinition* Hunter = ConfigureAsset<UHSNPCDefinition>(TEXT("/Game/Data/NPCs/DA_NPC_Hunter"), TEXT("DA_NPC_Hunter"));
 	Hunter->DisplayName = FText::FromString(TEXT("Hunter"));
 	Hunter->ProfessionTag = Tag(TEXT("NPC.Profession.Hunter"));
@@ -422,6 +442,17 @@ void CreateMap()
 	{
 		Deer->SetAnimalDefinition(DeerDefinition);
 	}
+	AHSAnimalActor* Boar = SpawnNamedActor<AHSAnimalActor>(World, TEXT("Animal_Boar_Prototype"), FVector(980.0f, -620.0f, 70.0f), FRotator(0.0f, -110.0f, 0.0f));
+	if (UHSAnimalDefinition* BoarDefinition = LoadObject<UHSAnimalDefinition>(nullptr, TEXT("/Game/Data/Animals/DA_Animal_Boar.DA_Animal_Boar")))
+	{
+		Boar->SetAnimalDefinition(BoarDefinition);
+	}
+	AHSAnimalActor* Hare = SpawnNamedActor<AHSAnimalActor>(World, TEXT("Animal_Hare_Prototype"), FVector(460.0f, 470.0f, 55.0f), FRotator(0.0f, -20.0f, 0.0f));
+	if (UHSAnimalDefinition* HareDefinition = LoadObject<UHSAnimalDefinition>(nullptr, TEXT("/Game/Data/Animals/DA_Animal_Hare.DA_Animal_Hare")))
+	{
+		Hare->SetAnimalDefinition(HareDefinition);
+		Hare->SetActorScale3D(FVector(0.55f, 0.55f, 0.55f));
+	}
 
 	SpawnNamedActor<AHSInteractionTarget>(World, TEXT("Interaction_Target_Practice"), FVector(200.0f, 160.0f, 90.0f), FRotator(0.0f, 180.0f, 0.0f));
 	SpawnNamedActor<AHSRestPointActor>(World, TEXT("Camp_RestPoint_EndMorning"), FVector(-80.0f, 220.0f, 45.0f), FRotator::ZeroRotator);
@@ -435,6 +466,10 @@ void CreateMap()
 	SpawnVisual(World, TEXT("Builder_Workbench"), FVector(-430.0f, -345.0f, 42.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.37f, 0.24f, 0.12f, 1.0f), FVector(1.25f, 0.45f, 0.25f), FRotator(0.0f, 8.0f, 0.0f));
 	SpawnVisual(World, TEXT("Builder_Log_Pile_A"), FVector(-520.0f, -360.0f, 30.0f), EHSPrototypeVisualShape::Cylinder, FLinearColor(0.34f, 0.21f, 0.11f, 1.0f), FVector(0.18f, 0.18f, 1.55f), FRotator(90.0f, 0.0f, 0.0f));
 	SpawnVisual(World, TEXT("Builder_Log_Pile_B"), FVector(-520.0f, -325.0f, 30.0f), EHSPrototypeVisualShape::Cylinder, FLinearColor(0.30f, 0.18f, 0.09f, 1.0f), FVector(0.18f, 0.18f, 1.55f), FRotator(90.0f, 0.0f, 0.0f));
+	SpawnVisual(World, TEXT("Trail_Road_Settlement"), FVector(-170.0f, -295.0f, 7.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.32f, 0.27f, 0.18f, 1.0f), FVector(8.8f, 0.35f, 0.02f), FRotator(0.0f, -8.0f, 0.0f));
+	SpawnVisual(World, TEXT("Trail_Road_Forest"), FVector(420.0f, -350.0f, 8.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.29f, 0.25f, 0.17f, 1.0f), FVector(8.2f, 0.28f, 0.02f), FRotator(0.0f, -6.0f, 0.0f));
+	SpawnVisual(World, TEXT("Stream_Performance_Test"), FVector(500.0f, 90.0f, 9.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.10f, 0.24f, 0.32f, 1.0f), FVector(6.5f, 0.22f, 0.018f), FRotator(0.0f, -16.0f, 0.0f));
+	SpawnVisual(World, TEXT("Landmark_StandingStone"), FVector(1010.0f, -145.0f, 90.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.34f, 0.35f, 0.32f, 1.0f), FVector(0.42f, 0.26f, 1.8f), FRotator(0.0f, 10.0f, 0.0f));
 
 	SpawnFenceRun(World, TEXT("Settlement_Fence_North"), { FVector(-650.0f, -430.0f, 0.0f), FVector(-480.0f, -430.0f, 0.0f), FVector(-310.0f, -430.0f, 0.0f), FVector(-140.0f, -430.0f, 0.0f) }, true);
 	SpawnFenceRun(World, TEXT("Settlement_Fence_West"), { FVector(-650.0f, -430.0f, 0.0f), FVector(-650.0f, -250.0f, 0.0f), FVector(-650.0f, -70.0f, 0.0f) }, false);
@@ -450,10 +485,13 @@ void CreateMap()
 	SpawnExplorationMarker(World, TEXT("Explore_Forest_Edge"), FVector(900.0f, -360.0f, 100.0f), FText::FromString(TEXT("Forest Edge")), TEXT("Location.Forest"));
 	SpawnExplorationMarker(World, TEXT("Explore_Animal_Ridge"), FVector(720.0f, -420.0f, 100.0f), FText::FromString(TEXT("Animal Ridge")), TEXT("Location.AnimalArea"));
 	SpawnExplorationMarker(World, TEXT("Trail_Settlement_01"), FVector(-260.0f, -245.0f, 95.0f), FText::FromString(TEXT("Village Trail")), TEXT("Location.Trail"));
+	SpawnExplorationMarker(World, TEXT("Road_Settlement_01"), FVector(-120.0f, -310.0f, 95.0f), FText::FromString(TEXT("Settlement Road")), TEXT("Location.Road"));
 	SpawnExplorationMarker(World, TEXT("Trail_Forest_02"), FVector(180.0f, -300.0f, 95.0f), FText::FromString(TEXT("Forest Trail")), TEXT("Location.Trail"));
 	SpawnExplorationMarker(World, TEXT("Trail_Forest_03"), FVector(560.0f, -340.0f, 95.0f), FText::FromString(TEXT("Ridge Trail")), TEXT("Location.Trail"));
 	SpawnExplorationMarker(World, TEXT("Trail_Ridge_04"), FVector(780.0f, -520.0f, 95.0f), FText::FromString(TEXT("Ridge Return")), TEXT("Location.Trail"));
-	SpawnExplorationMarker(World, TEXT("Explore_Herb_Patch"), FVector(360.0f, 305.0f, 100.0f), FText::FromString(TEXT("Herb Patch")), TEXT("Location.Forest"));
+	SpawnExplorationMarker(World, TEXT("Explore_Herb_Patch"), FVector(360.0f, 305.0f, 100.0f), FText::FromString(TEXT("Herb Patch")), TEXT("Location.PlantPatch"));
+	SpawnExplorationMarker(World, TEXT("Explore_Stream"), FVector(500.0f, 90.0f, 95.0f), FText::FromString(TEXT("Cold Stream")), TEXT("Location.River"));
+	SpawnExplorationMarker(World, TEXT("Explore_StandingStone"), FVector(1010.0f, -145.0f, 150.0f), FText::FromString(TEXT("Standing Stone")), TEXT("Location.Landmark"));
 	SpawnExplorationMarker(World, TEXT("Explore_Builder_Yard"), FVector(-430.0f, -330.0f, 100.0f), FText::FromString(TEXT("Builder Yard")), TEXT("Location.Village"));
 
 	SpawnTreeCluster(World, TEXT("ForestEdge"), {
@@ -472,6 +510,8 @@ void CreateMap()
 	SpawnVisual(World, TEXT("Ridge_Rock_A"), FVector(650.0f, -500.0f, 35.0f), EHSPrototypeVisualShape::Sphere, FLinearColor(0.34f, 0.36f, 0.34f, 1.0f), FVector(1.0f, 0.65f, 0.45f));
 	SpawnVisual(World, TEXT("Ridge_Rock_B"), FVector(820.0f, -560.0f, 30.0f), EHSPrototypeVisualShape::Sphere, FLinearColor(0.28f, 0.30f, 0.29f, 1.0f), FVector(0.8f, 0.55f, 0.38f));
 	SpawnVisual(World, TEXT("Ridge_Outcrop"), FVector(910.0f, -420.0f, 45.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.30f, 0.31f, 0.29f, 1.0f), FVector(1.8f, 0.65f, 0.65f), FRotator(0.0f, -24.0f, 0.0f));
+	SpawnVisual(World, TEXT("Boundary_Ridge_North"), FVector(260.0f, -1260.0f, 120.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.22f, 0.27f, 0.22f, 1.0f), FVector(18.0f, 0.6f, 2.0f), FRotator(0.0f, 4.0f, 0.0f));
+	SpawnVisual(World, TEXT("Boundary_Ridge_East"), FVector(1480.0f, -260.0f, 130.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.20f, 0.25f, 0.20f, 1.0f), FVector(0.7f, 12.0f, 2.2f), FRotator(0.0f, -8.0f, 0.0f));
 
 	World->MarkPackageDirty();
 	SaveMapPackage(World);

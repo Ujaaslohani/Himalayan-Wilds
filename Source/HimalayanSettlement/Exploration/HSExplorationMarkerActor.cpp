@@ -2,18 +2,22 @@
 
 #include "Components/StaticMeshComponent.h"
 #include "Core/HSGameplayTags.h"
+#include "Exploration/HSExplorationStateComponent.h"
 #include "UObject/ConstructorHelpers.h"
 
 #define LOCTEXT_NAMESPACE "HSExplorationMarkerActor"
 
 AHSExplorationMarkerActor::AHSExplorationMarkerActor()
 	: DisplayName(LOCTEXT("DefaultExplorationMarkerName", "Exploration Marker"))
+	, bDiscovered(false)
 {
 	PrimaryActorTick.bCanEverTick = false;
 
 	PrototypeMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PrototypeMesh"));
 	RootComponent = PrototypeMesh;
-	PrototypeMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PrototypeMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	PrototypeMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
+	PrototypeMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	PrototypeMesh->SetGenerateOverlapEvents(false);
 	PrototypeMesh->SetRelativeScale3D(FVector(0.45f, 0.45f, 1.4f));
 
@@ -41,6 +45,29 @@ AHSExplorationMarkerActor::AHSExplorationMarkerActor()
 	{
 		this->SphereMesh = SphereMeshFinder.Object;
 	}
+}
+
+FText AHSExplorationMarkerActor::GetInteractionPrompt_Implementation(const AActor* Interactor) const
+{
+	return bDiscovered
+		? FText::Format(LOCTEXT("ExplorationMarkerDiscovered", "Discovered {0}"), DisplayName)
+		: FText::Format(LOCTEXT("ExploreMarkerPrompt", "Discover {0}"), DisplayName);
+}
+
+bool AHSExplorationMarkerActor::CanInteract_Implementation(const AActor* Interactor) const
+{
+	return !bDiscovered && MarkerTag.IsValid();
+}
+
+void AHSExplorationMarkerActor::Interact_Implementation(AActor* Interactor)
+{
+	UHSExplorationStateComponent* ExplorationState = Interactor ? Interactor->FindComponentByClass<UHSExplorationStateComponent>() : nullptr;
+	if (!ExplorationState)
+	{
+		return;
+	}
+
+	bDiscovered = ExplorationState->DiscoverLocation(GetFName(), DisplayName, MarkerTag, GetActorLocation()) || bDiscovered;
 }
 
 void AHSExplorationMarkerActor::ConfigureMarker(FText NewDisplayName, FGameplayTag NewMarkerTag)

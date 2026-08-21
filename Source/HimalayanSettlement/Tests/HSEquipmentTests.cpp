@@ -44,6 +44,46 @@ bool FHSEquipmentConsumesArrowsForEquippedBowTest::RunTest(const FString& Parame
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSEquipmentCyclesAvailableWeaponModesTest,
+	"HimalayanSettlement.Equipment.CyclesAvailableWeaponModes",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSEquipmentCyclesAvailableWeaponModesTest::RunTest(const FString& Parameters)
+{
+	AHSPlayerCharacter* Player = NewObject<AHSPlayerCharacter>();
+	UHSPlayerEquipmentComponent* Equipment = Player ? Player->GetPlayerEquipmentComponent() : nullptr;
+	UHSResourceCarryComponent* Carry = Player ? Player->GetResourceCarryComponent() : nullptr;
+
+	TestNotNull(TEXT("Player should own equipment component."), Equipment);
+	TestNotNull(TEXT("Player should own resource carry component."), Carry);
+	if (!Equipment || !Carry)
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Weapon mode should start unarmed."), Equipment->GetEquippedWeaponMode(), EHSPlayerWeaponMode::Unarmed);
+	TestFalse(TEXT("Cycling with no carried weapons should fail."), Equipment->CycleWeaponMode());
+	TestEqual(TEXT("Failed cycle should stay unarmed."), Equipment->GetEquippedWeaponMode(), EHSPlayerWeaponMode::Unarmed);
+
+	Carry->AddStack(FHSItemStack{ TAG_HS_Item_Bow_Basic, 1 });
+	TestTrue(TEXT("Cycling with a bow should equip bow."), Equipment->CycleWeaponMode());
+	TestEqual(TEXT("Weapon mode should be bow."), Equipment->GetEquippedWeaponMode(), EHSPlayerWeaponMode::Bow);
+	TestTrue(TEXT("Bow mode should report bow equipped."), Equipment->IsBowEquipped());
+
+	Carry->AddStack(FHSItemStack{ TAG_HS_Item_Spear_Basic, 1 });
+	TestTrue(TEXT("Cycling from bow with spear carried should equip spear."), Equipment->CycleWeaponMode());
+	TestEqual(TEXT("Weapon mode should be spear."), Equipment->GetEquippedWeaponMode(), EHSPlayerWeaponMode::Spear);
+	TestTrue(TEXT("Spear mode should report spear equipped."), Equipment->IsSpearEquipped());
+
+	TestTrue(TEXT("Cycling from spear should store weapons."), Equipment->CycleWeaponMode());
+	TestEqual(TEXT("Weapon mode should return to unarmed."), Equipment->GetEquippedWeaponMode(), EHSPlayerWeaponMode::Unarmed);
+	TestTrue(TEXT("Direct spear equip should succeed when carried."), Equipment->SetSpearEquipped(true));
+	TestEqual(TEXT("Direct spear equip should select spear mode."), Equipment->GetEquippedWeaponMode(), EHSPlayerWeaponMode::Spear);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHSPlayerHasEquipmentComponentTest,
 	"HimalayanSettlement.Equipment.PlayerHasNativeEquipmentComponent",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

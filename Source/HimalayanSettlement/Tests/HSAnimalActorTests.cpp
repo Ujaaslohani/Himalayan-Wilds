@@ -117,15 +117,40 @@ bool FHSAnimalActorFleesWhenBadlyWoundedTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Badly wounded deer should still be alive."), Deer->IsDead());
 	TestTrue(TEXT("Badly wounded deer should enter fleeing state."), Deer->IsFleeing());
 	TestGreaterThan(TEXT("Fleeing deer should move away from the attacker."), Deer->GetActorLocation().X, StartLocation.X);
+	TestEqual(TEXT("Animal should record one hit reaction."), Deer->GetHitReactionCount(), 1);
+	TestEqual(TEXT("Animal should remember recent damage amount."), Deer->GetLastDamageTaken(), 40.0f);
+	TestGreaterThan(TEXT("Animal should record a readable flee path."), Deer->GetRecentFleePath().Num(), 1);
 
 	bool bFoundWoundClue = false;
+	bool bFoundTrackingClue = false;
 	for (TActorIterator<AHSWoundClueActor> It(World); It; ++It)
 	{
 		bFoundWoundClue |= It->GetSourceAnimal() == Deer && !It->PrimaryActorTick.bCanEverTick;
+		bFoundTrackingClue |= It->GetClueTag() == TAG_HS_Tracking_Blood || It->GetClueTag() == TAG_HS_Tracking_BrokenGrass;
 	}
 	TestTrue(TEXT("Nonlethal hit should leave a no-tick wound clue linked to the deer."), bFoundWoundClue);
+	TestTrue(TEXT("Nonlethal hit should leave readable tracking signs."), bFoundTrackingClue);
 
 	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSWoundClueStoresTrackingTagsTest,
+	"HimalayanSettlement.Animals.TrackingClueStoresGameplayTag",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSWoundClueStoresTrackingTagsTest::RunTest(const FString& Parameters)
+{
+	AHSWoundClueActor* Clue = NewObject<AHSWoundClueActor>();
+
+	TestNotNull(TEXT("Tracking clue should be constructible."), Clue);
+	TestFalse(TEXT("Tracking clue should not tick."), Clue->PrimaryActorTick.bCanEverTick);
+	Clue->SetActorLocation(FVector(10.0f, 20.0f, 30.0f));
+	Clue->ConfigureTrackingClue(nullptr, TAG_HS_Tracking_Footprint, 30.0f);
+	TestTrue(TEXT("Tracking clue should store footprint tag."), Clue->GetClueTag() == TAG_HS_Tracking_Footprint);
+	TestEqual(TEXT("Tracking clue should move to configured location."), Clue->GetActorLocation(), FVector(10.0f, 20.0f, 30.0f));
+
 	return true;
 }
 

@@ -62,6 +62,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Animal|State")
 	bool IsFleeing() const { return RuntimeState == EHSAnimalRuntimeState::Fleeing; }
 
+	UFUNCTION(BlueprintPure, Category = "Animal|State")
+	int32 GetHitReactionCount() const { return HitReactionCount; }
+
+	UFUNCTION(BlueprintPure, Category = "Animal|State")
+	const TArray<FVector>& GetRecentFleePath() const { return RecentFleePath; }
+
+	UFUNCTION(BlueprintPure, Category = "Animal|State")
+	float GetLastDamageTaken() const { return LastDamageTaken; }
+
 	UFUNCTION(BlueprintPure, Category = "Animal|Harvest")
 	bool HasBeenHarvested() const { return bHarvested; }
 
@@ -90,7 +99,8 @@ private:
 	void ResetRuntimeStateFromDefinition();
 	float GetMaxHealth() const;
 	void ReactToNonlethalDamage(AActor* DamageInstigator);
-	void SpawnWoundClue(FVector ClueLocation);
+	void SpawnTrackingClue(FVector ClueLocation, FGameplayTag ClueTag);
+	void RecordFleePathPoint(FVector Point);
 
 	UPROPERTY(VisibleAnywhere, Category = "Interaction")
 	TObjectPtr<UBoxComponent> InteractionBounds;
@@ -116,6 +126,15 @@ private:
 	UPROPERTY(VisibleAnywhere, Category = "Animal|Harvest")
 	TArray<FHSItemStack> HarvestedDrops;
 
+	UPROPERTY(VisibleAnywhere, Category = "Animal|Reaction")
+	int32 HitReactionCount;
+
+	UPROPERTY(VisibleAnywhere, Category = "Animal|Reaction")
+	float LastDamageTaken;
+
+	UPROPERTY(VisibleAnywhere, Category = "Animal|Reaction")
+	TArray<FVector> RecentFleePath;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Animal|Reaction", meta = (ClampMin = "0.0", Units = "cm"))
 	float AlertStepDistance;
 
@@ -127,4 +146,7 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Animal|Tracking", meta = (ClampMin = "1.0", Units = "s"))
 	float WoundClueLifetimeSeconds;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Animal|Tracking", meta = (ClampMin = "1"))
+	int32 MaxFleePathPoints;
 };
