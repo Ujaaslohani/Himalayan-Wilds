@@ -143,7 +143,7 @@ Scope:
 
 - Herbalist role definition.
 - One or two plant definitions.
-- Plant effects such as speed increase, scent masking, heightened senses, healing, or stamina.
+- Plant effects such as speed increase, scent masking, heightened senses, healing, or health support.
 - Temporary effect component on player.
 - Minimal feedback for active effect.
 

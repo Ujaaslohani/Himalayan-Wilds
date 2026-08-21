@@ -89,7 +89,7 @@ Current implementation boundary:
   - scent masking
   - heightened senses
   - healing
-  - stamina support
+  - health support
 - Makes forest exploration more strategic before hunting or travel.
 
 ## Daily Loop Target

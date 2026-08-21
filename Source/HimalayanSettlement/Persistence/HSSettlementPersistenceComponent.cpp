@@ -8,6 +8,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Persistence/HSSettlementSaveGame.h"
 #include "Player/HSPlayerCharacter.h"
+#include "Player/HSPlayerHealthComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
 #include "Settlement/HSConstructionComponent.h"
@@ -53,6 +54,11 @@ bool UHSSettlementPersistenceComponent::CaptureToSaveGame(UHSSettlementSaveGame*
 	if (const UHSResourceCarryComponent* ResourceCarry = Owner->FindComponentByClass<UHSResourceCarryComponent>())
 	{
 		SaveGame->CarriedItems = ResourceCarry->GetCarriedItems();
+	}
+
+	if (const UHSPlayerHealthComponent* Health = Owner->FindComponentByClass<UHSPlayerHealthComponent>())
+	{
+		SaveGame->PlayerHealth = Health->GetCurrentHealth();
 	}
 
 	if (const UHSPlayerEquipmentComponent* Equipment = Owner->FindComponentByClass<UHSPlayerEquipmentComponent>())
@@ -122,6 +128,13 @@ bool UHSSettlementPersistenceComponent::RestoreFromSaveGame(const UHSSettlementS
 	if (UHSResourceCarryComponent* ResourceCarry = Owner->FindComponentByClass<UHSResourceCarryComponent>())
 	{
 		ResourceCarry->ReplaceCarriedItems(SaveGame->CarriedItems);
+	}
+
+	if (UHSPlayerHealthComponent* Health = Owner->FindComponentByClass<UHSPlayerHealthComponent>())
+	{
+		Health->ResetHealth();
+		const float SavedHealth = FMath::Clamp(SaveGame->PlayerHealth, 0.0f, Health->GetMaxHealth());
+		Health->ApplyHealthDamage(Health->GetMaxHealth() - SavedHealth);
 	}
 
 	if (UHSPlayerEquipmentComponent* Equipment = Owner->FindComponentByClass<UHSPlayerEquipmentComponent>())

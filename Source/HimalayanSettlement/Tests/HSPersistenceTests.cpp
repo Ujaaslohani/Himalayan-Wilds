@@ -10,6 +10,7 @@
 #include "Persistence/HSSettlementPersistenceComponent.h"
 #include "Persistence/HSSettlementSaveGame.h"
 #include "Player/HSPlayerCharacter.h"
+#include "Player/HSPlayerHealthComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
 #include "Settlement/HSConstructionComponent.h"
@@ -45,11 +46,12 @@ bool SeedPersistentSettlementState(AHSPlayerCharacter& Player, UHSWorldTimeCompo
 	UHSConstructionComponent* Construction = Player.GetConstructionComponent();
 	UHSPlayerProgressComponent* Progress = Player.GetPlayerProgressComponent();
 	UHSResourceCarryComponent* Carry = Player.GetResourceCarryComponent();
+	UHSPlayerHealthComponent* Health = Player.GetPlayerHealthComponent();
 	UHSPlayerEquipmentComponent* Equipment = Player.GetPlayerEquipmentComponent();
 	UHSSettlementUnlockComponent* Unlocks = Player.GetSettlementUnlockComponent();
 	UHSAnimalIntelComponent* AnimalIntel = Player.GetAnimalIntelComponent();
 	UHSPlantEffectComponent* PlantEffect = Player.GetPlantEffectComponent();
-	if (!SettlementPlan || !Construction || !Progress || !Carry || !Equipment || !Unlocks || !AnimalIntel || !PlantEffect)
+	if (!SettlementPlan || !Construction || !Progress || !Carry || !Health || !Equipment || !Unlocks || !AnimalIntel || !PlantEffect)
 	{
 		return false;
 	}
@@ -70,6 +72,7 @@ bool SeedPersistentSettlementState(AHSPlayerCharacter& Player, UHSWorldTimeCompo
 	Carry->AddStack(FHSItemStack{ TAG_HS_Resource_Meat_Deer, 3 });
 	Carry->AddStack(FHSItemStack{ TAG_HS_Item_Bow_Basic, 1 });
 	Carry->AddStack(FHSItemStack{ TAG_HS_Item_Arrow_Basic, 6 });
+	Health->ApplyHealthDamage(35.0f);
 	Equipment->SetBowEquipped(true);
 	Player.SetEmergencyLowEndModeEnabled(true);
 	Player.CycleMouseSensitivityPreset();
@@ -97,6 +100,7 @@ bool FHSSaveGameDefaultsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Default save version should be supported."), SaveGame->IsSupportedVersion());
 	TestEqual(TEXT("Default save should start in day phase."), SaveGame->TimePhase, EHSTimePhase::Day);
 	TestEqual(TEXT("Default save should start with zero elapsed half-days."), SaveGame->ElapsedHalfDays, 0);
+	TestEqual(TEXT("Default save should start with full player health."), SaveGame->PlayerHealth, 100.0f);
 	TestFalse(TEXT("Default save should not equip a bow."), SaveGame->bBowEquipped);
 	TestFalse(TEXT("Default save should not enable emergency low-end mode."), SaveGame->bEmergencyLowEndModeEnabled);
 	TestEqual(TEXT("Default save should use medium mouse sensitivity."), SaveGame->MouseSensitivityPreset, 1);
@@ -158,6 +162,7 @@ bool FHSPersistenceSnapshotRestoresSettlementStateTest::RunTest(const FString& P
 	TestEqual(TEXT("Snapshot should store one pending schema."), Snapshot->PendingSchemas.Num(), 1);
 	TestEqual(TEXT("Snapshot should store one construction job."), Snapshot->ConstructionJobs.Num(), 1);
 	TestEqual(TEXT("Snapshot should store carried item stacks."), Snapshot->CarriedItems.Num(), 3);
+	TestEqual(TEXT("Snapshot should store player health."), Snapshot->PlayerHealth, 65.0f);
 	TestTrue(TEXT("Snapshot should store bow equipped state."), Snapshot->bBowEquipped);
 	TestTrue(TEXT("Snapshot should store emergency low-end mode state."), Snapshot->bEmergencyLowEndModeEnabled);
 	TestEqual(TEXT("Snapshot should store mouse sensitivity preset."), Snapshot->MouseSensitivityPreset, SourcePlayer->GetMouseSensitivityPreset());
@@ -172,6 +177,7 @@ bool FHSPersistenceSnapshotRestoresSettlementStateTest::RunTest(const FString& P
 	UHSConstructionComponent* RestoredConstruction = RestoredPlayer->GetConstructionComponent();
 	UHSPlayerProgressComponent* RestoredProgress = RestoredPlayer->GetPlayerProgressComponent();
 	UHSResourceCarryComponent* RestoredCarry = RestoredPlayer->GetResourceCarryComponent();
+	UHSPlayerHealthComponent* RestoredHealth = RestoredPlayer->GetPlayerHealthComponent();
 	UHSPlayerEquipmentComponent* RestoredEquipment = RestoredPlayer->GetPlayerEquipmentComponent();
 	UHSSettlementUnlockComponent* RestoredUnlocks = RestoredPlayer->GetSettlementUnlockComponent();
 	UHSAnimalIntelComponent* RestoredAnimalIntel = RestoredPlayer->GetAnimalIntelComponent();
@@ -184,6 +190,7 @@ bool FHSPersistenceSnapshotRestoresSettlementStateTest::RunTest(const FString& P
 	TestTrue(TEXT("Restored progress should keep completed milestone."), RestoredProgress && RestoredProgress->HasCompletedMilestone(TAG_HS_Milestone_OneMorningHunt_DayEnded));
 	TestEqual(TEXT("Restored carry should keep meat quantity."), RestoredCarry ? RestoredCarry->GetQuantityForTag(TAG_HS_Resource_Meat_Deer) : 0, 3);
 	TestEqual(TEXT("Restored carry should keep arrow quantity."), RestoredCarry ? RestoredCarry->GetQuantityForTag(TAG_HS_Item_Arrow_Basic) : 0, 6);
+	TestEqual(TEXT("Restored health should keep saved current health."), RestoredHealth ? RestoredHealth->GetCurrentHealth() : 0.0f, 65.0f);
 	TestTrue(TEXT("Restored equipment should keep bow equipped."), RestoredEquipment && RestoredEquipment->IsBowEquipped());
 	TestTrue(TEXT("Restored player should keep emergency low-end mode."), RestoredPlayer->IsEmergencyLowEndModeEnabled());
 	TestEqual(TEXT("Restored player should keep mouse sensitivity preset."), RestoredPlayer->GetMouseSensitivityPreset(), SourcePlayer->GetMouseSensitivityPreset());

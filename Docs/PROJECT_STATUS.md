@@ -92,7 +92,7 @@ Unreal Engine 5.5.4.
 - Animal runtime state now distinguishes idle, alert, fleeing, and dead; non-lethal hits rotate and move the animal away once so wounded reactions are visible before full AI exists.
 - Native wound clue actor added; non-lethal animal hits leave a short-lived no-tick marker at the hit location for early tracking readability.
 - HUD status lines now show bow equip state, current arrow count, and whether the bow is ready or nocking.
-- Versioned SaveGame now stores bow equipped state and emergency low-end mode state.
+- Versioned SaveGame now stores player health, bow equipped state, and emergency low-end mode state.
 - Milestone 8 soldier weapon-supply foundation compiles.
 - Native NPC service component added for shared role service query, prompt, execution, and time-refresh signaling.
 - Builder, hunter, herbalist, and soldier services now expose consistent service tags and options.

@@ -128,7 +128,7 @@ NPC services are coordinated by `UHSNPCServiceComponent`, a no-tick native compo
 
 ## Persistence
 
-`UHSSettlementSaveGame` is versioned and stores time, milestones, carried resources, bow equip state, prototype option presets, emergency low-end mode state, settlement unlocks, schema state, construction jobs, hunter intel, and herbalist plant state. `UHSSettlementPersistenceComponent` snapshots and restores from native components and rejects unsupported save versions. Manual pause-menu saves use the default slot, while event-driven autosaves use a separate autosave slot so deliberate saves are not overwritten by sleep, milestone, or construction events.
+`UHSSettlementSaveGame` is versioned and stores time, milestones, carried resources, player health, bow equip state, prototype option presets, emergency low-end mode state, settlement unlocks, schema state, construction jobs, hunter intel, and herbalist plant state. `UHSSettlementPersistenceComponent` snapshots and restores from native components and rejects unsupported save versions. Manual pause-menu saves use the default slot, while event-driven autosaves use a separate autosave slot so deliberate saves are not overwritten by sleep, milestone, or construction events.
 
 ## Performance Rules
 
