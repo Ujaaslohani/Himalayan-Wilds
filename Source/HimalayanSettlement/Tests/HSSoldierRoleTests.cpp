@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Core/HSGameplayTags.h"
+#include "Equipment/HSPlayerEquipmentComponent.h"
 #include "Engine/World.h"
 #include "NPC/HSNPCActor.h"
 #include "NPC/HSNPCDefinition.h"
@@ -41,10 +42,12 @@ bool FHSSoldierProvidesBasicWeaponSuppliesTest::RunTest(const FString& Parameter
 	Soldier->SetNPCDefinition(CreateSoldierDefinition(Soldier));
 
 	UHSResourceCarryComponent* ResourceCarry = Player ? Player->GetResourceCarryComponent() : nullptr;
+	UHSPlayerEquipmentComponent* Equipment = Player ? Player->GetPlayerEquipmentComponent() : nullptr;
 	TestNotNull(TEXT("Player should spawn."), Player);
 	TestNotNull(TEXT("Soldier should spawn."), Soldier);
 	TestNotNull(TEXT("Player should own resource carry component."), ResourceCarry);
-	if (!Player || !Soldier || !ResourceCarry)
+	TestNotNull(TEXT("Player should own equipment component."), Equipment);
+	if (!Player || !Soldier || !ResourceCarry || !Equipment)
 	{
 		World->DestroyWorld(false);
 		return false;
@@ -54,6 +57,7 @@ bool FHSSoldierProvidesBasicWeaponSuppliesTest::RunTest(const FString& Parameter
 	Soldier->Interact_Implementation(Player);
 	TestEqual(TEXT("Soldier should grant one basic bow."), ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic), 1);
 	TestEqual(TEXT("Soldier should grant a basic arrow bundle."), ResourceCarry->GetQuantityForTag(TAG_HS_Item_Arrow_Basic), 12);
+	TestTrue(TEXT("Soldier should auto-equip the granted bow."), Equipment->IsBowEquipped());
 
 	Soldier->Interact_Implementation(Player);
 	TestEqual(TEXT("Soldier should not duplicate bow supplies while player already has a bow."), ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic), 1);

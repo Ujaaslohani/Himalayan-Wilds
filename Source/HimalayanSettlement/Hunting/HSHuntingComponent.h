@@ -6,6 +6,8 @@
 
 class AHSAnimalActor;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FHSHuntingFeedbackSignature, FText, Message);
+
 UCLASS(ClassGroup = (HimalayanSettlement), meta = (BlueprintSpawnableComponent))
 class HIMALAYANSETTLEMENT_API UHSHuntingComponent : public UActorComponent
 {
@@ -31,6 +33,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Hunting")
 	TEnumAsByte<ECollisionChannel> GetTraceChannel() const { return TraceChannel; }
+
+	UPROPERTY(BlueprintAssignable, Category = "Hunting")
+	FHSHuntingFeedbackSignature OnHuntingFeedback;
 
 private:
 	bool ResolveTraceView(FVector& OutStart, FVector& OutDirection) const;

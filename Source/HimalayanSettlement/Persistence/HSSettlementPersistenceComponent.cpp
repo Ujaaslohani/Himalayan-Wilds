@@ -2,10 +2,12 @@
 
 #include "Core/HSLogCategories.h"
 #include "Engine/World.h"
+#include "Equipment/HSPlayerEquipmentComponent.h"
 #include "Herbalism/HSPlantEffectComponent.h"
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Persistence/HSSettlementSaveGame.h"
+#include "Player/HSPlayerCharacter.h"
 #include "Progression/HSPlayerProgressComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
 #include "Settlement/HSConstructionComponent.h"
@@ -51,6 +53,16 @@ bool UHSSettlementPersistenceComponent::CaptureToSaveGame(UHSSettlementSaveGame*
 	if (const UHSResourceCarryComponent* ResourceCarry = Owner->FindComponentByClass<UHSResourceCarryComponent>())
 	{
 		SaveGame->CarriedItems = ResourceCarry->GetCarriedItems();
+	}
+
+	if (const UHSPlayerEquipmentComponent* Equipment = Owner->FindComponentByClass<UHSPlayerEquipmentComponent>())
+	{
+		SaveGame->bBowEquipped = Equipment->IsBowEquipped();
+	}
+
+	if (const AHSPlayerCharacter* PlayerCharacter = Cast<AHSPlayerCharacter>(Owner))
+	{
+		SaveGame->bEmergencyLowEndModeEnabled = PlayerCharacter->IsEmergencyLowEndModeEnabled();
 	}
 
 	if (const UHSSettlementUnlockComponent* Unlocks = Owner->FindComponentByClass<UHSSettlementUnlockComponent>())
@@ -108,6 +120,16 @@ bool UHSSettlementPersistenceComponent::RestoreFromSaveGame(const UHSSettlementS
 	if (UHSResourceCarryComponent* ResourceCarry = Owner->FindComponentByClass<UHSResourceCarryComponent>())
 	{
 		ResourceCarry->ReplaceCarriedItems(SaveGame->CarriedItems);
+	}
+
+	if (UHSPlayerEquipmentComponent* Equipment = Owner->FindComponentByClass<UHSPlayerEquipmentComponent>())
+	{
+		Equipment->SetBowEquipped(SaveGame->bBowEquipped);
+	}
+
+	if (AHSPlayerCharacter* PlayerCharacter = Cast<AHSPlayerCharacter>(Owner))
+	{
+		PlayerCharacter->SetEmergencyLowEndModeEnabled(SaveGame->bEmergencyLowEndModeEnabled);
 	}
 
 	if (UHSSettlementUnlockComponent* Unlocks = Owner->FindComponentByClass<UHSSettlementUnlockComponent>())

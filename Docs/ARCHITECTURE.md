@@ -11,7 +11,7 @@ Target split:
 
 ## Scope Boundary
 
-Current milestone: early vertical-slice foundations through One Morning Hunt, temporary sleep, settlement schema, builder construction, persistence, hunter intel, herbalist plant knowledge, exploration markers, basic native HUD status/objective overlay, and first native inventory/build/options menu controls.
+Current milestone: early vertical-slice foundations through One Morning Hunt, temporary sleep, settlement schema, builder construction, persistence, hunter intel, herbalist plant knowledge, soldier weapon supply, bow/ammo equipment rules, exploration markers, basic native HUD status/objective overlay, and first native inventory/build/options menu controls.
 
 The player starts in a primitive settlement, talks to one hunter NPC, receives a deer-hunting task, tracks and hunts a deer, harvests resources, returns to the NPC, unlocks early settlement progression, places a house schema, uses specialist NPC services, and advances time through sleep.
 
@@ -23,6 +23,7 @@ No multiplayer, large procedural world, economy simulation, complex story framew
 Source/HimalayanSettlement/
   Core/
   Player/
+  Equipment/
   Interaction/
   Inventory/
   Resources/
@@ -83,11 +84,15 @@ Native placeholder actors own simple non-colliding static mesh components using 
 
 ## Animal Runtime
 
-`AHSAnimalActor` is the first native runtime animal shell. It references a `UHSAnimalDefinition`, tracks health and dead state, and exposes one-shot harvesting of configured drop stacks. It does not yet own wildlife AI, tracking clues, animation, inventory insertion, or projectile handling.
+`AHSAnimalActor` is the first native runtime animal shell. It references a `UHSAnimalDefinition`, tracks health plus idle/alert/fleeing/dead state, and exposes one-shot harvesting of configured drop stacks. Alert and fleeing are state hooks for later tracking and AI; they do not yet drive movement, animation, or ecology simulation.
 
 ## Hunting
 
-`UHSHuntingComponent` is the first player hunting action. It performs an on-demand camera visibility trace and applies prototype hunting damage to a live `AHSAnimalActor`. It is not yet a bow, arrow, projectile, ammo, animation, skill, or equipment system.
+`UHSHuntingComponent` is the first player hunting action. It performs an on-demand camera visibility trace, requires `UHSPlayerEquipmentComponent` to have a bow equipped and at least one basic arrow, consumes one arrow only when a valid live animal target is found, applies prototype hunting damage, and broadcasts lightweight HUD feedback. It is not yet a projectile, animation, weapon-skill, miss-spread, or advanced ballistics system.
+
+## Equipment
+
+`UHSPlayerEquipmentComponent` is the first narrow equipment state. The bow equip flag lives on the player, while bow and arrow quantities remain authoritative in `UHSResourceCarryComponent`. Soldier service auto-equips the first granted bow, `G` toggles bow equip, and save/load persists the equip flag after carried resources restore.
 
 ## Resource Carry State
 
@@ -117,7 +122,7 @@ NPC services are coordinated by `UHSNPCServiceComponent`, a no-tick native compo
 
 ## Persistence
 
-`UHSSettlementSaveGame` is versioned and stores time, milestones, carried resources, settlement unlocks, schema state, construction jobs, hunter intel, and herbalist plant state. `UHSSettlementPersistenceComponent` snapshots and restores from native components and rejects unsupported save versions. Manual pause-menu saves use the default slot, while event-driven autosaves use a separate autosave slot so deliberate saves are not overwritten by sleep, milestone, or construction events.
+`UHSSettlementSaveGame` is versioned and stores time, milestones, carried resources, bow equip state, emergency low-end mode state, settlement unlocks, schema state, construction jobs, hunter intel, and herbalist plant state. `UHSSettlementPersistenceComponent` snapshots and restores from native components and rejects unsupported save versions. Manual pause-menu saves use the default slot, while event-driven autosaves use a separate autosave slot so deliberate saves are not overwritten by sleep, milestone, or construction events.
 
 ## Performance Rules
 

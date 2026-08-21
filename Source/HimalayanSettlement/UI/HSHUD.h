@@ -85,6 +85,9 @@ public:
 	UFUNCTION()
 	void HandleTimeAdvanced(EHSTimePhase NewTimePhase, float ElapsedDays);
 
+	UFUNCTION()
+	void HandleHuntingFeedback(FText Message);
+
 private:
 	void BindWorldTimeComponent();
 	void BindProgressComponent();
@@ -93,6 +96,7 @@ private:
 	void BindBuildPlacementComponent();
 	void BindSettlementPlanComponent();
 	void BindConstructionComponent();
+	void BindHuntingComponent();
 	void ShowCompletionMessage(FText Message);
 	void DrawCenteredTextLine(const FString& Text, float Y, float Scale, const FLinearColor& Color);
 	void DrawStatusTextLine(const FString& Text, float Y, const FLinearColor& Color);
@@ -142,6 +146,9 @@ private:
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<class UHSWorldTimeComponent> BoundWorldTimeComponent;
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<class UHSHuntingComponent> BoundHuntingComponent;
 
 	UPROPERTY(Transient)
 	FText CompletionMessage;

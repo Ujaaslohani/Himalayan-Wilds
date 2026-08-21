@@ -4,6 +4,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Core/HSGameplayTags.h"
 #include "Core/HSLogCategories.h"
+#include "Equipment/HSPlayerEquipmentComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -79,6 +80,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	ResourceCarryComponent = CreateDefaultSubobject<UHSResourceCarryComponent>(TEXT("ResourceCarryComponent"));
 	SettlementPlanComponent = CreateDefaultSubobject<UHSSettlementPlanComponent>(TEXT("SettlementPlanComponent"));
 	SettlementUnlockComponent = CreateDefaultSubobject<UHSSettlementUnlockComponent>(TEXT("SettlementUnlockComponent"));
+	PlayerEquipmentComponent = CreateDefaultSubobject<UHSPlayerEquipmentComponent>(TEXT("PlayerEquipmentComponent"));
 
 	PlayerMappingContext = CreateDefaultSubobject<UInputMappingContext>(TEXT("PlayerMappingContext"));
 
@@ -186,6 +188,10 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	EmergencyLowEndModeAction->bTriggerWhenPaused = true;
 	PlayerMappingContext->MapKey(EmergencyLowEndModeAction, EKeys::F8);
 
+	EquipmentAction = CreateDefaultSubobject<UInputAction>(TEXT("EquipmentAction"));
+	EquipmentAction->ValueType = EInputActionValueType::Boolean;
+	PlayerMappingContext->MapKey(EquipmentAction, EKeys::G);
+
 	SaveAction = CreateDefaultSubobject<UInputAction>(TEXT("SaveAction"));
 	SaveAction->ValueType = EInputActionValueType::Boolean;
 	PlayerMappingContext->MapKey(SaveAction, EKeys::F5);
@@ -240,6 +246,7 @@ void AHSPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	EnhancedInputComponent->BindAction(MenuUtilityAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleMenuUtilityAction);
 	EnhancedInputComponent->BindAction(PerformanceOverlayAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandlePerformanceOverlayAction);
 	EnhancedInputComponent->BindAction(EmergencyLowEndModeAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleEmergencyLowEndModeAction);
+	EnhancedInputComponent->BindAction(EquipmentAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleEquipmentAction);
 	EnhancedInputComponent->BindAction(SaveAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::SaveSettlementState);
 	EnhancedInputComponent->BindAction(LoadAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::LoadSettlementState);
 }
@@ -521,6 +528,31 @@ void AHSPlayerCharacter::HandlePerformanceOverlayAction(const FInputActionValue&
 void AHSPlayerCharacter::HandleEmergencyLowEndModeAction(const FInputActionValue& InputValue)
 {
 	ToggleEmergencyLowEndMode();
+}
+
+void AHSPlayerCharacter::HandleEquipmentAction(const FInputActionValue& InputValue)
+{
+	if (bPauseMenuOpen || bInventoryOpen || bBuildMenuOpen)
+	{
+		return;
+	}
+
+	if (!PlayerEquipmentComponent)
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "EquipmentUnavailable", "Equipment is unavailable."));
+		return;
+	}
+
+	const bool bWasEquipped = PlayerEquipmentComponent->IsBowEquipped();
+	if (!PlayerEquipmentComponent->ToggleBowEquipped())
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "BowEquipMissing", "No bow available."));
+		return;
+	}
+
+	SetMenuFeedback(!bWasEquipped
+		? NSLOCTEXT("HSPlayerCharacter", "BowEquipped", "Bow equipped.")
+		: NSLOCTEXT("HSPlayerCharacter", "BowUnequipped", "Bow stored."));
 }
 
 void AHSPlayerCharacter::HandlePauseMenuExit(const FInputActionValue& InputValue)
@@ -806,7 +838,12 @@ void AHSPlayerCharacter::TogglePerformanceOverlay()
 
 void AHSPlayerCharacter::ToggleEmergencyLowEndMode()
 {
-	bEmergencyLowEndModeEnabled = !bEmergencyLowEndModeEnabled;
+	SetEmergencyLowEndModeEnabled(!bEmergencyLowEndModeEnabled);
+}
+
+void AHSPlayerCharacter::SetEmergencyLowEndModeEnabled(bool bNewEnabled)
+{
+	bEmergencyLowEndModeEnabled = bNewEnabled;
 
 	if (GetWorld())
 	{

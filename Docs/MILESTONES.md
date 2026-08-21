@@ -156,7 +156,7 @@ Complete when:
 
 ## Milestone 8: Soldier Role: Weapons And Safety
 
-Status: Implementation complete; hands-on closeout pending.
+Status: Implementation complete with first bow/equipment rules; hands-on closeout pending.
 
 Player experience: A soldier gives the settlement defensive and weapon value. The player can receive weapon access, training, or threat warnings.
 
@@ -164,12 +164,14 @@ Scope:
 
 - Soldier role definition.
 - One weapon/service unlock.
+- Basic bow equip and arrow-use gate for hunting.
 - Basic settlement safety or threat-warning state.
 - No full combat faction system yet.
 
 Complete when:
 
 - Soldier unlocks or provides one useful combat-related service.
+- Hunting requires the basic weapon/ammo state once granted.
 - Service is gated by recruitment/settlement state.
 - Tests cover service availability and unlock behavior.
 
@@ -217,7 +219,7 @@ Complete when:
 
 ## Milestone 11: Vertical Slice Closeout
 
-Status: Implementation started; basic native HUD status/objective overlay, sleep/time feedback, pause/save/autosave controls, first inventory actions, first build schema/campsite menu with availability feedback, first graphics option control, clearer prototype marker silhouettes, and completed-house visual feedback complete. Hands-on closeout and flow tuning remain pending.
+Status: Implementation started; basic native HUD status/objective overlay, sleep/time feedback, pause/save/autosave controls, first inventory actions, first build schema/campsite menu with availability feedback, first graphics option control, bow/ammo equipment feedback, clearer prototype marker silhouettes, and completed-house visual feedback complete. Hands-on closeout and flow tuning remain pending.
 
 Player experience: A new player can complete an early loop without developer instruction: wake, receive NPC intel, explore, hunt/gather, assign builder, sleep, and see the settlement progress.
 

@@ -11,6 +11,7 @@
 class UCameraComponent;
 class UHSAnimalIntelComponent;
 class UHSBuildPlacementComponent;
+class UHSPlayerEquipmentComponent;
 class UHSHuntingComponent;
 class UHSInteractionSensorComponent;
 class UHSSettlementPersistenceComponent;
@@ -54,6 +55,7 @@ public:
 	UHSResourceCarryComponent* GetResourceCarryComponent() const { return ResourceCarryComponent; }
 	UHSSettlementPlanComponent* GetSettlementPlanComponent() const { return SettlementPlanComponent; }
 	UHSSettlementUnlockComponent* GetSettlementUnlockComponent() const { return SettlementUnlockComponent; }
+	UHSPlayerEquipmentComponent* GetPlayerEquipmentComponent() const { return PlayerEquipmentComponent; }
 
 	UFUNCTION(BlueprintPure, Category = "Player|Movement")
 	EHSPlayerStance GetPlayerStance() const { return PlayerStance; }
@@ -149,6 +151,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
 	void ToggleEmergencyLowEndMode();
 
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void SetEmergencyLowEndModeEnabled(bool bNewEnabled);
+
 	UFUNCTION(BlueprintCallable, Category = "Player|Persistence")
 	bool AutosaveSettlementState(const FString& Reason);
 
@@ -174,6 +179,7 @@ private:
 	void HandleMenuUtilityAction(const FInputActionValue& InputValue);
 	void HandlePerformanceOverlayAction(const FInputActionValue& InputValue);
 	void HandleEmergencyLowEndModeAction(const FInputActionValue& InputValue);
+	void HandleEquipmentAction(const FInputActionValue& InputValue);
 	void SaveSettlementState(const FInputActionValue& InputValue);
 	void LoadSettlementState(const FInputActionValue& InputValue);
 	void ApplyInputMappingContext();
@@ -233,6 +239,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSSettlementUnlockComponent> SettlementUnlockComponent;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player")
+	TObjectPtr<UHSPlayerEquipmentComponent> PlayerEquipmentComponent;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputMappingContext> PlayerMappingContext;
@@ -296,6 +305,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> EmergencyLowEndModeAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> EquipmentAction;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> SaveAction;

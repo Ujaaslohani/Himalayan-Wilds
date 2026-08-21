@@ -17,7 +17,7 @@ class HIMALAYANSETTLEMENT_API UHSSettlementSaveGame : public USaveGame
 	GENERATED_BODY()
 
 public:
-	static constexpr int32 CurrentSaveVersion = 3;
+	static constexpr int32 CurrentSaveVersion = 4;
 
 	UHSSettlementSaveGame();
 
@@ -35,6 +35,12 @@ public:
 
 	UPROPERTY(VisibleAnywhere, Category = "Save|Resources")
 	TArray<FHSItemStack> CarriedItems;
+
+	UPROPERTY(VisibleAnywhere, Category = "Save|Equipment")
+	bool bBowEquipped;
+
+	UPROPERTY(VisibleAnywhere, Category = "Save|Options")
+	bool bEmergencyLowEndModeEnabled;
 
 	UPROPERTY(VisibleAnywhere, Category = "Save|Settlement")
 	FGameplayTagContainer GrantedUnlocks;

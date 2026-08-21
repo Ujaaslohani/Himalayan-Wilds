@@ -60,6 +60,7 @@ bool FHSAnimalActorDamageAndHarvestTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Positive hunting damage should reduce health."), Deer->ApplyHuntingDamage(25.0f, nullptr), 25.0f);
 	TestEqual(TEXT("Damaged deer should keep remaining health."), Deer->GetCurrentHealth(), 45.0f);
 	TestFalse(TEXT("Damaged deer should not be dead yet."), Deer->IsDead());
+	TestTrue(TEXT("Lightly damaged deer should become alert."), Deer->IsAlerted());
 
 	TestEqual(TEXT("Lethal damage should only apply remaining health."), Deer->ApplyHuntingDamage(100.0f, nullptr), 45.0f);
 	TestTrue(TEXT("Lethal damage should mark deer dead."), Deer->IsDead());
@@ -75,6 +76,23 @@ bool FHSAnimalActorDamageAndHarvestTest::RunTest(const FString& Parameters)
 	TArray<FHSItemStack> SecondDrops;
 	TestFalse(TEXT("Deer should not harvest twice."), Deer->TryHarvest(nullptr, SecondDrops));
 	TestEqual(TEXT("Second harvest should produce no drops."), SecondDrops.Num(), 0);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSAnimalActorFleesWhenBadlyWoundedTest,
+	"HimalayanSettlement.Animals.DeerFleesWhenBadlyWounded",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSAnimalActorFleesWhenBadlyWoundedTest::RunTest(const FString& Parameters)
+{
+	AHSAnimalActor* Deer = NewObject<AHSAnimalActor>();
+	Deer->SetAnimalDefinition(CreateValidDeerDefinition(Deer));
+
+	TestEqual(TEXT("Heavy nonlethal damage should apply."), Deer->ApplyHuntingDamage(40.0f, nullptr), 40.0f);
+	TestFalse(TEXT("Badly wounded deer should still be alive."), Deer->IsDead());
+	TestTrue(TEXT("Badly wounded deer should enter fleeing state."), Deer->IsFleeing());
 
 	return true;
 }

@@ -2,9 +2,11 @@
 
 #include "Core/HSGameplayTags.h"
 #include "Engine/Canvas.h"
+#include "Equipment/HSPlayerEquipmentComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Herbalism/HSPlantEffectComponent.h"
 #include "Hunting/HSAnimalIntelComponent.h"
+#include "Hunting/HSHuntingComponent.h"
 #include "Interaction/HSInteractionSensorComponent.h"
 #include "Player/HSPlayerCharacter.h"
 #include "Progression/HSPlayerProgressComponent.h"
@@ -43,6 +45,7 @@ void AHSHUD::DrawHUD()
 	BindSettlementPlanComponent();
 	BindConstructionComponent();
 	BindWorldTimeComponent();
+	BindHuntingComponent();
 
 	const AHSGameState* GameState = GetWorld() ? GetWorld()->GetGameState<AHSGameState>() : nullptr;
 	const APawn* Pawn = PlayerOwner->GetPawn();
@@ -128,6 +131,13 @@ TArray<FString> AHSHUD::BuildStatusLines(const AHSGameState* GameState, const AP
 	}
 
 	const UHSResourceCarryComponent* ResourceCarryComponent = Pawn ? Pawn->FindComponentByClass<UHSResourceCarryComponent>() : nullptr;
+	const UHSPlayerEquipmentComponent* EquipmentComponent = Pawn ? Pawn->FindComponentByClass<UHSPlayerEquipmentComponent>() : nullptr;
+	if (EquipmentComponent)
+	{
+		const FString BowState = EquipmentComponent->IsBowEquipped() ? TEXT("equipped") : TEXT("stored");
+		Lines.Add(FString::Printf(TEXT("Equipment: Bow %s, arrows %d"), *BowState, EquipmentComponent->GetArrowCount()));
+	}
+
 	if (ResourceCarryComponent)
 	{
 		const TArray<FHSItemStack>& CarriedItems = ResourceCarryComponent->GetCarriedItems();
@@ -339,6 +349,11 @@ void AHSHUD::HandleTimeAdvanced(EHSTimePhase NewTimePhase, float ElapsedDays)
 		FText::AsNumber(ElapsedDays)));
 }
 
+void AHSHUD::HandleHuntingFeedback(FText Message)
+{
+	ShowCompletionMessage(Message);
+}
+
 void AHSHUD::BindWorldTimeComponent()
 {
 	const AHSGameState* GameState = GetWorld() ? GetWorld()->GetGameState<AHSGameState>() : nullptr;
@@ -355,6 +370,29 @@ void AHSHUD::BindWorldTimeComponent()
 
 	BoundWorldTimeComponent = WorldTimeComponent;
 	WorldTimeComponent->OnTimeAdvanced.AddUniqueDynamic(this, &AHSHUD::HandleTimeAdvanced);
+}
+
+void AHSHUD::BindHuntingComponent()
+{
+	if (!PlayerOwner)
+	{
+		return;
+	}
+
+	APawn* Pawn = PlayerOwner->GetPawn();
+	UHSHuntingComponent* HuntingComponent = Pawn ? Pawn->FindComponentByClass<UHSHuntingComponent>() : nullptr;
+	if (!HuntingComponent || BoundHuntingComponent.Get() == HuntingComponent)
+	{
+		return;
+	}
+
+	if (UHSHuntingComponent* PreviousHuntingComponent = BoundHuntingComponent.Get())
+	{
+		PreviousHuntingComponent->OnHuntingFeedback.RemoveDynamic(this, &AHSHUD::HandleHuntingFeedback);
+	}
+
+	BoundHuntingComponent = HuntingComponent;
+	HuntingComponent->OnHuntingFeedback.AddUniqueDynamic(this, &AHSHUD::HandleHuntingFeedback);
 }
 
 void AHSHUD::BindProgressComponent()

@@ -69,6 +69,11 @@ float AHSAnimalActor::ApplyHuntingDamage(float DamageAmount, AActor* DamageInsti
 		RuntimeState = EHSAnimalRuntimeState::Dead;
 		UE_LOG(LogHSAI, Log, TEXT("%s killed %s."), *GetNameSafe(DamageInstigator), *GetNameSafe(this));
 	}
+	else
+	{
+		RuntimeState = CurrentHealth <= (GetMaxHealth() * 0.5f) ? EHSAnimalRuntimeState::Fleeing : EHSAnimalRuntimeState::Alert;
+		UE_LOG(LogHSAI, Verbose, TEXT("%s wounded %s; state is now %d."), *GetNameSafe(DamageInstigator), *GetNameSafe(this), static_cast<int32>(RuntimeState));
+	}
 
 	return AppliedDamage;
 }

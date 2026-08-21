@@ -15,6 +15,8 @@ UENUM(BlueprintType)
 enum class EHSAnimalRuntimeState : uint8
 {
 	Idle,
+	Alert,
+	Fleeing,
 	Dead
 };
 
@@ -52,6 +54,12 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Animal|State")
 	bool IsDead() const { return RuntimeState == EHSAnimalRuntimeState::Dead; }
+
+	UFUNCTION(BlueprintPure, Category = "Animal|State")
+	bool IsAlerted() const { return RuntimeState == EHSAnimalRuntimeState::Alert; }
+
+	UFUNCTION(BlueprintPure, Category = "Animal|State")
+	bool IsFleeing() const { return RuntimeState == EHSAnimalRuntimeState::Fleeing; }
 
 	UFUNCTION(BlueprintPure, Category = "Animal|Harvest")
 	bool HasBeenHarvested() const { return bHarvested; }

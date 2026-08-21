@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 11: Vertical Slice Closeout: implementation started with basic native HUD status/objective overlay, sleep/time feedback, pause menu, manual save/load, autosave foundation, first inventory actions, build schema/campsite menu feedback, first options control, and clearer prototype visuals; hands-on closeout pending.
+Milestone 11: Vertical Slice Closeout: implementation continues with basic native HUD status/objective overlay, sleep/time feedback, pause menu, manual save/load, autosave foundation, first inventory actions, build schema/campsite menu feedback, first options control, bow/ammo equipment rules, animal reaction states, and clearer prototype visuals; hands-on closeout pending.
 
 ## Engine Version
 
@@ -82,6 +82,12 @@ Unreal Engine 5.5.4.
 - Milestone 7 herbalist plant knowledge foundation compiles.
 - Soldier profession tag, soldier data asset, and soldier NPC bootstrap path added.
 - Soldier NPC interaction now grants one basic bow and a basic arrow bundle if the player does not already have a bow.
+- Native player equipment component added for basic bow equip state and arrow consumption.
+- Soldier weapon service now auto-equips the first granted bow while still preventing duplicate weapon bundles.
+- Hunting now requires an equipped bow and at least one arrow, consumes one arrow on valid animal shots, and reports hit/no-target/no-ammo feedback through the HUD.
+- Animal runtime state now distinguishes idle, alert, fleeing, and dead so wounded animals can support later tracking/AI behavior.
+- HUD status lines now show bow equip state and current arrow count.
+- Versioned SaveGame now stores bow equipped state and emergency low-end mode state.
 - Milestone 8 soldier weapon-supply foundation compiles.
 - Native NPC service component added for shared role service query, prompt, execution, and time-refresh signaling.
 - Builder, hunter, herbalist, and soldier services now expose consistent service tags and options.
@@ -119,11 +125,11 @@ Unreal Engine 5.5.4.
 - Hands-on milestone pass reported complete by the project owner after the 40 FPS stable retest.
 - Milestone 3 settlement claim and house schema foundation compiles.
 - Content bootstrap succeeds with zero warnings and regenerates the basic house schema marker.
-- All 80 `HimalayanSettlement` automation tests pass.
+- All 83 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
-- Hands-on closeout results have been reported working by the project owner; remaining work is implementation polish and continued feature development.
+- Hands-on closeout results have been reported working by the project owner; equipment/hunting polish is ready for the next manual pass.
 
 ## Known Blockers
 
@@ -145,13 +151,13 @@ Unreal Engine 5.5.4.
 
 1. Run hands-on hunter intel playtest: ask hunter for animal signs, confirm marker appears, sleep into next day, and confirm a fresh report is available.
 2. Run hands-on herbalist playtest: talk to Herbalist, use Speed Herb, confirm movement is faster, sleep/advance time, and confirm the effect expires.
-3. Run hands-on soldier playtest: talk to Soldier, confirm bow and arrows are granted once, and confirm repeat interaction does not duplicate supplies.
+3. Run hands-on soldier/equipment playtest: talk to Soldier, confirm bow and arrows are granted once, confirm bow auto-equips, press `G` to store/equip bow, and confirm repeat interaction does not duplicate supplies.
 4. Run hands-on free-build playtest: claim settlement, press `B`, choose Basic House with `[1]`, rotate with `Q/R`, place house with left mouse or `E`, ask Builder to start construction, then sleep until the 1-day build completes and a completed house visual appears.
 5. Run hands-on service-framework sanity pass: confirm Builder/Hunter/Herbalist/Soldier prompts still appear only when their service is available.
 6. Run hands-on exploration pass: walk settlement to village core, follow trail markers to forest edge, find animal ridge, and confirm the route is readable without explanation.
 7. Run hands-on closeout for Milestones 3-5 if not already confirmed in-editor.
 8. Keep tracking numeric FPS/Game/Draw/GPU readings from the live low-end `stat fps` and `stat unit` overlays before forest density increases.
-9. Run hands-on HUD pass: confirm status/objective lines and menu feedback appear clearly without blocking the center interaction prompt.
+9. Run hands-on HUD pass: confirm status/objective lines, bow/arrows status, hunting feedback, and menu feedback appear clearly without blocking the center interaction prompt.
 10. Run hands-on pause/save pass: press `Esc`, test Resume/Save/Load/Options feedback, confirm build placement `Esc` still cancels placement before pausing, and confirm autosave files are produced after sleep/construction/progress events.
 11. Run hands-on inventory/build/options pass: confirm `I`/`Tab` opens inventory, `[1]` inspects, `[2]` drops one item, `[3]` drops the stack, `B` opens build menu, `[1]` enters Basic House placement only when available, `[2]` places a Basic Campsite, and `[6]` cycles graphics preset when pause options are open.
 12. Add mouse-driven UMG/Slate polish later if the native Canvas controls test well.

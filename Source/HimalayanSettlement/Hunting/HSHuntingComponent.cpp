@@ -4,7 +4,10 @@
 #include "Camera/CameraComponent.h"
 #include "Core/HSLogCategories.h"
 #include "Engine/World.h"
+#include "Equipment/HSPlayerEquipmentComponent.h"
 #include "GameFramework/Actor.h"
+
+#define LOCTEXT_NAMESPACE "HSHuntingComponent"
 
 UHSHuntingComponent::UHSHuntingComponent()
 	: HuntDistance(1200.0f)
@@ -16,11 +19,28 @@ UHSHuntingComponent::UHSHuntingComponent()
 
 bool UHSHuntingComponent::TryHunt()
 {
+	const AActor* Owner = GetOwner();
+	const UHSPlayerEquipmentComponent* Equipment = Owner ? Owner->FindComponentByClass<UHSPlayerEquipmentComponent>() : nullptr;
+	if (!Equipment || !Equipment->CanUseBow())
+	{
+		OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "BowRequired", "Equip a bow and arrows first."));
+		UE_LOG(LogHSAI, Verbose, TEXT("%s tried to hunt without an equipped bow and arrows."), *GetNameSafe(GetOwner()));
+		return false;
+	}
+
 	FHitResult Hit;
 	AHSAnimalActor* Target = FindHuntTarget(Hit);
 	if (!Target)
 	{
+		OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "NoTarget", "No animal target."));
 		UE_LOG(LogHSAI, Verbose, TEXT("%s found no hunting target."), *GetNameSafe(GetOwner()));
+		return false;
+	}
+
+	UHSPlayerEquipmentComponent* MutableEquipment = Owner ? Owner->FindComponentByClass<UHSPlayerEquipmentComponent>() : nullptr;
+	if (!MutableEquipment || !MutableEquipment->ConsumeArrow())
+	{
+		OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "ArrowConsumeFailed", "No arrow ready."));
 		return false;
 	}
 
@@ -63,6 +83,13 @@ bool UHSHuntingComponent::ApplyDamageToTarget(AHSAnimalActor* Target)
 	}
 
 	const float AppliedDamage = Target->ApplyHuntingDamage(HuntDamage, GetOwner());
+	if (AppliedDamage > 0.0f)
+	{
+		OnHuntingFeedback.Broadcast(Target->IsDead()
+			? FText::Format(LOCTEXT("AnimalKilled", "Killed {0}."), Target->GetDisplayName())
+			: FText::Format(LOCTEXT("AnimalHit", "Hit {0}."), Target->GetDisplayName()));
+	}
+
 	UE_LOG(
 		LogHSAI,
 		Log,
@@ -93,3 +120,5 @@ bool UHSHuntingComponent::ResolveTraceView(FVector& OutStart, FVector& OutDirect
 	OutDirection = ViewRotation.Vector();
 	return true;
 }
+
+#undef LOCTEXT_NAMESPACE

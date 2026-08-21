@@ -4,6 +4,7 @@
 #include "Animals/HSAnimalActor.h"
 #include "Animals/HSAnimalDefinition.h"
 #include "Core/HSGameplayTags.h"
+#include "Equipment/HSPlayerEquipmentComponent.h"
 #include "Hunting/HSHuntingComponent.h"
 #include "Player/HSPlayerCharacter.h"
 #include "Resources/HSResourceCarryComponent.h"
@@ -69,6 +70,7 @@ bool FHSPlayerHasHuntingComponentTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Player class should have a valid default object."), Player);
 	TestNotNull(TEXT("Player should own the native hunting component."), Player ? Player->GetHuntingComponent() : nullptr);
 	TestNotNull(TEXT("Player should own the native resource carry component."), Player ? Player->GetResourceCarryComponent() : nullptr);
+	TestNotNull(TEXT("Player should own the native equipment component."), Player ? Player->GetPlayerEquipmentComponent() : nullptr);
 
 	return true;
 }

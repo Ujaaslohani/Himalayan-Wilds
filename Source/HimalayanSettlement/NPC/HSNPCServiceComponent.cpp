@@ -2,6 +2,7 @@
 
 #include "Core/HSGameplayTags.h"
 #include "Core/HSLogCategories.h"
+#include "Equipment/HSPlayerEquipmentComponent.h"
 #include "Herbalism/HSPlantEffectComponent.h"
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "NPC/HSNPCActor.h"
@@ -274,6 +275,11 @@ bool UHSNPCServiceComponent::ExecuteSoldierService(AActor* Interactor) const
 
 	ResourceCarry->AddStack(FHSItemStack{ TAG_HS_Item_Bow_Basic, 1 });
 	ResourceCarry->AddStack(FHSItemStack{ TAG_HS_Item_Arrow_Basic, 12 });
+	if (UHSPlayerEquipmentComponent* Equipment = Interactor ? Interactor->FindComponentByClass<UHSPlayerEquipmentComponent>() : nullptr)
+	{
+		Equipment->SetBowEquipped(true);
+	}
+
 	return true;
 }
 
