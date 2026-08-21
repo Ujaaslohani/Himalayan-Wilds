@@ -50,6 +50,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	, bInventoryOpen(false)
 	, bBuildMenuOpen(false)
 	, SelectedInventoryIndex(0)
+	, SelectedBuildMenuIndex(0)
 	, GraphicsQualityPreset(0)
 	, MouseSensitivityPreset(1)
 	, MasterVolumePreset(2)
@@ -476,8 +477,14 @@ void AHSPlayerCharacter::ToggleBuildPlacement(const FInputActionValue& InputValu
 
 void AHSPlayerCharacter::RotateBuildPlacementLeft(const FInputActionValue& InputValue)
 {
-	if (bPauseMenuOpen || bBuildMenuOpen)
+	if (bPauseMenuOpen)
 	{
+		return;
+	}
+
+	if (bBuildMenuOpen)
+	{
+		SelectBuildMenuDelta(-1);
 		return;
 	}
 
@@ -495,8 +502,14 @@ void AHSPlayerCharacter::RotateBuildPlacementLeft(const FInputActionValue& Input
 
 void AHSPlayerCharacter::RotateBuildPlacementRight(const FInputActionValue& InputValue)
 {
-	if (bPauseMenuOpen || bBuildMenuOpen)
+	if (bPauseMenuOpen)
 	{
+		return;
+	}
+
+	if (bBuildMenuOpen)
+	{
+		SelectBuildMenuDelta(1);
 		return;
 	}
 
@@ -555,7 +568,7 @@ void AHSPlayerCharacter::HandlePauseMenuResume(const FInputActionValue& InputVal
 
 	if (bBuildMenuOpen)
 	{
-		StartBasicHouseFromBuildMenu();
+		StartSelectedBuildMenuEntry();
 		return;
 	}
 
@@ -870,6 +883,26 @@ void AHSPlayerCharacter::StartBasicCampsiteFromBuildMenu()
 	{
 		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "CampsitePlacementStartFailed", "Could not start campsite placement."));
 	}
+}
+
+void AHSPlayerCharacter::StartSelectedBuildMenuEntry()
+{
+	ClampSelectedBuildMenuIndex();
+	if (SelectedBuildMenuIndex == 0)
+	{
+		StartBasicHouseFromBuildMenu();
+		return;
+	}
+
+	StartBasicCampsiteFromBuildMenu();
+}
+
+void AHSPlayerCharacter::SelectBuildMenuDelta(int32 Delta)
+{
+	SelectedBuildMenuIndex = FMath::Clamp(SelectedBuildMenuIndex + Delta, 0, 1);
+	SetMenuFeedback(SelectedBuildMenuIndex == 0
+		? NSLOCTEXT("HSPlayerCharacter", "BuildMenuSelectedHouse", "Selected Basic House.")
+		: NSLOCTEXT("HSPlayerCharacter", "BuildMenuSelectedCampsite", "Selected Basic Campsite."));
 }
 
 bool AHSPlayerCharacter::CanStartBasicHouseFromBuildMenu(FText* OutReason) const
@@ -1282,6 +1315,7 @@ void AHSPlayerCharacter::SetBuildMenuOpen(bool bNewOpen)
 	if (bBuildMenuOpen)
 	{
 		bInventoryOpen = false;
+		ClampSelectedBuildMenuIndex();
 	}
 }
 
@@ -1342,6 +1376,11 @@ void AHSPlayerCharacter::ClampSelectedInventoryIndex()
 {
 	const int32 ItemCount = ResourceCarryComponent ? ResourceCarryComponent->GetCarriedItems().Num() : 0;
 	SelectedInventoryIndex = ItemCount > 0 ? FMath::Clamp(SelectedInventoryIndex, 0, ItemCount - 1) : 0;
+}
+
+void AHSPlayerCharacter::ClampSelectedBuildMenuIndex()
+{
+	SelectedBuildMenuIndex = FMath::Clamp(SelectedBuildMenuIndex, 0, 1);
 }
 
 void AHSPlayerCharacter::BindAutosaveSources()

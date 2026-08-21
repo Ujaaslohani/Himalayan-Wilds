@@ -98,6 +98,9 @@ public:
 	int32 GetSelectedInventoryIndex() const { return SelectedInventoryIndex; }
 
 	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	int32 GetSelectedBuildMenuIndex() const { return SelectedBuildMenuIndex; }
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
 	int32 GetGraphicsQualityPreset() const { return GraphicsQualityPreset; }
 
 	UFUNCTION(BlueprintPure, Category = "Player|Menu")
@@ -162,6 +165,12 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
 	void StartBasicCampsiteFromBuildMenu();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void StartSelectedBuildMenuEntry();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void SelectBuildMenuDelta(int32 Delta);
 
 	bool CanStartBasicHouseFromBuildMenu(FText* OutReason = nullptr) const;
 
@@ -245,6 +254,7 @@ private:
 	void SetMenuFeedback(FText Feedback);
 	void RefreshBowVisuals();
 	bool SpawnDroppedInventoryStack(const FHSItemStack& DroppedStack);
+	void ClampSelectedBuildMenuIndex();
 	float GetMouseSensitivityScale() const;
 	float GetMasterVolumeScale() const;
 	void ApplyMasterVolumePreset();
@@ -444,6 +454,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
 	int32 SelectedInventoryIndex;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
+	int32 SelectedBuildMenuIndex;
 
 	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
 	int32 GraphicsQualityPreset;

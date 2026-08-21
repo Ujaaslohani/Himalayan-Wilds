@@ -4,6 +4,7 @@
 #include "Core/HSGameplayTags.h"
 #include "Player/HSPlayerCharacter.h"
 #include "Resources/HSResourceCarryComponent.h"
+#include "Settlement/HSBuildPlacementComponent.h"
 #include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
 
@@ -45,6 +46,11 @@ bool FHSPauseMenuStateTest::RunTest(const FString& Parameters)
 	Player->ToggleBuildMenu();
 	TestTrue(TEXT("Build menu should open from toggle."), Player->IsBuildMenuOpen());
 	TestFalse(TEXT("Opening build menu should close inventory."), Player->IsInventoryOpen());
+	TestEqual(TEXT("Build menu should start on the first entry."), Player->GetSelectedBuildMenuIndex(), 0);
+	Player->SelectBuildMenuDelta(1);
+	TestEqual(TEXT("Build menu selection should move to campsite."), Player->GetSelectedBuildMenuIndex(), 1);
+	Player->SelectBuildMenuDelta(-1);
+	TestEqual(TEXT("Build menu selection should move back to house."), Player->GetSelectedBuildMenuIndex(), 0);
 
 	Player->OpenPauseMenu();
 	TestTrue(TEXT("Pause menu should open over other menus."), Player->IsPauseMenuOpen());
@@ -171,6 +177,8 @@ bool FHSBuildMenuAvailabilityFeedbackTest::RunTest(const FString& Parameters)
 	Player->GetSettlementPlanComponent()->RestoreSettlementPlan(true, FVector::ZeroVector, {});
 	TestTrue(TEXT("Basic house should be available after claim."), Player->CanStartBasicHouseFromBuildMenu(&Reason));
 	TestTrue(TEXT("Available build reason should mention readiness."), Reason.ToString().Contains(TEXT("Ready")));
+	Player->SelectBuildMenuDelta(1);
+	TestEqual(TEXT("Build menu selection should support the campsite entry."), Player->GetSelectedBuildMenuIndex(), 1);
 
 	FHSPendingBuildingSchema PendingSchema;
 	PendingSchema.BuildingTag = TAG_HS_Building_BasicHouse;

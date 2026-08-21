@@ -112,6 +112,7 @@ Unreal Engine 5.5.4.
 - Native inventory selection added: `Q`/`R` changes the selected carried stack, and `[1]`, `[2]`, `[3]` inspect/drop the selected stack.
 - Native resource pickup actor added; dropped inventory stacks now spawn lightweight no-tick world pickups that can be collected again.
 - Native build menu added on `B`; Basic House is selected with `[1]` before entering free placement.
+- Build menu now has a highlighted selected entry; `Q`/`R` moves between Basic House and Basic Campsite, and `[1]`/`E` starts the selected entry.
 - Build menu now explains blocked Basic House placement states such as missing settlement claim, pending schema, active construction, or completed house.
 - Build menu now includes `[2] Basic Campsite`, which enters free placement and spawns a one-use temporary shelter for sleep/time skipping.
 - Pause options can cycle a simple graphics scalability preset with `[6]`.

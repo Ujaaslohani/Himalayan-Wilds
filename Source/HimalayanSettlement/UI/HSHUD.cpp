@@ -692,21 +692,24 @@ void AHSHUD::DrawBuildMenu(const AHSPlayerCharacter* PlayerCharacter)
 	DrawCenteredTextLine(TEXT("Build"), LineY, 1.25f, FLinearColor(0.95f, 0.95f, 0.86f, 1.0f));
 	LineY += 50.0f;
 
+	const int32 SelectedBuildMenuIndex = PlayerCharacter->GetSelectedBuildMenuIndex();
 	FText BuildReason;
 	const bool bCanStartBasicHouse = PlayerCharacter->CanStartBasicHouseFromBuildMenu(&BuildReason);
-	const FLinearColor SchemaColor = bCanStartBasicHouse ? FLinearColor::White : FLinearColor(1.0f, 0.55f, 0.45f, 1.0f);
+	const FLinearColor HouseBaseColor = bCanStartBasicHouse ? FLinearColor::White : FLinearColor(1.0f, 0.55f, 0.45f, 1.0f);
+	const FLinearColor HouseColor = SelectedBuildMenuIndex == 0 ? FLinearColor(0.75f, 1.0f, 0.72f, 1.0f) : HouseBaseColor;
+	const FLinearColor CampsiteColor = SelectedBuildMenuIndex == 1 ? FLinearColor(0.75f, 1.0f, 0.72f, 1.0f) : FLinearColor::White;
 
-	DrawText(TEXT("[1] Basic House"), SchemaColor, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.95f, false);
+	DrawText(SelectedBuildMenuIndex == 0 ? TEXT("> [1] Basic House") : TEXT("  [1] Basic House"), HouseColor, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.95f, false);
 	LineY += 32.0f;
 	DrawText(BuildReason.ToString(), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
 	LineY += 38.0f;
 
-	DrawText(TEXT("[2] Basic Campsite"), FLinearColor::White, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.95f, false);
+	DrawText(SelectedBuildMenuIndex == 1 ? TEXT("> [2] Basic Campsite") : TEXT("  [2] Basic Campsite"), CampsiteColor, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.95f, false);
 	LineY += 32.0f;
 	DrawText(TEXT("Place a temporary one-use sleep point."), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
 
 	DrawPlayerMenuFeedback(PlayerCharacter, PanelY + PanelHeight - 60.0f);
-	DrawText(TEXT("[B/Esc] Close"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, PanelY + PanelHeight - 42.0f, GEngine->GetSmallFont(), 0.85f, false);
+	DrawText(TEXT("[Q/R] Select   [1/E] Start   [2] Campsite   [B/Esc] Close"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, PanelY + PanelHeight - 42.0f, GEngine->GetSmallFont(), 0.85f, false);
 }
 
 void AHSHUD::DrawPlayerMenuFeedback(const AHSPlayerCharacter* PlayerCharacter, float Y)
