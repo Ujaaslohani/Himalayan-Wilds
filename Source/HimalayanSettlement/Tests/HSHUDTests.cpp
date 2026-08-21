@@ -10,6 +10,7 @@
 #include "Settlement/HSSettlementPlanComponent.h"
 #include "UI/HSHUD.h"
 #include "World/HSGameState.h"
+#include "World/HSWorldTimeComponent.h"
 
 namespace
 {
@@ -149,6 +150,31 @@ bool FHSHUDObjectiveLinesTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("Completed house should point to NPC services and exploration."),
 		HasLineContaining(HUD->BuildObjectiveLines(GameState, Player), TEXT("Basic house complete")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSHUDTimeAdvancedFeedbackTest,
+	"HimalayanSettlement.UI.HUDTimeAdvancedShowsSleepFeedback",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSHUDTimeAdvancedFeedbackTest::RunTest(const FString& Parameters)
+{
+	AHSHUD* HUD = NewObject<AHSHUD>();
+
+	TestNotNull(TEXT("HUD should be constructible."), HUD);
+	if (!HUD)
+	{
+		return false;
+	}
+
+	HUD->HandleTimeAdvanced(EHSTimePhase::Night, 0.5f);
+
+	TestTrue(TEXT("Time advance should show a feedback message."), HUD->HasActiveCompletionMessage());
+	TestTrue(TEXT("Feedback should mention time advancement."), HUD->GetCompletionMessage().ToString().Contains(TEXT("Time advanced")));
+	TestTrue(TEXT("Feedback should mention the new phase."), HUD->GetCompletionMessage().ToString().Contains(TEXT("Night")));
+	TestTrue(TEXT("Feedback should mention refreshed services."), HUD->GetCompletionMessage().ToString().Contains(TEXT("Services refreshed")));
 
 	return true;
 }

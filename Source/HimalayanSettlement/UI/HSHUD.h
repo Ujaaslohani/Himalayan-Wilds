@@ -5,6 +5,7 @@
 #include "GameplayTagContainer.h"
 #include "Herbalism/HSPlantEffectComponent.h"
 #include "Hunting/HSAnimalIntelComponent.h"
+#include "World/HSWorldTimeComponent.h"
 #include "HSHUD.generated.h"
 
 struct FHSPendingBuildingSchema;
@@ -78,7 +79,11 @@ public:
 	UFUNCTION()
 	void HandleBuildPlacementConfirmed(const FHSPendingBuildingSchema& PendingSchema);
 
+	UFUNCTION()
+	void HandleTimeAdvanced(EHSTimePhase NewTimePhase, float ElapsedDays);
+
 private:
+	void BindWorldTimeComponent();
 	void BindProgressComponent();
 	void BindAnimalIntelComponent();
 	void BindPlantEffectComponent();
@@ -130,6 +135,9 @@ private:
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<class UHSConstructionComponent> BoundConstructionComponent;
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<class UHSWorldTimeComponent> BoundWorldTimeComponent;
 
 	UPROPERTY(Transient)
 	FText CompletionMessage;

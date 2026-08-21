@@ -42,6 +42,7 @@ void AHSHUD::DrawHUD()
 	BindBuildPlacementComponent();
 	BindSettlementPlanComponent();
 	BindConstructionComponent();
+	BindWorldTimeComponent();
 
 	const AHSGameState* GameState = GetWorld() ? GetWorld()->GetGameState<AHSGameState>() : nullptr;
 	const APawn* Pawn = PlayerOwner->GetPawn();
@@ -314,6 +315,36 @@ void AHSHUD::HandleBuildPlacementBlocked(FText Message)
 void AHSHUD::HandleBuildPlacementConfirmed(const FHSPendingBuildingSchema& PendingSchema)
 {
 	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "BuildPlacementConfirmed", "Schema placed: {0}"), FText::FromString(PendingSchema.BuildingTag.ToString())));
+}
+
+void AHSHUD::HandleTimeAdvanced(EHSTimePhase NewTimePhase, float ElapsedDays)
+{
+	const FText PhaseText = NewTimePhase == EHSTimePhase::Day
+		? NSLOCTEXT("HimalayanSettlementHUD", "TimePhaseDay", "Day")
+		: NSLOCTEXT("HimalayanSettlementHUD", "TimePhaseNight", "Night");
+
+	ShowCompletionMessage(FText::Format(
+		NSLOCTEXT("HimalayanSettlementHUD", "TimeAdvanced", "Time advanced: {0} ({1} days). Services refreshed."),
+		PhaseText,
+		FText::AsNumber(ElapsedDays)));
+}
+
+void AHSHUD::BindWorldTimeComponent()
+{
+	const AHSGameState* GameState = GetWorld() ? GetWorld()->GetGameState<AHSGameState>() : nullptr;
+	UHSWorldTimeComponent* WorldTimeComponent = GameState ? GameState->GetWorldTimeComponent() : nullptr;
+	if (!WorldTimeComponent || BoundWorldTimeComponent.Get() == WorldTimeComponent)
+	{
+		return;
+	}
+
+	if (UHSWorldTimeComponent* PreviousWorldTimeComponent = BoundWorldTimeComponent.Get())
+	{
+		PreviousWorldTimeComponent->OnTimeAdvanced.RemoveDynamic(this, &AHSHUD::HandleTimeAdvanced);
+	}
+
+	BoundWorldTimeComponent = WorldTimeComponent;
+	WorldTimeComponent->OnTimeAdvanced.AddUniqueDynamic(this, &AHSHUD::HandleTimeAdvanced);
 }
 
 void AHSHUD::BindProgressComponent()

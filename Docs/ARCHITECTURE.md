@@ -67,7 +67,7 @@ The first quest handoff is intentionally small: `UHSQuestHandoffComponent` refer
 
 ## HUD
 
-`AHSHUD` is the first native HUD layer. It draws a minimal interaction prompt from the player interaction sensor cache, short feedback messages for progress, settlement planning, construction, hunter intel, and plant effects, plus a compact vertical-slice status/objective readout. Objective guidance is derived from existing native state such as quest completion, carried deer resources, settlement claim, pending schemas, construction jobs, and completed house state. It is intentionally not a broader inventory, dialogue, quest log, or survival HUD.
+`AHSHUD` is the first native HUD layer. It draws a minimal interaction prompt from the player interaction sensor cache, short feedback messages for progress, settlement planning, construction, hunter intel, plant effects, and world-time advancement, plus a compact vertical-slice status/objective readout. Objective guidance is derived from existing native state such as quest completion, carried deer resources, settlement claim, pending schemas, construction jobs, and completed house state. It is intentionally not a broader inventory, dialogue, quest log, or survival HUD.
 
 Pause menu presentation is currently native Canvas HUD. `Esc` cancels active build placement first; otherwise it pauses/unpauses the game and shows keyboard commands for Resume, Save, Load, Options, and Exit. This is the first functional menu layer and may later be replaced by richer UMG/Slate widgets without moving gameplay rules out of C++.
 

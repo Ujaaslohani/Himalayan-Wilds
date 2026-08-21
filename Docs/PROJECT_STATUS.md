@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 11: Vertical Slice Closeout: implementation started with basic native HUD status/objective overlay, pause menu, manual save/load, autosave foundation, inventory screen, build schema menu, and first options control; hands-on closeout pending.
+Milestone 11: Vertical Slice Closeout: implementation started with basic native HUD status/objective overlay, sleep/time feedback, pause menu, manual save/load, autosave foundation, inventory screen, build schema menu, and first options control; hands-on closeout pending.
 
 ## Engine Version
 
@@ -92,6 +92,7 @@ Unreal Engine 5.5.4.
 - Milestone 10 exploration foundation compiles.
 - Native HUD status overlay added for vertical-slice testing: time/day, carried resources, active animal lead, active plant effect, and construction progress.
 - Native HUD objective guidance added for the early loop: hunter hunt/turn-in, settlement claim, house placement, builder start, construction sleep, and post-house exploration.
+- Native HUD time-advance feedback added so sleep/day changes clearly report the new phase and refreshed services.
 - Native pause menu foundation added: `Esc` cancels build placement first, otherwise pauses/resumes and shows Resume, Save, Load, Options, and Exit commands.
 - Manual pause-menu save/load uses the default save slot; event-driven autosave uses a separate autosave slot.
 - Autosave now runs on milestone completion, time advance/sleep, construction start, and construction completion, with suppression during manual load restore.
@@ -106,7 +107,7 @@ Unreal Engine 5.5.4.
 - Hands-on movement playtest passed for jump, crouch, and prone.
 - Milestone 3 settlement claim and house schema foundation compiles.
 - Content bootstrap succeeds with zero warnings and regenerates the basic house schema marker.
-- All 75 `HimalayanSettlement` automation tests pass.
+- All 76 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
