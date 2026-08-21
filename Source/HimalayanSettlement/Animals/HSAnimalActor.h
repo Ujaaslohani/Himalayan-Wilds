@@ -88,6 +88,7 @@ public:
 private:
 	void ResetRuntimeStateFromDefinition();
 	float GetMaxHealth() const;
+	void ReactToNonlethalDamage(AActor* DamageInstigator);
 
 	UPROPERTY(VisibleAnywhere, Category = "Interaction")
 	TObjectPtr<UBoxComponent> InteractionBounds;
@@ -112,4 +113,10 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Animal|Harvest")
 	TArray<FHSItemStack> HarvestedDrops;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Animal|Reaction", meta = (ClampMin = "0.0", Units = "cm"))
+	float AlertStepDistance;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Animal|Reaction", meta = (ClampMin = "0.0", Units = "cm"))
+	float FleeStepDistance;
 };

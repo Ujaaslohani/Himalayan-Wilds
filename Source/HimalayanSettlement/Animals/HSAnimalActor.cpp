@@ -15,6 +15,8 @@ AHSAnimalActor::AHSAnimalActor()
 	, CurrentHealth(1.0f)
 	, RuntimeState(EHSAnimalRuntimeState::Idle)
 	, bHarvested(false)
+	, AlertStepDistance(60.0f)
+	, FleeStepDistance(180.0f)
 {
 	PrimaryActorTick.bCanEverTick = false;
 
@@ -72,6 +74,7 @@ float AHSAnimalActor::ApplyHuntingDamage(float DamageAmount, AActor* DamageInsti
 	else
 	{
 		RuntimeState = CurrentHealth <= (GetMaxHealth() * 0.5f) ? EHSAnimalRuntimeState::Fleeing : EHSAnimalRuntimeState::Alert;
+		ReactToNonlethalDamage(DamageInstigator);
 		UE_LOG(LogHSAI, Verbose, TEXT("%s wounded %s; state is now %d."), *GetNameSafe(DamageInstigator), *GetNameSafe(this), static_cast<int32>(RuntimeState));
 	}
 
@@ -147,6 +150,31 @@ void AHSAnimalActor::ResetRuntimeStateFromDefinition()
 float AHSAnimalActor::GetMaxHealth() const
 {
 	return AnimalDefinition ? FMath::Max(1.0f, AnimalDefinition->MaxHealth) : 1.0f;
+}
+
+void AHSAnimalActor::ReactToNonlethalDamage(AActor* DamageInstigator)
+{
+	FVector ReactionDirection = GetActorForwardVector();
+	if (DamageInstigator)
+	{
+		ReactionDirection = GetActorLocation() - DamageInstigator->GetActorLocation();
+		ReactionDirection.Z = 0.0f;
+		if (ReactionDirection.IsNearlyZero())
+		{
+			ReactionDirection = -DamageInstigator->GetActorForwardVector();
+		}
+	}
+
+	ReactionDirection.Z = 0.0f;
+	ReactionDirection = ReactionDirection.GetSafeNormal();
+	if (ReactionDirection.IsNearlyZero())
+	{
+		ReactionDirection = FVector::ForwardVector;
+	}
+
+	SetActorRotation(ReactionDirection.Rotation());
+	const float StepDistance = RuntimeState == EHSAnimalRuntimeState::Fleeing ? FleeStepDistance : AlertStepDistance;
+	AddActorWorldOffset(ReactionDirection * StepDistance, true);
 }
 
 #undef LOCTEXT_NAMESPACE

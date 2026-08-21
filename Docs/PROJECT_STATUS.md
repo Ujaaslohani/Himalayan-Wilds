@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 11: Vertical Slice Closeout: implementation continues with basic native HUD status/objective overlay, sleep/time feedback, pause menu, manual save/load, autosave foundation, first inventory actions, build schema/campsite menu feedback, first options control, bow/ammo equipment rules, first-person bow placeholder, visible arrow projectiles, bow shot cooldown, animal reaction states, and clearer prototype visuals; hands-on closeout pending.
+Milestone 11: Vertical Slice Closeout: implementation continues with basic native HUD status/objective overlay, sleep/time feedback, pause menu, manual save/load, autosave foundation, first inventory actions, build schema/campsite menu feedback, first options control, bow/ammo equipment rules, first-person bow placeholder, visible arrow projectiles, bow shot cooldown, visible wounded-animal reactions, and clearer prototype visuals; hands-on closeout pending.
 
 ## Engine Version
 
@@ -88,7 +88,7 @@ Unreal Engine 5.5.4.
 - Hunting now requires an equipped bow and at least one arrow, consumes one arrow on valid animal shots, and reports hit/no-target/no-ammo feedback through the HUD.
 - Native visible arrow projectile actor added; hunting now looses a more readable multi-part arrow that flies forward, traces while in flight, stops on impact, and applies hunting damage when it hits an animal.
 - Bow firing now has a short native cooldown to prevent instant arrow spam and make shots easier to read.
-- Animal runtime state now distinguishes idle, alert, fleeing, and dead so wounded animals can support later tracking/AI behavior.
+- Animal runtime state now distinguishes idle, alert, fleeing, and dead; non-lethal hits rotate and move the animal away once so wounded reactions are visible before full AI exists.
 - HUD status lines now show bow equip state, current arrow count, and whether the bow is ready or nocking.
 - Versioned SaveGame now stores bow equipped state and emergency low-end mode state.
 - Milestone 8 soldier weapon-supply foundation compiles.

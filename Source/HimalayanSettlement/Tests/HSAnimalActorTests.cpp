@@ -5,6 +5,7 @@
 #include "Animals/HSAnimalDefinition.h"
 #include "Components/StaticMeshComponent.h"
 #include "Core/HSGameplayTags.h"
+#include "Engine/World.h"
 #include "Interaction/HSInteractable.h"
 
 namespace
@@ -87,13 +88,35 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FHSAnimalActorFleesWhenBadlyWoundedTest::RunTest(const FString& Parameters)
 {
-	AHSAnimalActor* Deer = NewObject<AHSAnimalActor>();
-	Deer->SetAnimalDefinition(CreateValidDeerDefinition(Deer));
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Transient test world should be created."), World);
+	if (!World)
+	{
+		return false;
+	}
 
-	TestEqual(TEXT("Heavy nonlethal damage should apply."), Deer->ApplyHuntingDamage(40.0f, nullptr), 40.0f);
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	AActor* Hunter = World->SpawnActor<AActor>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+	AHSAnimalActor* Deer = World->SpawnActor<AHSAnimalActor>(FVector(300.0f, 0.0f, 0.0f), FRotator::ZeroRotator, SpawnParameters);
+	TestNotNull(TEXT("Hunter source actor should spawn."), Hunter);
+	TestNotNull(TEXT("Deer should spawn."), Deer);
+	if (!Hunter || !Deer)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	Deer->SetAnimalDefinition(CreateValidDeerDefinition(Deer));
+	const FVector StartLocation = Deer->GetActorLocation();
+
+	TestEqual(TEXT("Heavy nonlethal damage should apply."), Deer->ApplyHuntingDamage(40.0f, Hunter), 40.0f);
 	TestFalse(TEXT("Badly wounded deer should still be alive."), Deer->IsDead());
 	TestTrue(TEXT("Badly wounded deer should enter fleeing state."), Deer->IsFleeing());
+	TestGreaterThan(TEXT("Fleeing deer should move away from the attacker."), Deer->GetActorLocation().X, StartLocation.X);
 
+	World->DestroyWorld(false);
 	return true;
 }
 
