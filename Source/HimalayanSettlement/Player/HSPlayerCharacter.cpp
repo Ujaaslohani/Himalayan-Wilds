@@ -22,6 +22,8 @@
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Misc/App.h"
+#include "NPC/HSNPCActor.h"
+#include "NPC/HSNPCServiceComponent.h"
 #include "Persistence/HSSettlementPersistenceComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
@@ -494,6 +496,11 @@ void AHSPlayerCharacter::RotateBuildPlacementLeft(const FInputActionValue& Input
 		return;
 	}
 
+	if ((!BuildPlacementComponent || !BuildPlacementComponent->IsPlacementActive()) && SelectFocusedNPCServiceDelta(-1))
+	{
+		return;
+	}
+
 	if (BuildPlacementComponent)
 	{
 		BuildPlacementComponent->RotatePlacement(-1.0f);
@@ -516,6 +523,11 @@ void AHSPlayerCharacter::RotateBuildPlacementRight(const FInputActionValue& Inpu
 	if (bInventoryOpen)
 	{
 		SelectInventoryDelta(1);
+		return;
+	}
+
+	if ((!BuildPlacementComponent || !BuildPlacementComponent->IsPlacementActive()) && SelectFocusedNPCServiceDelta(1))
+	{
 		return;
 	}
 
@@ -1375,6 +1387,31 @@ void AHSPlayerCharacter::SetMenuFeedback(FText Feedback)
 {
 	LastMenuFeedback = Feedback;
 	MenuFeedbackExpireTime = FPlatformTime::Seconds() + MenuFeedbackDuration;
+}
+
+bool AHSPlayerCharacter::SelectFocusedNPCServiceDelta(int32 Delta)
+{
+	if (!InteractionSensor)
+	{
+		return false;
+	}
+
+	InteractionSensor->RefreshFocus();
+	AHSNPCActor* FocusedNPC = Cast<AHSNPCActor>(InteractionSensor->GetFocusedInteractable());
+	UHSNPCServiceComponent* ServiceComponent = FocusedNPC ? FocusedNPC->GetNPCServiceComponent() : nullptr;
+	if (!ServiceComponent || !ServiceComponent->SelectServiceDelta(Delta, this))
+	{
+		return false;
+	}
+
+	FHSNPCServiceOption SelectedService;
+	if (ServiceComponent->GetSelectedServiceOption(this, SelectedService))
+	{
+		SetMenuFeedback(FText::Format(
+			NSLOCTEXT("HSPlayerCharacter", "NPCServiceSelected", "Selected service: {0}."),
+			SelectedService.Prompt));
+	}
+	return true;
 }
 
 bool AHSPlayerCharacter::SpawnDroppedInventoryStack(const FHSItemStack& DroppedStack)

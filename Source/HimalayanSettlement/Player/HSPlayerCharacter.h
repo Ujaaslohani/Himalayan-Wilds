@@ -253,6 +253,7 @@ private:
 	void SetBuildMenuOpen(bool bNewOpen);
 	void CloseNonPauseMenus();
 	void ExitGameFromPauseMenu() const;
+	bool SelectFocusedNPCServiceDelta(int32 Delta);
 	void BindAutosaveSources();
 	void SetMenuFeedback(FText Feedback);
 	void RefreshBowVisuals();

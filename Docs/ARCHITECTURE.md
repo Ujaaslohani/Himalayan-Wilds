@@ -110,7 +110,7 @@ The first-person bow visual is a native placeholder on `AHSPlayerCharacter`, bui
 
 ## Specialist Role Services
 
-NPC services are coordinated by `UHSNPCServiceComponent`, a no-tick native component on NPC actors. It exposes service options by gameplay tag, selects prompts by priority, executes the requested service, and broadcasts refreshes when world time advances. Builder starts pending schema construction, Hunter reports one daily animal lead, Herbalist teaches one known plant, and Soldier grants basic weapon supplies through this shared query/execution path.
+NPC services are coordinated by `UHSNPCServiceComponent`, a no-tick native component on NPC actors. It exposes service options by gameplay tag, tracks a selected available service, selects prompts by selected service or priority fallback, executes the requested service, and broadcasts refreshes when world time advances. The player can cycle the focused NPC service with `Q`/`R` when no menu or build placement preview is active; this is mostly future-proofing until each profession has multiple options. Builder starts pending schema construction, Hunter reports one daily animal lead, Herbalist teaches one known plant, and Soldier grants basic weapon supplies through this shared query/execution path.
 
 ## Build Placement
 

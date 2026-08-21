@@ -16,6 +16,7 @@
 #define LOCTEXT_NAMESPACE "HSNPCServiceComponent"
 
 UHSNPCServiceComponent::UHSNPCServiceComponent()
+	: SelectedServiceIndex(0)
 {
 	PrimaryComponentTick.bCanEverTick = false;
 }
@@ -87,6 +88,19 @@ bool UHSNPCServiceComponent::GetServiceOption(FGameplayTag ServiceTag, const AAc
 	return false;
 }
 
+bool UHSNPCServiceComponent::GetSelectedServiceOption(const AActor* Interactor, FHSNPCServiceOption& OutServiceOption) const
+{
+	TArray<FHSNPCServiceOption> ServiceOptions;
+	QueryAvailableServiceOptions(Interactor, ServiceOptions);
+	if (ServiceOptions.Num() <= 0)
+	{
+		return false;
+	}
+
+	OutServiceOption = ServiceOptions[FMath::Clamp(SelectedServiceIndex, 0, ServiceOptions.Num() - 1)];
+	return true;
+}
+
 void UHSNPCServiceComponent::QueryServiceOptions(const AActor* Interactor, TArray<FHSNPCServiceOption>& OutServiceOptions) const
 {
 	OutServiceOptions.Reset();
@@ -103,10 +117,61 @@ void UHSNPCServiceComponent::QueryServiceOptions(const AActor* Interactor, TArra
 	AddSoldierService(*NPC, Interactor, OutServiceOptions);
 }
 
+void UHSNPCServiceComponent::QueryAvailableServiceOptions(const AActor* Interactor, TArray<FHSNPCServiceOption>& OutServiceOptions) const
+{
+	TArray<FHSNPCServiceOption> ServiceOptions;
+	QueryServiceOptions(Interactor, ServiceOptions);
+
+	OutServiceOptions.Reset();
+	for (const FHSNPCServiceOption& ServiceOption : ServiceOptions)
+	{
+		if (ServiceOption.bAvailable)
+		{
+			OutServiceOptions.Add(ServiceOption);
+		}
+	}
+
+	OutServiceOptions.Sort([](const FHSNPCServiceOption& Left, const FHSNPCServiceOption& Right)
+	{
+		return Left.Priority > Right.Priority;
+	});
+}
+
+bool UHSNPCServiceComponent::SelectServiceDelta(int32 Delta, const AActor* Interactor)
+{
+	TArray<FHSNPCServiceOption> ServiceOptions;
+	QueryAvailableServiceOptions(Interactor, ServiceOptions);
+	if (ServiceOptions.Num() <= 0)
+	{
+		SelectedServiceIndex = 0;
+		return false;
+	}
+
+	SelectedServiceIndex = FMath::Clamp(SelectedServiceIndex + Delta, 0, ServiceOptions.Num() - 1);
+	return true;
+}
+
 bool UHSNPCServiceComponent::TryExecuteBestService(AActor* Interactor, FHSNPCServiceOption* OutExecutedService)
 {
 	FHSNPCServiceOption ServiceOption;
 	if (!GetBestServiceOption(Interactor, ServiceOption))
+	{
+		return false;
+	}
+
+	const bool bExecuted = TryExecuteService(ServiceOption.ServiceTag, Interactor);
+	if (bExecuted && OutExecutedService)
+	{
+		*OutExecutedService = ServiceOption;
+	}
+
+	return bExecuted;
+}
+
+bool UHSNPCServiceComponent::TryExecuteSelectedService(AActor* Interactor, FHSNPCServiceOption* OutExecutedService)
+{
+	FHSNPCServiceOption ServiceOption;
+	if (!GetSelectedServiceOption(Interactor, ServiceOption))
 	{
 		return false;
 	}

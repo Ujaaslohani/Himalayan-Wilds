@@ -86,7 +86,7 @@ FText AHSNPCActor::GetInteractionPrompt_Implementation(const AActor* Interactor)
 	if (NPCServiceComponent)
 	{
 		FHSNPCServiceOption ServiceOption;
-		if (NPCServiceComponent->GetBestServiceOption(Interactor, ServiceOption))
+		if (NPCServiceComponent->GetSelectedServiceOption(Interactor, ServiceOption) || NPCServiceComponent->GetBestServiceOption(Interactor, ServiceOption))
 		{
 			return ServiceOption.Prompt;
 		}
@@ -112,7 +112,7 @@ void AHSNPCActor::Interact_Implementation(AActor* Interactor)
 		NPCServiceComponent->GetServiceOption(TAG_HS_NPC_Service_Builder_StartConstruction, Interactor, ExecutedService);
 	}
 	const bool bAdvancedQuest = !bExecutedServiceBeforeQuest && QuestHandoffComponent && QuestHandoffComponent->TryAdvanceQuest(Interactor);
-	const bool bExecutedServiceAfterQuest = !bExecutedServiceBeforeQuest && !bAdvancedQuest && NPCServiceComponent && NPCServiceComponent->TryExecuteBestService(Interactor, &ExecutedService);
+	const bool bExecutedServiceAfterQuest = !bExecutedServiceBeforeQuest && !bAdvancedQuest && NPCServiceComponent && NPCServiceComponent->TryExecuteSelectedService(Interactor, &ExecutedService);
 	const bool bExecutedService = bExecutedServiceBeforeQuest || bExecutedServiceAfterQuest;
 	UE_LOG(
 		LogHSInteraction,

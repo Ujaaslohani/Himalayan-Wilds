@@ -6,6 +6,7 @@
 #include "Engine/World.h"
 #include "NPC/HSNPCActor.h"
 #include "NPC/HSNPCDefinition.h"
+#include "NPC/HSNPCServiceComponent.h"
 #include "Player/HSPlayerCharacter.h"
 #include "Resources/HSResourceCarryComponent.h"
 
@@ -54,10 +55,18 @@ bool FHSSoldierProvidesBasicWeaponSuppliesTest::RunTest(const FString& Parameter
 	}
 
 	TestTrue(TEXT("Soldier prompt should offer weapons before the player has a bow."), Soldier->GetInteractionPrompt_Implementation(Player).ToString().Contains(TEXT("weapons")));
-	Soldier->Interact_Implementation(Player);
+	UHSNPCServiceComponent* ServiceComponent = Soldier->GetNPCServiceComponent();
+	FHSNPCServiceOption SelectedService;
+	TestNotNull(TEXT("Soldier should own service component."), ServiceComponent);
+	TestTrue(TEXT("Soldier selected service should be queryable."), ServiceComponent && ServiceComponent->GetSelectedServiceOption(Player, SelectedService));
+	TestTrue(TEXT("Selected soldier service should provide basic weapons."), SelectedService.ServiceTag == TAG_HS_NPC_Service_Soldier_ProvideBasicWeapons);
+	TestTrue(TEXT("Single available soldier service should remain selected after cycling."), ServiceComponent && ServiceComponent->SelectServiceDelta(1, Player));
+	TestEqual(TEXT("Single service selection should clamp at zero."), ServiceComponent ? ServiceComponent->GetSelectedServiceIndex() : INDEX_NONE, 0);
+	TestTrue(TEXT("Selected soldier service should execute."), ServiceComponent && ServiceComponent->TryExecuteSelectedService(Player));
 	TestEqual(TEXT("Soldier should grant one basic bow."), ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic), 1);
 	TestEqual(TEXT("Soldier should grant a basic arrow bundle."), ResourceCarry->GetQuantityForTag(TAG_HS_Item_Arrow_Basic), 12);
 	TestTrue(TEXT("Soldier should auto-equip the granted bow."), Equipment->IsBowEquipped());
+	TestFalse(TEXT("Selected soldier service should be unavailable after bow is granted."), ServiceComponent && ServiceComponent->GetSelectedServiceOption(Player, SelectedService));
 
 	Soldier->Interact_Implementation(Player);
 	TestEqual(TEXT("Soldier should not duplicate bow supplies while player already has a bow."), ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic), 1);

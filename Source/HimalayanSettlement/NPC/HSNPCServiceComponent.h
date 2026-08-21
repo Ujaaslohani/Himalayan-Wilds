@@ -53,10 +53,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "NPC Service")
 	bool HasAnyAvailableService(const AActor* Interactor) const;
 
+	UFUNCTION(BlueprintPure, Category = "NPC Service")
+	int32 GetSelectedServiceIndex() const { return SelectedServiceIndex; }
+
 	bool GetBestServiceOption(const AActor* Interactor, FHSNPCServiceOption& OutServiceOption) const;
+	bool GetSelectedServiceOption(const AActor* Interactor, FHSNPCServiceOption& OutServiceOption) const;
 	bool GetServiceOption(FGameplayTag ServiceTag, const AActor* Interactor, FHSNPCServiceOption& OutServiceOption) const;
 	void QueryServiceOptions(const AActor* Interactor, TArray<FHSNPCServiceOption>& OutServiceOptions) const;
+	void QueryAvailableServiceOptions(const AActor* Interactor, TArray<FHSNPCServiceOption>& OutServiceOptions) const;
+	bool SelectServiceDelta(int32 Delta, const AActor* Interactor);
 	bool TryExecuteBestService(AActor* Interactor, FHSNPCServiceOption* OutExecutedService = nullptr);
+	bool TryExecuteSelectedService(AActor* Interactor, FHSNPCServiceOption* OutExecutedService = nullptr);
 	bool TryExecuteService(FGameplayTag ServiceTag, AActor* Interactor);
 
 	void BindToWorldTime();
@@ -79,4 +86,7 @@ private:
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<class UHSWorldTimeComponent> BoundWorldTime;
+
+	UPROPERTY(VisibleAnywhere, Category = "NPC Service")
+	int32 SelectedServiceIndex;
 };

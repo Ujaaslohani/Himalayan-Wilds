@@ -96,6 +96,7 @@ Unreal Engine 5.5.4.
 - Native NPC service component added for shared role service query, prompt, execution, and time-refresh signaling.
 - Builder, hunter, herbalist, and soldier services now expose consistent service tags and options.
 - NPC actors now delegate role-service prompts and interactions to the shared service component while preserving quest handoff priority rules.
+- NPC service component now tracks a selected available service and executes that selected service; Q/R can cycle the focused NPC service when no menu or build placement is active.
 - Milestone 9 NPC role framework foundation compiles.
 - Native exploration marker actor added for cheap no-tick village, forest, trail, and animal-area landmarks.
 - One Morning Hunt map now has a readable village-to-forest route with trail markers, a forest edge marker, an animal ridge marker, and a village core marker.
