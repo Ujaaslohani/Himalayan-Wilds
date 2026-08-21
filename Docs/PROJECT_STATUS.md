@@ -109,6 +109,7 @@ Unreal Engine 5.5.4.
 - Autosave now runs on milestone completion, time advance/sleep, construction start, and construction completion, with suppression during manual load restore.
 - Native inventory screen added on `I` / `Tab`, showing carried item stacks from the resource carry component.
 - Native inventory selection added: `Q`/`R` changes the selected carried stack, and `[1]`, `[2]`, `[3]` inspect/drop the selected stack.
+- Native resource pickup actor added; dropped inventory stacks now spawn lightweight no-tick world pickups that can be collected again.
 - Native build menu added on `B`; Basic House is selected with `[1]` before entering free placement.
 - Build menu now explains blocked Basic House placement states such as missing settlement claim, pending schema, active construction, or completed house.
 - Build menu now includes `[2] Basic Campsite`, which enters free placement and spawns a one-use temporary shelter for sleep/time skipping.
@@ -129,7 +130,7 @@ Unreal Engine 5.5.4.
 - Hands-on milestone pass reported complete by the project owner after the 40 FPS stable retest.
 - Milestone 3 settlement claim and house schema foundation compiles.
 - Content bootstrap succeeds with zero warnings and regenerates the basic house schema marker.
-- All 85 `HimalayanSettlement` automation tests pass.
+- All 86 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 

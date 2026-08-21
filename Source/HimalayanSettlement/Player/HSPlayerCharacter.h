@@ -4,6 +4,7 @@
 #include "GameFramework/Character.h"
 #include "GameplayTagContainer.h"
 #include "Herbalism/HSPlantEffectComponent.h"
+#include "Resources/HSItemStack.h"
 #include "Settlement/HSConstructionComponent.h"
 #include "World/HSWorldTimeComponent.h"
 #include "HSPlayerCharacter.generated.h"
@@ -22,6 +23,7 @@ class UHSSettlementPlanComponent;
 class UHSSettlementUnlockComponent;
 class UInputAction;
 class UInputMappingContext;
+class AHSResourcePickupActor;
 struct FInputActionValue;
 
 UENUM(BlueprintType)
@@ -209,6 +211,7 @@ private:
 	void BindAutosaveSources();
 	void SetMenuFeedback(FText Feedback);
 	void RefreshBowVisuals();
+	bool SpawnDroppedInventoryStack(const FHSItemStack& DroppedStack);
 	void ClampSelectedInventoryIndex();
 
 	UFUNCTION()
@@ -276,6 +279,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSPlayerEquipmentComponent> PlayerEquipmentComponent;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Player|Inventory")
+	TSubclassOf<AHSResourcePickupActor> ResourcePickupActorClass;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputMappingContext> PlayerMappingContext;

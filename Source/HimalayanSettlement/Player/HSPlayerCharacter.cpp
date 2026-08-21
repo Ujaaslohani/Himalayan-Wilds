@@ -24,6 +24,7 @@
 #include "Persistence/HSSettlementPersistenceComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
+#include "Resources/HSResourcePickupActor.h"
 #include "Settlement/HSBuildPlacementComponent.h"
 #include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
@@ -134,6 +135,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	SettlementPlanComponent = CreateDefaultSubobject<UHSSettlementPlanComponent>(TEXT("SettlementPlanComponent"));
 	SettlementUnlockComponent = CreateDefaultSubobject<UHSSettlementUnlockComponent>(TEXT("SettlementUnlockComponent"));
 	PlayerEquipmentComponent = CreateDefaultSubobject<UHSPlayerEquipmentComponent>(TEXT("PlayerEquipmentComponent"));
+	ResourcePickupActorClass = AHSResourcePickupActor::StaticClass();
 
 	PlayerMappingContext = CreateDefaultSubobject<UInputMappingContext>(TEXT("PlayerMappingContext"));
 
@@ -872,6 +874,7 @@ bool AHSPlayerCharacter::DropInventoryStackQuantity(int32 StackIndex, int32 Quan
 		NSLOCTEXT("HSPlayerCharacter", "InventoryDroppedStack", "Dropped {0} x{1}."),
 		FText::FromString(ConsumedStack.ItemTag.ToString()),
 		FText::AsNumber(ConsumedStack.Quantity)));
+	SpawnDroppedInventoryStack(ConsumedStack);
 	ClampSelectedInventoryIndex();
 	return true;
 }
@@ -1151,6 +1154,36 @@ void AHSPlayerCharacter::SetMenuFeedback(FText Feedback)
 {
 	LastMenuFeedback = Feedback;
 	MenuFeedbackExpireTime = FPlatformTime::Seconds() + MenuFeedbackDuration;
+}
+
+bool AHSPlayerCharacter::SpawnDroppedInventoryStack(const FHSItemStack& DroppedStack)
+{
+	if (!DroppedStack.IsValidStack() || !ResourcePickupActorClass)
+	{
+		return false;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	const FVector DropForward = GetActorForwardVector().GetSafeNormal();
+	const FVector DropLocation = GetActorLocation() + (DropForward * 120.0f) + FVector(0.0f, 0.0f, 36.0f);
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Owner = this;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	AHSResourcePickupActor* DroppedPickup = World->SpawnActor<AHSResourcePickupActor>(ResourcePickupActorClass, DropLocation, FRotator::ZeroRotator, SpawnParameters);
+	if (!DroppedPickup)
+	{
+		return false;
+	}
+
+	DroppedPickup->SetItemStack(DroppedStack);
+	return true;
 }
 
 void AHSPlayerCharacter::ClampSelectedInventoryIndex()

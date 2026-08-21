@@ -98,7 +98,7 @@ The first-person bow visual is a native placeholder on `AHSPlayerCharacter`, bui
 
 ## Resource Carry State
 
-`UHSResourceCarryComponent` is the first lightweight resource state on the player. It stores harvested `FHSItemStack` values merged by gameplay tag so quest return logic and the first inventory screen can query carried resources. Player menu code keeps a selected row clamped against the current carried stacks and supports selected-row inspect/drop actions, but it is not yet a full container, weight, equipment, crafting, world-drop, or item-use system.
+`UHSResourceCarryComponent` is the first lightweight resource state on the player. It stores harvested `FHSItemStack` values merged by gameplay tag so quest return logic and the first inventory screen can query carried resources. Player menu code keeps a selected row clamped against the current carried stacks and supports selected-row inspect/drop actions. Dropped stacks spawn a lightweight no-tick `AHSResourcePickupActor` that can be interacted with to merge the stack back into carry state, but this is still not a full container, weight, equipment, crafting, or durable world-item system.
 
 ## Player Progress
 

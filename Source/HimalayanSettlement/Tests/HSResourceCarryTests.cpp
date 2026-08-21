@@ -4,9 +4,11 @@
 #include "Animals/HSAnimalActor.h"
 #include "Animals/HSAnimalDefinition.h"
 #include "Core/HSGameplayTags.h"
+#include "EngineUtils.h"
 #include "Interaction/HSInteractable.h"
 #include "Player/HSPlayerCharacter.h"
 #include "Resources/HSResourceCarryComponent.h"
+#include "Resources/HSResourcePickupActor.h"
 
 namespace
 {
@@ -151,6 +153,59 @@ bool FHSAnimalHarvestTransfersToPlayerCarryTest::RunTest(const FString& Paramete
 	TestEqual(TEXT("Harvested hide should transfer to player carry."), Carry ? Carry->GetQuantityForTag(TAG_HS_Resource_Hide_Deer) : 0, 1);
 	TestFalse(TEXT("Harvested deer should no longer be interactable."), HSInteraction::CanInteract(Deer, Player));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSResourceDropSpawnsPickupTest,
+	"HimalayanSettlement.Resources.DroppingInventorySpawnsPickup",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSResourceDropSpawnsPickupTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Transient test world should be created."), World);
+	if (!World)
+	{
+		return false;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	AHSPlayerCharacter* Player = World->SpawnActor<AHSPlayerCharacter>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+	UHSResourceCarryComponent* Carry = Player ? Player->GetResourceCarryComponent() : nullptr;
+	TestNotNull(TEXT("Spawned player should own resource carry."), Carry);
+	if (!Player || !Carry)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	Carry->AddStack(FHSItemStack{ TAG_HS_Resource_Meat_Deer, 2 });
+	TestTrue(TEXT("Dropping one carried item should succeed."), Player->DropInventoryStackQuantity(0, 1));
+	TestEqual(TEXT("One meat should remain carried after drop."), Carry->GetQuantityForTag(TAG_HS_Resource_Meat_Deer), 1);
+
+	AHSResourcePickupActor* DroppedPickup = nullptr;
+	for (TActorIterator<AHSResourcePickupActor> It(World); It; ++It)
+	{
+		DroppedPickup = *It;
+		break;
+	}
+
+	TestNotNull(TEXT("Dropping inventory should spawn a pickup actor."), DroppedPickup);
+	TestFalse(TEXT("Pickup actor should not tick by default."), DroppedPickup ? DroppedPickup->PrimaryActorTick.bCanEverTick : true);
+	TestEqual(TEXT("Pickup prototype mesh should not use collision."), DroppedPickup && DroppedPickup->GetPrototypeMesh() ? DroppedPickup->GetPrototypeMesh()->GetCollisionEnabled() : ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::NoCollision);
+	TestTrue(TEXT("Pickup should hold the dropped item tag."), DroppedPickup && DroppedPickup->GetItemStack().ItemTag == TAG_HS_Resource_Meat_Deer);
+	TestEqual(TEXT("Pickup should hold the dropped quantity."), DroppedPickup ? DroppedPickup->GetItemStack().Quantity : 0, 1);
+	TestTrue(TEXT("Pickup prompt should mention the resource."), DroppedPickup && HSInteraction::GetInteractionPrompt(DroppedPickup, Player).ToString().Contains(TEXT("Resource.Meat.Deer")));
+
+	HSInteraction::Interact(DroppedPickup, Player);
+	TestTrue(TEXT("Pickup should become consumed after interaction."), DroppedPickup && DroppedPickup->IsPickedUp());
+	TestEqual(TEXT("Picked-up meat should return to carry."), Carry->GetQuantityForTag(TAG_HS_Resource_Meat_Deer), 2);
+	TestFalse(TEXT("Picked-up item should stop being interactable."), DroppedPickup && HSInteraction::CanInteract(DroppedPickup, Player));
+
+	World->DestroyWorld(false);
 	return true;
 }
 
