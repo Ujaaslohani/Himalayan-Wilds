@@ -669,7 +669,7 @@ void AHSHUD::DrawInventoryMenu(const AHSPlayerCharacter* PlayerCharacter)
 		}
 	}
 
-	DrawText(TEXT("[Q/R] Select   [1] Inspect   [2] Drop one   [3] Drop stack"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, PanelY + PanelHeight - 70.0f, GEngine->GetSmallFont(), 0.85f, false);
+	DrawText(TEXT("[Q/R] Select   [1] Inspect   [2] Drop one   [3] Drop stack   [4] Use"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, PanelY + PanelHeight - 70.0f, GEngine->GetSmallFont(), 0.85f, false);
 	DrawPlayerMenuFeedback(PlayerCharacter, PanelY + PanelHeight - 54.0f);
 	DrawText(TEXT("[I/Tab/Esc] Close"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, PanelY + PanelHeight - 42.0f, GEngine->GetSmallFont(), 0.85f, false);
 }

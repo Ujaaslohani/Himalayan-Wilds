@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "Core/HSGameplayTags.h"
 #include "Player/HSPlayerCharacter.h"
+#include "Equipment/HSPlayerEquipmentComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
 #include "Settlement/HSBuildPlacementComponent.h"
 #include "Settlement/HSConstructionComponent.h"
@@ -143,11 +144,18 @@ bool FHSInventoryMenuActionsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Dropping the remaining selected stack should succeed."), Player->DropSelectedInventoryStackQuantity(999));
 	TestEqual(TEXT("No hide should remain after dropping the selected stack."), Player->GetResourceCarryComponent()->GetQuantityForTag(TAG_HS_Resource_Hide_Deer), 0);
 	TestEqual(TEXT("Inventory selection should clamp back to the remaining stack."), Player->GetSelectedInventoryIndex(), 0);
+	TestFalse(TEXT("Using an unsupported resource stack should fail cleanly."), Player->UseSelectedInventoryStack());
+	TestTrue(TEXT("Unsupported use feedback should explain the item cannot be used."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("cannot be used")));
 
 	TestTrue(TEXT("Dropping the remaining stack should succeed."), Player->DropInventoryStackQuantity(0, 999));
 	TestEqual(TEXT("No meat should remain after dropping the stack."), Player->GetResourceCarryComponent()->GetQuantityForTag(TAG_HS_Resource_Meat_Deer), 0);
 	TestFalse(TEXT("Inspecting an empty row should fail."), Player->InspectInventoryStack(0));
 	TestTrue(TEXT("Empty inspect should explain the missing slot."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("No carried item")));
+
+	Player->GetResourceCarryComponent()->AddStack(FHSItemStack{ TAG_HS_Item_Bow_Basic, 1 });
+	TestTrue(TEXT("Using the bow stack should equip the bow."), Player->UseSelectedInventoryStack());
+	TestTrue(TEXT("Player equipment should report bow equipped."), Player->GetPlayerEquipmentComponent() && Player->GetPlayerEquipmentComponent()->IsBowEquipped());
+	TestTrue(TEXT("Bow use feedback should report equipped state."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Bow equipped")));
 
 	return true;
 }

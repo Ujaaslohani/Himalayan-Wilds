@@ -189,6 +189,9 @@ public:
 	bool DropSelectedInventoryStackQuantity(int32 Quantity);
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	bool UseSelectedInventoryStack();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
 	void SelectInventoryDelta(int32 Delta);
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")

@@ -111,6 +111,7 @@ Unreal Engine 5.5.4.
 - Native inventory screen added on `I` / `Tab`, showing carried item stacks from the resource carry component.
 - Native inventory selection added: `Q`/`R` changes the selected carried stack, and `[1]`, `[2]`, `[3]` inspect/drop the selected stack.
 - Native resource pickup actor added; dropped inventory stacks now spawn lightweight no-tick world pickups that can be collected again.
+- Native inventory use action added on `[4]`; the carried basic bow can be equipped from inventory, while unsupported resources report clear feedback.
 - Native build menu added on `B`; Basic House is selected with `[1]` before entering free placement.
 - Build menu now has a highlighted selected entry; `Q`/`R` moves between Basic House and Basic Campsite, and `[1]`/`E` starts the selected entry.
 - Build menu now explains blocked Basic House placement states such as missing settlement claim, pending schema, active construction, or completed house.

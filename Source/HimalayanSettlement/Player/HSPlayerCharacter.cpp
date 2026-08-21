@@ -614,6 +614,12 @@ void AHSPlayerCharacter::HandlePauseMenuLoad(const FInputActionValue& InputValue
 
 void AHSPlayerCharacter::HandlePauseMenuOptions(const FInputActionValue& InputValue)
 {
+	if (bInventoryOpen)
+	{
+		UseSelectedInventoryStack();
+		return;
+	}
+
 	if (bPauseMenuOpen)
 	{
 		TogglePauseOptions();
@@ -1014,6 +1020,35 @@ bool AHSPlayerCharacter::DropSelectedInventoryStackQuantity(int32 Quantity)
 {
 	ClampSelectedInventoryIndex();
 	return DropInventoryStackQuantity(SelectedInventoryIndex, Quantity);
+}
+
+bool AHSPlayerCharacter::UseSelectedInventoryStack()
+{
+	ClampSelectedInventoryIndex();
+
+	FHSItemStack Stack;
+	if (!ResourceCarryComponent || !ResourceCarryComponent->GetStackAtIndex(SelectedInventoryIndex, Stack))
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "InventoryUseEmpty", "No carried item to use."));
+		return false;
+	}
+
+	if (Stack.ItemTag == TAG_HS_Item_Bow_Basic)
+	{
+		if (PlayerEquipmentComponent && PlayerEquipmentComponent->SetBowEquipped(true))
+		{
+			SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "InventoryUseBowEquipped", "Bow equipped."));
+			return true;
+		}
+
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "InventoryUseBowFailed", "Could not equip bow."));
+		return false;
+	}
+
+	SetMenuFeedback(FText::Format(
+		NSLOCTEXT("HSPlayerCharacter", "InventoryUseUnsupported", "{0} cannot be used yet."),
+		FText::FromString(Stack.ItemTag.ToString())));
+	return false;
 }
 
 void AHSPlayerCharacter::SelectInventoryDelta(int32 Delta)
