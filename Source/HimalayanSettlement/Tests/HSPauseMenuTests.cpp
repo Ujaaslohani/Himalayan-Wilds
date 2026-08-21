@@ -60,6 +60,22 @@ bool FHSPauseMenuStateTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Cycling graphics should produce visible menu feedback."), Player->HasActiveMenuFeedback());
 	TestTrue(TEXT("Graphics feedback should name the preset."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Graphics preset")));
 
+	TestFalse(TEXT("Performance overlay should start disabled."), Player->IsPerformanceOverlayEnabled());
+	Player->TogglePerformanceOverlay();
+	TestTrue(TEXT("Performance overlay should toggle on."), Player->IsPerformanceOverlayEnabled());
+	TestTrue(TEXT("Performance overlay toggle should produce feedback."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Performance overlay: On")));
+	Player->TogglePerformanceOverlay();
+	TestFalse(TEXT("Performance overlay should toggle off."), Player->IsPerformanceOverlayEnabled());
+	TestTrue(TEXT("Performance overlay off toggle should produce feedback."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Performance overlay: Off")));
+
+	TestFalse(TEXT("Emergency low-end mode should start disabled."), Player->IsEmergencyLowEndModeEnabled());
+	Player->ToggleEmergencyLowEndMode();
+	TestTrue(TEXT("Emergency low-end mode should toggle on."), Player->IsEmergencyLowEndModeEnabled());
+	TestTrue(TEXT("Emergency low-end feedback should report enabled state."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Emergency low-end mode: On")));
+	Player->ToggleEmergencyLowEndMode();
+	TestFalse(TEXT("Emergency low-end mode should toggle off."), Player->IsEmergencyLowEndModeEnabled());
+	TestTrue(TEXT("Emergency low-end feedback should report disabled state."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Emergency low-end mode: Off")));
+
 	return true;
 }
 

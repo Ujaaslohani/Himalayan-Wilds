@@ -71,7 +71,7 @@ The first quest handoff is intentionally small: `UHSQuestHandoffComponent` refer
 
 Pause menu presentation is currently native Canvas HUD. `Esc` cancels active build placement first; otherwise it pauses/unpauses the game and shows keyboard commands for Resume, Save, Load, Options, and Exit. This is the first functional menu layer and may later be replaced by richer UMG/Slate widgets without moving gameplay rules out of C++.
 
-Inventory and build menu presentation also live in the native Canvas HUD for now. `I`/`Tab` shows carried item stacks from `UHSResourceCarryComponent`; `[1]` inspects the first visible stack, `[2]` drops one item from it, and `[3]` drops that stack for prototype cleanup. `B` opens a schema menu and `[1]` starts the Basic House free-placement preview only when native settlement/construction state allows it. The pause options panel can cycle a simple graphics scalability preset. These are first-pass control surfaces, not final visual UI.
+Inventory and build menu presentation also live in the native Canvas HUD for now. `I`/`Tab` shows carried item stacks from `UHSResourceCarryComponent`; `[1]` inspects the first visible stack, `[2]` drops one item from it, and `[3]` drops that stack for prototype cleanup. `B` opens a schema menu and `[1]` starts the Basic House free-placement preview only when native settlement/construction state allows it. The pause options panel can cycle a simple graphics scalability preset. `F10` toggles the FPS/unit performance overlays for profiling, and `F8` toggles an emergency low-end mode for weak hardware testing. These are first-pass control surfaces, not final visual UI.
 
 ## Prototype Visual Markers
 

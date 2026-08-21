@@ -49,7 +49,7 @@
 		{
 			"label": "UE: Open One Morning Hunt Map Low-End Profile",
 			"type": "shell",
-			"command": "& 'C:\\Program Files\\Epic Games\\UE_5.5\\Engine\\Binaries\\Win64\\UnrealEditor.exe' '${workspaceFolder}\\HimalayanSettlement.uproject' /Game/Maps/L_OneMorningHunt \"-ExecCmds=sg.ViewDistanceQuality 1; sg.AntiAliasingQuality 1; sg.ShadowQuality 1; sg.GlobalIlluminationQuality 0; sg.ReflectionQuality 0; sg.PostProcessQuality 1; sg.TextureQuality 1; sg.EffectsQuality 1; sg.FoliageQuality 0; sg.ShadingQuality 1; stat fps; stat unit\"",
+			"command": "& 'C:\\Program Files\\Epic Games\\UE_5.5\\Engine\\Binaries\\Win64\\UnrealEditor.exe' '${workspaceFolder}\\HimalayanSettlement.uproject' /Game/Maps/L_OneMorningHunt \"-ExecCmds=sg.ResolutionQuality 55; sg.ViewDistanceQuality 0; sg.AntiAliasingQuality 0; sg.ShadowQuality 0; sg.GlobalIlluminationQuality 0; sg.ReflectionQuality 0; sg.PostProcessQuality 0; sg.TextureQuality 1; sg.EffectsQuality 0; sg.FoliageQuality 0; sg.ShadingQuality 0; r.ScreenPercentage 55; r.MotionBlurQuality 0; r.BloomQuality 0; r.DepthOfFieldQuality 0; r.AmbientOcclusionLevels 0; r.SSR.Quality 0; r.VolumetricFog 0; foliage.LODDistanceScale 0.45; grass.DensityScale 0.25; stat fps; stat unit\"",
 			"problemMatcher": [],
 			"presentation": {
 				"reveal": "always",
@@ -59,7 +59,7 @@
 		{
 			"label": "UE: Run Low-End Benchmark Smoke",
 			"type": "shell",
-			"command": "& 'C:\\Program Files\\Epic Games\\UE_5.5\\Engine\\Binaries\\Win64\\UnrealEditor.exe' '${workspaceFolder}\\HimalayanSettlement.uproject' /Game/Maps/L_OneMorningHunt -game -windowed -ResX=1280 -ResY=720 -BENCHMARK -FPS=60 -BENCHMARKSECONDS=30 \"-ExecCmds=sg.ViewDistanceQuality 1; sg.AntiAliasingQuality 1; sg.ShadowQuality 1; sg.GlobalIlluminationQuality 0; sg.ReflectionQuality 0; sg.PostProcessQuality 1; sg.TextureQuality 1; sg.EffectsQuality 1; sg.FoliageQuality 0; sg.ShadingQuality 1; stat fps; stat unit\"",
+			"command": "& 'C:\\Program Files\\Epic Games\\UE_5.5\\Engine\\Binaries\\Win64\\UnrealEditor.exe' '${workspaceFolder}\\HimalayanSettlement.uproject' /Game/Maps/L_OneMorningHunt -game -windowed -ResX=1280 -ResY=720 -BENCHMARK -FPS=60 -BENCHMARKSECONDS=30 \"-ExecCmds=sg.ResolutionQuality 55; sg.ViewDistanceQuality 0; sg.AntiAliasingQuality 0; sg.ShadowQuality 0; sg.GlobalIlluminationQuality 0; sg.ReflectionQuality 0; sg.PostProcessQuality 0; sg.TextureQuality 1; sg.EffectsQuality 0; sg.FoliageQuality 0; sg.ShadingQuality 0; r.ScreenPercentage 55; r.MotionBlurQuality 0; r.BloomQuality 0; r.DepthOfFieldQuality 0; r.AmbientOcclusionLevels 0; r.SSR.Quality 0; r.VolumetricFog 0; foliage.LODDistanceScale 0.45; grass.DensityScale 0.25; stat fps; stat unit\"",
 			"problemMatcher": [],
 			"presentation": {
 				"reveal": "always",

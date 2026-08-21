@@ -89,6 +89,12 @@ public:
 	int32 GetGraphicsQualityPreset() const { return GraphicsQualityPreset; }
 
 	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	bool IsPerformanceOverlayEnabled() const { return bPerformanceOverlayEnabled; }
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	bool IsEmergencyLowEndModeEnabled() const { return bEmergencyLowEndModeEnabled; }
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
 	FString GetGraphicsQualityPresetName() const;
 
 	UFUNCTION(BlueprintPure, Category = "Player|Menu")
@@ -132,6 +138,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
 	void CycleGraphicsQualityPreset();
 
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void TogglePerformanceOverlay();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void ToggleEmergencyLowEndMode();
+
 	UFUNCTION(BlueprintCallable, Category = "Player|Persistence")
 	bool AutosaveSettlementState(const FString& Reason);
 
@@ -155,6 +167,8 @@ private:
 	void HandlePauseMenuOptions(const FInputActionValue& InputValue);
 	void HandlePauseMenuExit(const FInputActionValue& InputValue);
 	void HandleMenuUtilityAction(const FInputActionValue& InputValue);
+	void HandlePerformanceOverlayAction(const FInputActionValue& InputValue);
+	void HandleEmergencyLowEndModeAction(const FInputActionValue& InputValue);
 	void SaveSettlementState(const FInputActionValue& InputValue);
 	void LoadSettlementState(const FInputActionValue& InputValue);
 	void ApplyInputMappingContext();
@@ -273,6 +287,12 @@ private:
 	TObjectPtr<UInputAction> MenuUtilityAction;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> PerformanceOverlayAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> EmergencyLowEndModeAction;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> SaveAction;
 
 	UPROPERTY(Transient)
@@ -322,6 +342,12 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
 	int32 GraphicsQualityPreset;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
+	bool bPerformanceOverlayEnabled;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
+	bool bEmergencyLowEndModeEnabled;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Player|Menu", meta = (ClampMin = "0.1", Units = "s"))
 	float MenuFeedbackDuration;

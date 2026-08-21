@@ -102,6 +102,9 @@ Unreal Engine 5.5.4.
 - Native build menu added on `B`; Basic House is selected with `[1]` before entering free placement.
 - Build menu now explains blocked Basic House placement states such as missing settlement claim, pending schema, active construction, or completed house.
 - Pause options can cycle a simple graphics scalability preset with `[6]`.
+- Native `F10` shortcut toggles the FPS and unit performance overlays for live profiling.
+- Native `F8` shortcut toggles Emergency Low-End Mode for weak hardware testing.
+- Default low-end settings were tightened after hands-on FPS dropped from about 19 to about 7 during play.
 - Exploration markers now use distinct cheap silhouettes for trail, village, forest, and animal-area landmarks.
 - Completed house prototype visual now includes no-tick wall, roof, door, and chimney meshes.
 - VS Code low-end benchmark smoke task added; real-renderer command path confirmed, but numeric FPS still requires manual overlay recording.
@@ -133,7 +136,7 @@ Unreal Engine 5.5.4.
 - Gameplay Tags are intentionally minimal and should be expanded only when milestone features require them.
 - Data assets are prototype-authored and should stay narrow until each milestone system needs more fields.
 - Input config is intentionally minimal because gameplay input mappings are created in native C++.
-- Low-end renderer/scalability baseline and benchmark smoke launch are configured; numeric FPS/Game/Draw/GPU readings should still be captured from the live overlay before forest density increases.
+- Low-end renderer/scalability baseline, benchmark smoke launch, and Emergency Low-End Mode are configured; numeric FPS/Game/Draw/GPU readings should still be captured from the live overlay before forest density increases.
 
 ## Next Tasks
 
@@ -144,7 +147,7 @@ Unreal Engine 5.5.4.
 5. Run hands-on service-framework sanity pass: confirm Builder/Hunter/Herbalist/Soldier prompts still appear only when their service is available.
 6. Run hands-on exploration pass: walk settlement to village core, follow trail markers to forest edge, find animal ridge, and confirm the route is readable without explanation.
 7. Run hands-on closeout for Milestones 3-5 if not already confirmed in-editor.
-8. Record numeric FPS/Game/Draw/GPU readings from the live low-end `stat fps` and `stat unit` overlays before forest density increases.
+8. Press `F8`, then `F10`, and record numeric FPS/Game/Draw/GPU readings from the live low-end `stat fps` and `stat unit` overlays before forest density increases.
 9. Run hands-on HUD pass: confirm status/objective lines and menu feedback appear clearly without blocking the center interaction prompt.
 10. Run hands-on pause/save pass: press `Esc`, test Resume/Save/Load/Options feedback, confirm build placement `Esc` still cancels placement before pausing, and confirm autosave files are produced after sleep/construction/progress events.
 11. Run hands-on inventory/build/options pass: confirm `I`/`Tab` opens inventory, `[1]` inspects, `[2]` drops one item, `[3]` drops the stack, `B` opens build menu, `[1]` enters Basic House placement only when available, and `[6]` cycles graphics preset when pause options are open.

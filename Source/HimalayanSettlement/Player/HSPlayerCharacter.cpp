@@ -45,6 +45,8 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	, bInventoryOpen(false)
 	, bBuildMenuOpen(false)
 	, GraphicsQualityPreset(0)
+	, bPerformanceOverlayEnabled(false)
+	, bEmergencyLowEndModeEnabled(false)
 	, MenuFeedbackDuration(4.0f)
 	, MenuFeedbackExpireTime(0.0)
 	, bAutosaveSuppressed(false)
@@ -174,6 +176,16 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	MenuUtilityAction->bTriggerWhenPaused = true;
 	PlayerMappingContext->MapKey(MenuUtilityAction, EKeys::Six);
 
+	PerformanceOverlayAction = CreateDefaultSubobject<UInputAction>(TEXT("PerformanceOverlayAction"));
+	PerformanceOverlayAction->ValueType = EInputActionValueType::Boolean;
+	PerformanceOverlayAction->bTriggerWhenPaused = true;
+	PlayerMappingContext->MapKey(PerformanceOverlayAction, EKeys::F10);
+
+	EmergencyLowEndModeAction = CreateDefaultSubobject<UInputAction>(TEXT("EmergencyLowEndModeAction"));
+	EmergencyLowEndModeAction->ValueType = EInputActionValueType::Boolean;
+	EmergencyLowEndModeAction->bTriggerWhenPaused = true;
+	PlayerMappingContext->MapKey(EmergencyLowEndModeAction, EKeys::F8);
+
 	SaveAction = CreateDefaultSubobject<UInputAction>(TEXT("SaveAction"));
 	SaveAction->ValueType = EInputActionValueType::Boolean;
 	PlayerMappingContext->MapKey(SaveAction, EKeys::F5);
@@ -226,6 +238,8 @@ void AHSPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	EnhancedInputComponent->BindAction(PauseMenuOptionsAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandlePauseMenuOptions);
 	EnhancedInputComponent->BindAction(PauseMenuExitAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandlePauseMenuExit);
 	EnhancedInputComponent->BindAction(MenuUtilityAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleMenuUtilityAction);
+	EnhancedInputComponent->BindAction(PerformanceOverlayAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandlePerformanceOverlayAction);
+	EnhancedInputComponent->BindAction(EmergencyLowEndModeAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleEmergencyLowEndModeAction);
 	EnhancedInputComponent->BindAction(SaveAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::SaveSettlementState);
 	EnhancedInputComponent->BindAction(LoadAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::LoadSettlementState);
 }
@@ -493,6 +507,16 @@ void AHSPlayerCharacter::HandleMenuUtilityAction(const FInputActionValue& InputV
 	}
 }
 
+void AHSPlayerCharacter::HandlePerformanceOverlayAction(const FInputActionValue& InputValue)
+{
+	TogglePerformanceOverlay();
+}
+
+void AHSPlayerCharacter::HandleEmergencyLowEndModeAction(const FInputActionValue& InputValue)
+{
+	ToggleEmergencyLowEndMode();
+}
+
 void AHSPlayerCharacter::HandlePauseMenuExit(const FInputActionValue& InputValue)
 {
 	if (bPauseMenuOpen)
@@ -717,6 +741,81 @@ void AHSPlayerCharacter::CycleGraphicsQualityPreset()
 	SetMenuFeedback(FText::Format(
 		NSLOCTEXT("HSPlayerCharacter", "GraphicsPresetChanged", "Graphics preset: {0}."),
 		FText::FromString(GetGraphicsQualityPresetName())));
+}
+
+void AHSPlayerCharacter::TogglePerformanceOverlay()
+{
+	bPerformanceOverlayEnabled = !bPerformanceOverlayEnabled;
+
+	if (GetWorld())
+	{
+		UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("stat fps"));
+		UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("stat unit"));
+	}
+
+	SetMenuFeedback(bPerformanceOverlayEnabled
+		? NSLOCTEXT("HSPlayerCharacter", "PerformanceOverlayEnabled", "Performance overlay: On (F10).")
+		: NSLOCTEXT("HSPlayerCharacter", "PerformanceOverlayDisabled", "Performance overlay: Off (F10)."));
+}
+
+void AHSPlayerCharacter::ToggleEmergencyLowEndMode()
+{
+	bEmergencyLowEndModeEnabled = !bEmergencyLowEndModeEnabled;
+
+	if (GetWorld())
+	{
+		if (bEmergencyLowEndModeEnabled)
+		{
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.ResolutionQuality 55"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.ViewDistanceQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.AntiAliasingQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.ShadowQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.GlobalIlluminationQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.ReflectionQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.PostProcessQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.EffectsQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.FoliageQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.ShadingQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("r.ScreenPercentage 55"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("r.MotionBlurQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("r.BloomQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("r.DepthOfFieldQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("r.AmbientOcclusionLevels 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("r.SSR.Quality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("r.VolumetricFog 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("r.Fog 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("foliage.LODDistanceScale 0.45"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("grass.DensityScale 0.25"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("r.StaticMeshLODDistanceScale 1.75"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("r.SkeletalMeshLODBias 1"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("r.Streaming.PoolSize 512"));
+		}
+		else
+		{
+			GraphicsQualityPreset = 0;
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.ResolutionQuality 60"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.ViewDistanceQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.AntiAliasingQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.ShadowQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.GlobalIlluminationQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.ReflectionQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.PostProcessQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.TextureQuality 1"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.EffectsQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.FoliageQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("sg.ShadingQuality 0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("r.ScreenPercentage 60"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("r.Fog 1"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("foliage.LODDistanceScale 1.0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("grass.DensityScale 1.0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("r.StaticMeshLODDistanceScale 1.0"));
+			UKismetSystemLibrary::ExecuteConsoleCommand(this, TEXT("r.SkeletalMeshLODBias 0"));
+		}
+	}
+
+	SetMenuFeedback(bEmergencyLowEndModeEnabled
+		? NSLOCTEXT("HSPlayerCharacter", "EmergencyLowEndEnabled", "Emergency low-end mode: On (F8).")
+		: NSLOCTEXT("HSPlayerCharacter", "EmergencyLowEndDisabled", "Emergency low-end mode: Off (F8)."));
 }
 
 void AHSPlayerCharacter::SetPlayerStance(EHSPlayerStance NewStance)
