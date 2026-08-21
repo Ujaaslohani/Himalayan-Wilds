@@ -47,6 +47,12 @@ Construction durations:
 
 Important rule: the player should not spend most of the game cutting trees, collecting logs, and manually assembling every wall. Resource gathering can exist, but construction work belongs to the builder role.
 
+Current implementation boundary:
+
+- The first settlement slice records a permanent claim marker and one pending `Basic House` schema.
+- Pending means the player has chosen intent; it is not a finished house.
+- Construction duration, builder assignment, and completion are intentionally reserved for the builder milestone.
+
 ## NPC Role Use Cases
 
 ### Builder

@@ -16,7 +16,9 @@
 #include "Quests/HSQuestDefinition.h"
 #include "Quests/HSQuestHandoffComponent.h"
 #include "Resources/HSItemDefinition.h"
+#include "Settlement/HSBuildingSchemaActor.h"
 #include "Settlement/HSRestPointActor.h"
+#include "Settlement/HSSettlementClaimActor.h"
 #include "Settlement/HSTemporaryShelterActor.h"
 
 namespace
@@ -44,6 +46,7 @@ bool FHSOneMorningHuntDefinitionsValidateTest::RunTest(const FString& Parameters
 	const UHSAnimalDefinition* Deer = LoadRequiredAsset<UHSAnimalDefinition>(*this, TEXT("/Game/Data/Animals/DA_Animal_Deer.DA_Animal_Deer"));
 	const UHSNPCDefinition* Hunter = LoadRequiredAsset<UHSNPCDefinition>(*this, TEXT("/Game/Data/NPCs/DA_NPC_Hunter.DA_NPC_Hunter"));
 	const UHSBuildingDefinition* DryingRack = LoadRequiredAsset<UHSBuildingDefinition>(*this, TEXT("/Game/Data/Buildings/DA_Building_BasicDryingRack.DA_Building_BasicDryingRack"));
+	const UHSBuildingDefinition* BasicHouse = LoadRequiredAsset<UHSBuildingDefinition>(*this, TEXT("/Game/Data/Buildings/DA_Building_BasicHouse.DA_Building_BasicHouse"));
 	const UHSQuestDefinition* Quest = LoadRequiredAsset<UHSQuestDefinition>(*this, TEXT("/Game/Data/Quests/DA_Quest_OneMorningHunt.DA_Quest_OneMorningHunt"));
 
 	if (Bow) { TestTrue(TEXT("Basic bow definition should validate."), Bow->IsDefinitionValid()); }
@@ -53,6 +56,7 @@ bool FHSOneMorningHuntDefinitionsValidateTest::RunTest(const FString& Parameters
 	if (Deer) { TestTrue(TEXT("Deer definition should validate."), Deer->IsDefinitionValid()); }
 	if (Hunter) { TestTrue(TEXT("Hunter definition should validate."), Hunter->IsDefinitionValid()); }
 	if (DryingRack) { TestTrue(TEXT("Drying rack definition should validate."), DryingRack->IsDefinitionValid()); }
+	if (BasicHouse) { TestTrue(TEXT("Basic house definition should validate."), BasicHouse->IsDefinitionValid()); }
 	if (Quest) { TestTrue(TEXT("One Morning Hunt quest definition should validate."), Quest->IsDefinitionValid()); }
 
 	return true;
@@ -74,6 +78,8 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	bool bFoundInteractionTarget = false;
 	bool bFoundRestPoint = false;
 	bool bFoundTemporaryShelter = false;
+	bool bFoundSettlementClaim = false;
+	bool bFoundBasicHouseSchema = false;
 	bool bFoundCheapPrototypeSun = false;
 	bool bFoundCheapPrototypeSkyLight = false;
 	if (World && World->PersistentLevel)
@@ -97,6 +103,13 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 			bFoundInteractionTarget |= Actor && Actor->IsA<AHSInteractionTarget>();
 			bFoundRestPoint |= Actor && Actor->IsA<AHSRestPointActor>();
 			bFoundTemporaryShelter |= Actor && Actor->IsA<AHSTemporaryShelterActor>();
+			bFoundSettlementClaim |= Actor && Actor->IsA<AHSSettlementClaimActor>();
+			if (const AHSBuildingSchemaActor* SchemaActor = Cast<AHSBuildingSchemaActor>(Actor))
+			{
+				bFoundBasicHouseSchema |= SchemaActor->GetBuildingDefinition()
+					&& SchemaActor->GetBuildingDefinition()->BuildingTag == TAG_HS_Building_BasicHouse
+					&& !SchemaActor->IsSchemaPlaced();
+			}
 			if (const ADirectionalLight* Sun = Cast<ADirectionalLight>(Actor))
 			{
 				const ULightComponent* SunComponent = Sun->GetLightComponent();
@@ -120,6 +133,8 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("One Morning Hunt map should contain a native interaction target."), bFoundInteractionTarget);
 	TestTrue(TEXT("One Morning Hunt map should contain a native end-of-day rest point."), bFoundRestPoint);
 	TestTrue(TEXT("One Morning Hunt map should contain a native temporary shelter marker."), bFoundTemporaryShelter);
+	TestTrue(TEXT("One Morning Hunt map should contain a native settlement claim marker."), bFoundSettlementClaim);
+	TestTrue(TEXT("One Morning Hunt map should contain a pending basic house schema marker."), bFoundBasicHouseSchema);
 	TestTrue(TEXT("One Morning Hunt prototype sun should use the cheap no-shadow baseline."), bFoundCheapPrototypeSun);
 	TestTrue(TEXT("One Morning Hunt prototype skylight should use the cheap no-shadow baseline."), bFoundCheapPrototypeSkyLight);
 

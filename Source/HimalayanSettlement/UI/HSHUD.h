@@ -5,6 +5,8 @@
 #include "GameplayTagContainer.h"
 #include "HSHUD.generated.h"
 
+struct FHSPendingBuildingSchema;
+
 UCLASS()
 class HIMALAYANSETTLEMENT_API AHSHUD : public AHUD
 {
@@ -30,8 +32,16 @@ public:
 	UFUNCTION()
 	void HandleMilestoneCompleted(FGameplayTag MilestoneTag);
 
+	UFUNCTION()
+	void HandleSettlementClaimed(FVector ClaimCenter);
+
+	UFUNCTION()
+	void HandleBuildingSchemaPlaced(const FHSPendingBuildingSchema& PendingSchema);
+
 private:
 	void BindProgressComponent();
+	void BindSettlementPlanComponent();
+	void ShowCompletionMessage(FText Message);
 	void DrawCenteredTextLine(const FString& Text, float Y, float Scale, const FLinearColor& Color);
 
 	UPROPERTY(EditDefaultsOnly, Category = "HUD", meta = (ClampMin = "0.0"))
@@ -45,6 +55,9 @@ private:
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<class UHSPlayerProgressComponent> BoundProgressComponent;
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<class UHSSettlementPlanComponent> BoundSettlementPlanComponent;
 
 	UPROPERTY(Transient)
 	FText CompletionMessage;

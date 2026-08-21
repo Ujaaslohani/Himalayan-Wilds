@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Movement expansion after Milestone 2: complete. Next milestone is Milestone 3: Settlement Claim And House Schema.
+Milestone 3: Settlement Claim And House Schema: in progress.
 
 ## Engine Version
 
@@ -53,17 +53,23 @@ Unreal Engine 5.5.4.
 - Gameplay direction documented for temporary camps, schema building, construction time, and NPC role services.
 - Performance strategy documented after low-FPS editor playtest feedback.
 - Low-end performance baseline preset added for renderer defaults, game user settings, no-shadow prototype lights, and VS Code profiling launch.
+- Native settlement planning component added for permanent claim state and pending building schemas.
+- Native settlement claim marker and basic house schema marker added for the first permanent building intent flow.
+- Native HUD feedback added for settlement claim and pending schema placement.
+- Basic house building definition and `Building.BasicHouse` / `Settlement.Stage.Claimed` tags added.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
 - Hands-on editor playtest passed with the visible `Morning hunt completed` confirmation.
 - Hands-on temporary shelter playtest passed and Milestone 2 was confirmed complete.
 - Hands-on movement playtest passed for jump, crouch, and prone.
-- All 39 `HimalayanSettlement` automation tests pass.
+- Milestone 3 settlement claim and house schema foundation compiles.
+- Content bootstrap succeeds with zero warnings and regenerates the basic house schema marker.
+- All 44 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
-- Milestone 3 settlement claim and house schema scope.
+- Milestone 3 hands-on playtest.
 
 ## Known Blockers
 
@@ -83,6 +89,5 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Define Milestone 3 implementation scope in the existing gameplay direction and milestone docs.
-2. Add the native settlement claim and house schema foundation.
-3. Record numeric FPS using the low-end profile task before forest density increases.
+1. Run hands-on playtest for claiming a settlement site and placing the basic house schema.
+2. Record numeric FPS using the low-end profile task before forest density increases.

@@ -4,6 +4,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Interaction/HSInteractionSensorComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
+#include "Settlement/HSSettlementPlanComponent.h"
 #include "World/HSGameState.h"
 #include "World/HSWorldTimeComponent.h"
 
@@ -25,6 +26,7 @@ void AHSHUD::DrawHUD()
 	}
 
 	BindProgressComponent();
+	BindSettlementPlanComponent();
 
 	if (const AHSGameState* GameState = GetWorld() ? GetWorld()->GetGameState<AHSGameState>() : nullptr)
 	{
@@ -67,8 +69,17 @@ void AHSHUD::HandleMilestoneCompleted(FGameplayTag MilestoneTag)
 		return;
 	}
 
-	CompletionMessage = FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "MilestoneCompleted", "Completed: {Milestone}"), FText::FromString(MilestoneTag.ToString()));
-	CompletionMessageExpireTime = FPlatformTime::Seconds() + CompletionMessageDuration;
+	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "MilestoneCompleted", "Completed: {Milestone}"), FText::FromString(MilestoneTag.ToString())));
+}
+
+void AHSHUD::HandleSettlementClaimed(FVector ClaimCenter)
+{
+	ShowCompletionMessage(NSLOCTEXT("HimalayanSettlementHUD", "SettlementClaimed", "Settlement site claimed"));
+}
+
+void AHSHUD::HandleBuildingSchemaPlaced(const FHSPendingBuildingSchema& PendingSchema)
+{
+	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "SchemaPending", "Schema pending: {Building}"), FText::FromString(PendingSchema.BuildingTag.ToString())));
 }
 
 void AHSHUD::BindProgressComponent()
@@ -92,6 +103,37 @@ void AHSHUD::BindProgressComponent()
 
 	BoundProgressComponent = ProgressComponent;
 	ProgressComponent->OnMilestoneCompleted.AddUniqueDynamic(this, &AHSHUD::HandleMilestoneCompleted);
+}
+
+void AHSHUD::BindSettlementPlanComponent()
+{
+	if (!PlayerOwner)
+	{
+		return;
+	}
+
+	APawn* Pawn = PlayerOwner->GetPawn();
+	UHSSettlementPlanComponent* SettlementPlanComponent = Pawn ? Pawn->FindComponentByClass<UHSSettlementPlanComponent>() : nullptr;
+	if (!SettlementPlanComponent || BoundSettlementPlanComponent.Get() == SettlementPlanComponent)
+	{
+		return;
+	}
+
+	if (UHSSettlementPlanComponent* PreviousSettlementPlanComponent = BoundSettlementPlanComponent.Get())
+	{
+		PreviousSettlementPlanComponent->OnSettlementClaimed.RemoveDynamic(this, &AHSHUD::HandleSettlementClaimed);
+		PreviousSettlementPlanComponent->OnBuildingSchemaPlaced.RemoveDynamic(this, &AHSHUD::HandleBuildingSchemaPlaced);
+	}
+
+	BoundSettlementPlanComponent = SettlementPlanComponent;
+	SettlementPlanComponent->OnSettlementClaimed.AddUniqueDynamic(this, &AHSHUD::HandleSettlementClaimed);
+	SettlementPlanComponent->OnBuildingSchemaPlaced.AddUniqueDynamic(this, &AHSHUD::HandleBuildingSchemaPlaced);
+}
+
+void AHSHUD::ShowCompletionMessage(FText Message)
+{
+	CompletionMessage = Message;
+	CompletionMessageExpireTime = FPlatformTime::Seconds() + CompletionMessageDuration;
 }
 
 void AHSHUD::DrawCenteredTextLine(const FString& Text, float Y, float Scale, const FLinearColor& Color)

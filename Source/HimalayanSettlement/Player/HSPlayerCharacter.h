@@ -9,6 +9,7 @@ class UHSHuntingComponent;
 class UHSInteractionSensorComponent;
 class UHSPlayerProgressComponent;
 class UHSResourceCarryComponent;
+class UHSSettlementPlanComponent;
 class UHSSettlementUnlockComponent;
 class UInputAction;
 class UInputMappingContext;
@@ -38,6 +39,7 @@ public:
 	UHSHuntingComponent* GetHuntingComponent() const { return HuntingComponent; }
 	UHSPlayerProgressComponent* GetPlayerProgressComponent() const { return PlayerProgressComponent; }
 	UHSResourceCarryComponent* GetResourceCarryComponent() const { return ResourceCarryComponent; }
+	UHSSettlementPlanComponent* GetSettlementPlanComponent() const { return SettlementPlanComponent; }
 	UHSSettlementUnlockComponent* GetSettlementUnlockComponent() const { return SettlementUnlockComponent; }
 
 	UFUNCTION(BlueprintPure, Category = "Player|Movement")
@@ -84,6 +86,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSResourceCarryComponent> ResourceCarryComponent;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player")
+	TObjectPtr<UHSSettlementPlanComponent> SettlementPlanComponent;
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSSettlementUnlockComponent> SettlementUnlockComponent;

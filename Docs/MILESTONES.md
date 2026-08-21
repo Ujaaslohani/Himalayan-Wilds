@@ -47,15 +47,19 @@ Complete when:
 
 ## Milestone 3: Settlement Claim And House Schema
 
+Status: In progress.
+
 Player experience: The player chooses a permanent settlement spot and places a house schema/ghost, similar in spirit to schema-based building games. The player is choosing intent, not personally constructing the house by hand.
 
 Scope:
 
 - Native schema placement actor/component.
+- Native settlement claim marker.
 - One permanent schema: basic house.
 - Schema validates placement and records pending construction.
 - No instant building completion.
 - No tree chopping/log hauling loop.
+- No builder job timer yet; that starts in Milestone 4.
 
 Complete when:
 

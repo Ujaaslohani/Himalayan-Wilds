@@ -24,6 +24,8 @@
 #include "Quests/HSQuestDefinition.h"
 #include "Resources/HSItemDefinition.h"
 #include "Settlement/HSRestPointActor.h"
+#include "Settlement/HSBuildingSchemaActor.h"
+#include "Settlement/HSSettlementClaimActor.h"
 #include "Settlement/HSTemporaryShelterActor.h"
 #include "UObject/SavePackage.h"
 
@@ -160,6 +162,13 @@ void CreateDefinitions()
 	Rack->ResourceCosts = { Stack(TEXT("Resource.Hide.Deer"), 1) };
 	SaveAssetPackage(Rack);
 
+	UHSBuildingDefinition* House = ConfigureAsset<UHSBuildingDefinition>(TEXT("/Game/Data/Buildings/DA_Building_BasicHouse"), TEXT("DA_Building_BasicHouse"));
+	House->DisplayName = FText::FromString(TEXT("Basic House"));
+	House->BuildingTag = Tag(TEXT("Building.BasicHouse"));
+	House->RequiredKnowledgeTags = Tags({ TEXT("Knowledge.Settlement.BasicCrafting") });
+	House->ResourceCosts.Reset();
+	SaveAssetPackage(House);
+
 	UHSQuestDefinition* Quest = ConfigureAsset<UHSQuestDefinition>(TEXT("/Game/Data/Quests/DA_Quest_OneMorningHunt"), TEXT("DA_Quest_OneMorningHunt"));
 	Quest->DisplayName = FText::FromString(TEXT("One Morning Hunt"));
 	Quest->QuestTag = Tag(TEXT("Quest.OneMorningHunt"));
@@ -260,6 +269,9 @@ void CreateMap()
 	SpawnNamedActor<AHSInteractionTarget>(World, TEXT("Interaction_Target_Practice"), FVector(200.0f, 160.0f, 90.0f), FRotator(0.0f, 180.0f, 0.0f));
 	SpawnNamedActor<AHSRestPointActor>(World, TEXT("Camp_RestPoint_EndMorning"), FVector(-80.0f, 220.0f, 45.0f), FRotator::ZeroRotator);
 	SpawnNamedActor<AHSTemporaryShelterActor>(World, TEXT("Temporary_Shelter_Sleep"), FVector(-230.0f, 220.0f, 55.0f), FRotator(0.0f, 25.0f, 0.0f));
+	SpawnNamedActor<AHSSettlementClaimActor>(World, TEXT("Settlement_Claim_Marker"), FVector(-80.0f, -260.0f, 55.0f), FRotator::ZeroRotator);
+	AHSBuildingSchemaActor* HouseSchema = SpawnNamedActor<AHSBuildingSchemaActor>(World, TEXT("Schema_BasicHouse_Pending"), FVector(260.0f, -300.0f, 75.0f), FRotator(0.0f, 18.0f, 0.0f));
+	HouseSchema->SetBuildingDefinition(GetOrCreateAsset<UHSBuildingDefinition>(TEXT("/Game/Data/Buildings/DA_Building_BasicHouse"), TEXT("DA_Building_BasicHouse")));
 
 	World->MarkPackageDirty();
 	SaveMapPackage(World);
