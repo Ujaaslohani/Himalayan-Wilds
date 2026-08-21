@@ -53,6 +53,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	, GraphicsQualityPreset(0)
 	, MouseSensitivityPreset(1)
 	, MasterVolumePreset(2)
+	, SelectedManualSaveSlotIndex(0)
 	, bPerformanceOverlayEnabled(false)
 	, bEmergencyLowEndModeEnabled(false)
 	, MenuFeedbackDuration(4.0f)
@@ -246,6 +247,11 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	MenuVolumeAction->bTriggerWhenPaused = true;
 	PlayerMappingContext->MapKey(MenuVolumeAction, EKeys::Eight);
 
+	MenuSaveSlotAction = CreateDefaultSubobject<UInputAction>(TEXT("MenuSaveSlotAction"));
+	MenuSaveSlotAction->ValueType = EInputActionValueType::Boolean;
+	MenuSaveSlotAction->bTriggerWhenPaused = true;
+	PlayerMappingContext->MapKey(MenuSaveSlotAction, EKeys::Nine);
+
 	PerformanceOverlayAction = CreateDefaultSubobject<UInputAction>(TEXT("PerformanceOverlayAction"));
 	PerformanceOverlayAction->ValueType = EInputActionValueType::Boolean;
 	PerformanceOverlayAction->bTriggerWhenPaused = true;
@@ -320,6 +326,7 @@ void AHSPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	EnhancedInputComponent->BindAction(MenuUtilityAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleMenuUtilityAction);
 	EnhancedInputComponent->BindAction(MenuSensitivityAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleMenuSensitivityAction);
 	EnhancedInputComponent->BindAction(MenuVolumeAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleMenuVolumeAction);
+	EnhancedInputComponent->BindAction(MenuSaveSlotAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleMenuSaveSlotAction);
 	EnhancedInputComponent->BindAction(PerformanceOverlayAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandlePerformanceOverlayAction);
 	EnhancedInputComponent->BindAction(EmergencyLowEndModeAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleEmergencyLowEndModeAction);
 	EnhancedInputComponent->BindAction(EquipmentAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::HandleEquipmentAction);
@@ -624,6 +631,14 @@ void AHSPlayerCharacter::HandleMenuVolumeAction(const FInputActionValue& InputVa
 	}
 }
 
+void AHSPlayerCharacter::HandleMenuSaveSlotAction(const FInputActionValue& InputValue)
+{
+	if (bPauseMenuOpen && bPauseOptionsOpen)
+	{
+		CycleManualSaveSlot();
+	}
+}
+
 void AHSPlayerCharacter::HandlePerformanceOverlayAction(const FInputActionValue& InputValue)
 {
 	TogglePerformanceOverlay();
@@ -701,9 +716,9 @@ void AHSPlayerCharacter::ClosePauseMenu()
 
 bool AHSPlayerCharacter::SaveFromPauseMenu()
 {
-	const bool bSaved = SettlementPersistenceComponent && SettlementPersistenceComponent->SaveToSlot(SettlementPersistenceComponent->GetDefaultSlotName());
+	const bool bSaved = SettlementPersistenceComponent && SettlementPersistenceComponent->SaveToSlot(GetSelectedManualSaveSlotName());
 	SetMenuFeedback(bSaved
-		? NSLOCTEXT("HSPlayerCharacter", "PauseSaveSucceeded", "Saved game.")
+		? FText::Format(NSLOCTEXT("HSPlayerCharacter", "PauseSaveSucceeded", "Saved {0}."), FText::FromString(GetSelectedManualSaveSlotLabel()))
 		: NSLOCTEXT("HSPlayerCharacter", "PauseSaveFailed", "Save failed."));
 	UE_LOG(LogHSSettlement, Log, TEXT("%s pause menu save result: %s."), *GetNameSafe(this), bSaved ? TEXT("saved") : TEXT("failed"));
 	return bSaved;
@@ -712,11 +727,11 @@ bool AHSPlayerCharacter::SaveFromPauseMenu()
 bool AHSPlayerCharacter::LoadFromPauseMenu()
 {
 	bAutosaveSuppressed = true;
-	const bool bLoaded = SettlementPersistenceComponent && SettlementPersistenceComponent->LoadFromSlot(SettlementPersistenceComponent->GetDefaultSlotName());
+	const bool bLoaded = SettlementPersistenceComponent && SettlementPersistenceComponent->LoadFromSlot(GetSelectedManualSaveSlotName());
 	bAutosaveSuppressed = false;
 	UE_LOG(LogHSSettlement, Log, TEXT("%s pause menu load result: %s."), *GetNameSafe(this), bLoaded ? TEXT("loaded") : TEXT("failed"));
 	SetMenuFeedback(bLoaded
-		? NSLOCTEXT("HSPlayerCharacter", "PauseLoadSucceeded", "Loaded game.")
+		? FText::Format(NSLOCTEXT("HSPlayerCharacter", "PauseLoadSucceeded", "Loaded {0}."), FText::FromString(GetSelectedManualSaveSlotLabel()))
 		: NSLOCTEXT("HSPlayerCharacter", "PauseLoadFailed", "Load failed."));
 	if (bLoaded)
 	{
@@ -785,6 +800,22 @@ FString AHSPlayerCharacter::GetMasterVolumePresetName() const
 	default:
 		return TEXT("Custom");
 	}
+}
+
+FString AHSPlayerCharacter::GetSelectedManualSaveSlotName() const
+{
+	const FString BaseSlotName = SettlementPersistenceComponent ? SettlementPersistenceComponent->GetDefaultSlotName() : TEXT("HimalayanSettlement_Prototype");
+	if (SelectedManualSaveSlotIndex <= 0)
+	{
+		return BaseSlotName;
+	}
+
+	return FString::Printf(TEXT("%s_%d"), *BaseSlotName, SelectedManualSaveSlotIndex + 1);
+}
+
+FString AHSPlayerCharacter::GetSelectedManualSaveSlotLabel() const
+{
+	return FString::Printf(TEXT("Slot %d"), SelectedManualSaveSlotIndex + 1);
 }
 
 void AHSPlayerCharacter::ToggleInventoryMenu()
@@ -1007,6 +1038,14 @@ void AHSPlayerCharacter::CycleMasterVolumePreset()
 	SetMenuFeedback(FText::Format(
 		NSLOCTEXT("HSPlayerCharacter", "MasterVolumeChanged", "Master volume: {0}."),
 		FText::FromString(GetMasterVolumePresetName())));
+}
+
+void AHSPlayerCharacter::CycleManualSaveSlot()
+{
+	SelectedManualSaveSlotIndex = (SelectedManualSaveSlotIndex + 1) % 3;
+	SetMenuFeedback(FText::Format(
+		NSLOCTEXT("HSPlayerCharacter", "ManualSaveSlotChanged", "Manual save slot: {0}."),
+		FText::FromString(GetSelectedManualSaveSlotLabel())));
 }
 
 void AHSPlayerCharacter::TogglePerformanceOverlay()

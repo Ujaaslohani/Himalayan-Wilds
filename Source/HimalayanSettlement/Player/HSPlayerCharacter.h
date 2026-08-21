@@ -107,6 +107,15 @@ public:
 	int32 GetMasterVolumePreset() const { return MasterVolumePreset; }
 
 	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	int32 GetSelectedManualSaveSlotIndex() const { return SelectedManualSaveSlotIndex; }
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	FString GetSelectedManualSaveSlotName() const;
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	FString GetSelectedManualSaveSlotLabel() const;
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
 	bool IsPerformanceOverlayEnabled() const { return bPerformanceOverlayEnabled; }
 
 	UFUNCTION(BlueprintPure, Category = "Player|Menu")
@@ -183,6 +192,9 @@ public:
 	void CycleMasterVolumePreset();
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void CycleManualSaveSlot();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
 	void TogglePerformanceOverlay();
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
@@ -216,6 +228,7 @@ private:
 	void HandleMenuUtilityAction(const FInputActionValue& InputValue);
 	void HandleMenuSensitivityAction(const FInputActionValue& InputValue);
 	void HandleMenuVolumeAction(const FInputActionValue& InputValue);
+	void HandleMenuSaveSlotAction(const FInputActionValue& InputValue);
 	void HandlePerformanceOverlayAction(const FInputActionValue& InputValue);
 	void HandleEmergencyLowEndModeAction(const FInputActionValue& InputValue);
 	void HandleEquipmentAction(const FInputActionValue& InputValue);
@@ -370,6 +383,9 @@ private:
 	TObjectPtr<UInputAction> MenuVolumeAction;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> MenuSaveSlotAction;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> PerformanceOverlayAction;
 
 	UPROPERTY(Transient)
@@ -437,6 +453,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
 	int32 MasterVolumePreset;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
+	int32 SelectedManualSaveSlotIndex;
 
 	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
 	bool bPerformanceOverlayEnabled;

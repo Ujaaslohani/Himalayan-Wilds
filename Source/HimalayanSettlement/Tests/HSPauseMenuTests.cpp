@@ -74,6 +74,13 @@ bool FHSPauseMenuStateTest::RunTest(const FString& Parameters)
 	TestNotEqual(TEXT("Cycling master volume should change preset label."), Player->GetMasterVolumePresetName(), InitialVolumeName);
 	TestTrue(TEXT("Master volume feedback should name the setting."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Master volume")));
 
+	const FString InitialManualSaveSlotName = Player->GetSelectedManualSaveSlotName();
+	const FString InitialManualSaveSlotLabel = Player->GetSelectedManualSaveSlotLabel();
+	Player->CycleManualSaveSlot();
+	TestNotEqual(TEXT("Cycling manual save slot should change slot name."), Player->GetSelectedManualSaveSlotName(), InitialManualSaveSlotName);
+	TestNotEqual(TEXT("Cycling manual save slot should change slot label."), Player->GetSelectedManualSaveSlotLabel(), InitialManualSaveSlotLabel);
+	TestTrue(TEXT("Manual save slot feedback should name the setting."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Manual save slot")));
+
 	TestFalse(TEXT("Performance overlay should start disabled."), Player->IsPerformanceOverlayEnabled());
 	Player->TogglePerformanceOverlay();
 	TestTrue(TEXT("Performance overlay should toggle on."), Player->IsPerformanceOverlayEnabled());

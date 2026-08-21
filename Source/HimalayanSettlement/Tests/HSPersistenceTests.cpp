@@ -257,6 +257,8 @@ bool FHSPersistenceManualAndAutosaveSlotsAreSeparateTest::RunTest(const FString&
 	TestFalse(TEXT("Manual save slot should not be empty."), Persistence->GetDefaultSlotName().IsEmpty());
 	TestFalse(TEXT("Autosave slot should not be empty."), Persistence->GetAutosaveSlotName().IsEmpty());
 	TestNotEqual(TEXT("Autosave should not overwrite the manual save slot."), Persistence->GetAutosaveSlotName(), Persistence->GetDefaultSlotName());
+	TestFalse(TEXT("Selected manual save slot should not be empty."), Player->GetSelectedManualSaveSlotName().IsEmpty());
+	TestEqual(TEXT("First selected manual save slot should use default slot."), Player->GetSelectedManualSaveSlotName(), Persistence->GetDefaultSlotName());
 
 	return true;
 }

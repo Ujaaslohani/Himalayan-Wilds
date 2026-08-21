@@ -104,6 +104,7 @@ Unreal Engine 5.5.4.
 - Native HUD objective guidance added for the early loop: hunter hunt/turn-in, settlement claim, house placement, builder start, construction sleep, and post-house exploration.
 - Native HUD time-advance feedback added so sleep/day changes clearly report the new phase and refreshed services.
 - Native pause menu foundation added: `Esc` cancels build placement first, otherwise pauses/resumes and shows Resume, Save, Load, Options, and Exit commands.
+- Pause menu save/load now uses a selected manual save slot; the options panel cycles between three manual slots with `[9]` while autosave remains separate.
 - Pause, save/load, inventory, build, and graphics option actions now surface short native menu feedback messages.
 - Manual pause-menu save/load uses the default save slot; event-driven autosave uses a separate autosave slot.
 - Autosave now runs on milestone completion, time advance/sleep, construction start, and construction completion, with suppression during manual load restore.
