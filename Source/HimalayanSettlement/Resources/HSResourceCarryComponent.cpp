@@ -99,3 +99,9 @@ bool UHSResourceCarryComponent::HasAtLeast(const FHSItemStack& Stack) const
 {
 	return Stack.IsValidStack() && GetQuantityForTag(Stack.ItemTag) >= Stack.Quantity;
 }
+
+void UHSResourceCarryComponent::ReplaceCarriedItems(const TArray<FHSItemStack>& NewCarriedItems)
+{
+	CarriedItems.Reset();
+	AddStacks(NewCarriedItems);
+}

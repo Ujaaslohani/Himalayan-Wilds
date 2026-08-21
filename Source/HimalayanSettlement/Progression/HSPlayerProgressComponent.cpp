@@ -24,3 +24,15 @@ bool UHSPlayerProgressComponent::HasCompletedMilestone(FGameplayTag MilestoneTag
 {
 	return MilestoneTag.IsValid() && CompletedMilestones.HasTagExact(MilestoneTag);
 }
+
+void UHSPlayerProgressComponent::ReplaceCompletedMilestones(const FGameplayTagContainer& NewCompletedMilestones)
+{
+	CompletedMilestones.Reset();
+	for (const FGameplayTag& MilestoneTag : NewCompletedMilestones)
+	{
+		if (MilestoneTag.IsValid())
+		{
+			CompletedMilestones.AddTag(MilestoneTag);
+		}
+	}
+}

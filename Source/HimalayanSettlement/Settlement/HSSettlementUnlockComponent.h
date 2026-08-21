@@ -30,6 +30,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Settlement")
 	const FGameplayTagContainer& GetGrantedUnlocks() const { return GrantedUnlocks; }
 
+	void ReplaceGrantedUnlocks(const FGameplayTagContainer& NewGrantedUnlocks);
+
 private:
 	UPROPERTY(VisibleAnywhere, Category = "Settlement")
 	FGameplayTagContainer GrantedUnlocks;

@@ -34,3 +34,15 @@ bool UHSSettlementUnlockComponent::HasUnlock(FGameplayTag UnlockTag) const
 {
 	return UnlockTag.IsValid() && GrantedUnlocks.HasTagExact(UnlockTag);
 }
+
+void UHSSettlementUnlockComponent::ReplaceGrantedUnlocks(const FGameplayTagContainer& NewGrantedUnlocks)
+{
+	GrantedUnlocks.Reset();
+	for (const FGameplayTag& UnlockTag : NewGrantedUnlocks)
+	{
+		if (UnlockTag.IsValid())
+		{
+			GrantedUnlocks.AddTag(UnlockTag);
+		}
+	}
+}

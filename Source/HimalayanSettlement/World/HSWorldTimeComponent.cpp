@@ -20,6 +20,13 @@ void UHSWorldTimeComponent::SetTimePhase(EHSTimePhase NewTimePhase)
 	OnTimeAdvanced.Broadcast(TimePhase, GetElapsedDays());
 }
 
+void UHSWorldTimeComponent::SetTimeState(EHSTimePhase NewTimePhase, int32 NewElapsedHalfDays)
+{
+	TimePhase = NewTimePhase;
+	ElapsedHalfDays = FMath::Max(0, NewElapsedHalfDays);
+	OnTimeAdvanced.Broadcast(TimePhase, GetElapsedDays());
+}
+
 EHSTimePhase UHSWorldTimeComponent::AdvanceHalfDay()
 {
 	TimePhase = TimePhase == EHSTimePhase::Day ? EHSTimePhase::Night : EHSTimePhase::Day;

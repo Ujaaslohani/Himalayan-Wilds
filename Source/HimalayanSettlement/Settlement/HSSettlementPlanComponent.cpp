@@ -134,4 +134,19 @@ bool UHSSettlementPlanComponent::ConsumePendingSchema(FGameplayTag BuildingTag, 
 	return false;
 }
 
+void UHSSettlementPlanComponent::RestoreSettlementPlan(bool bNewHasSettlementClaim, FVector NewSettlementClaimCenter, const TArray<FHSPendingBuildingSchema>& NewPendingSchemas)
+{
+	bHasSettlementClaim = bNewHasSettlementClaim;
+	SettlementClaimCenter = bHasSettlementClaim ? NewSettlementClaimCenter : FVector::ZeroVector;
+	PendingSchemas.Reset();
+
+	for (const FHSPendingBuildingSchema& PendingSchema : NewPendingSchemas)
+	{
+		if (PendingSchema.IsValid() && !HasPendingSchema(PendingSchema.BuildingTag))
+		{
+			PendingSchemas.Add(PendingSchema);
+		}
+	}
+}
+
 #undef LOCTEXT_NAMESPACE

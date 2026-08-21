@@ -27,6 +27,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Progression")
 	const FGameplayTagContainer& GetCompletedMilestones() const { return CompletedMilestones; }
 
+	void ReplaceCompletedMilestones(const FGameplayTagContainer& NewCompletedMilestones);
+
 private:
 	UPROPERTY(VisibleAnywhere, Category = "Progression")
 	FGameplayTagContainer CompletedMilestones;

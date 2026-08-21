@@ -35,6 +35,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Resources")
 	const TArray<FHSItemStack>& GetCarriedItems() const { return CarriedItems; }
 
+	void ReplaceCarriedItems(const TArray<FHSItemStack>& NewCarriedItems);
+
 private:
 	UPROPERTY(VisibleAnywhere, Category = "Resources")
 	TArray<FHSItemStack> CarriedItems;

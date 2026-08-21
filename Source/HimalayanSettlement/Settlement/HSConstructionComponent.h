@@ -86,6 +86,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Construction")
 	const TArray<FHSConstructionJob>& GetConstructionJobs() const { return ConstructionJobs; }
 
+	UFUNCTION(BlueprintPure, Category = "Construction")
+	const FGameplayTagContainer& GetCompletedBuildings() const { return CompletedBuildings; }
+
+	void RestoreConstructionState(const TArray<FHSConstructionJob>& NewConstructionJobs, const FGameplayTagContainer& NewCompletedBuildings);
+
 private:
 	UFUNCTION()
 	void HandleTimeAdvanced(EHSTimePhase NewTimePhase, float ElapsedDays);

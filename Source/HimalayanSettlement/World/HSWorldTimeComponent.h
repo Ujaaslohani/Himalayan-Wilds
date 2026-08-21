@@ -40,6 +40,9 @@ public:
 	void SetTimePhase(EHSTimePhase NewTimePhase);
 
 	UFUNCTION(BlueprintCallable, Category = "World Time")
+	void SetTimeState(EHSTimePhase NewTimePhase, int32 NewElapsedHalfDays);
+
+	UFUNCTION(BlueprintCallable, Category = "World Time")
 	EHSTimePhase AdvanceHalfDay();
 
 private:

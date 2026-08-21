@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 4: Builder NPC And Construction Time: in progress.
+Milestone 5: Persistent Settlement State: in progress.
 
 ## Engine Version
 
@@ -62,6 +62,9 @@ Unreal Engine 5.5.4.
 - Native HUD feedback added for construction start and completion.
 - Milestone 4 builder construction-time foundation compiles.
 - Content bootstrap succeeds with zero warnings and regenerates the builder NPC/data asset.
+- Native versioned settlement SaveGame added for time, milestones, resources, unlocks, settlement claim, pending schemas, construction jobs, completed buildings, and future NPC profession tags.
+- Native settlement persistence component added with snapshot restore plus manual F5 save / F9 load bindings.
+- Milestone 5 persistence foundation compiles.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
@@ -70,11 +73,11 @@ Unreal Engine 5.5.4.
 - Hands-on movement playtest passed for jump, crouch, and prone.
 - Milestone 3 settlement claim and house schema foundation compiles.
 - Content bootstrap succeeds with zero warnings and regenerates the basic house schema marker.
-- All 49 `HimalayanSettlement` automation tests pass.
+- All 53 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
-- Milestone 4 hands-on playtest.
+- Milestone 5 hands-on save/load playtest.
 
 ## Known Blockers
 
@@ -94,5 +97,6 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Run hands-on playtest: place house schema, ask builder to start it, sleep twice, and confirm completion feedback.
-2. Record numeric FPS using the low-end profile task before forest density increases.
+1. Run hands-on playtest: build settlement state, press F5, alter state, press F9, and confirm time/construction/resources restore.
+2. Run hands-on closeout for Milestones 3 and 4 if not already confirmed in-editor.
+3. Record numeric FPS using the low-end profile task before forest density increases.

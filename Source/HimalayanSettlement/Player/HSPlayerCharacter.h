@@ -8,6 +8,7 @@ class UCameraComponent;
 class UHSHuntingComponent;
 class UHSConstructionComponent;
 class UHSInteractionSensorComponent;
+class UHSSettlementPersistenceComponent;
 class UHSPlayerProgressComponent;
 class UHSResourceCarryComponent;
 class UHSSettlementPlanComponent;
@@ -39,6 +40,7 @@ public:
 	UHSInteractionSensorComponent* GetInteractionSensor() const { return InteractionSensor; }
 	UHSHuntingComponent* GetHuntingComponent() const { return HuntingComponent; }
 	UHSConstructionComponent* GetConstructionComponent() const { return ConstructionComponent; }
+	UHSSettlementPersistenceComponent* GetSettlementPersistenceComponent() const { return SettlementPersistenceComponent; }
 	UHSPlayerProgressComponent* GetPlayerProgressComponent() const { return PlayerProgressComponent; }
 	UHSResourceCarryComponent* GetResourceCarryComponent() const { return ResourceCarryComponent; }
 	UHSSettlementPlanComponent* GetSettlementPlanComponent() const { return SettlementPlanComponent; }
@@ -71,6 +73,8 @@ private:
 	void StopJump(const FInputActionValue& InputValue);
 	void ToggleCrouchStance(const FInputActionValue& InputValue);
 	void ToggleProneStance(const FInputActionValue& InputValue);
+	void SaveSettlementState(const FInputActionValue& InputValue);
+	void LoadSettlementState(const FInputActionValue& InputValue);
 	void ApplyInputMappingContext();
 	void ApplyStanceMovementSettings();
 
@@ -85,6 +89,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSConstructionComponent> ConstructionComponent;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player")
+	TObjectPtr<UHSSettlementPersistenceComponent> SettlementPersistenceComponent;
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSPlayerProgressComponent> PlayerProgressComponent;
@@ -121,6 +128,12 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> ProneAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> SaveAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> LoadAction;
 
 	UPROPERTY(VisibleAnywhere, Category = "Player|Movement")
 	EHSPlayerStance PlayerStance;

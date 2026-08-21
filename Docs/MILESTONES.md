@@ -47,7 +47,7 @@ Complete when:
 
 ## Milestone 3: Settlement Claim And House Schema
 
-Status: In progress.
+Status: Implementation complete; hands-on closeout pending.
 
 Player experience: The player chooses a permanent settlement spot and places a house schema/ghost, similar in spirit to schema-based building games. The player is choosing intent, not personally constructing the house by hand.
 
@@ -70,7 +70,7 @@ Complete when:
 
 ## Milestone 4: Builder NPC And Construction Time
 
-Status: In progress.
+Status: Implementation complete; hands-on closeout pending.
 
 Player experience: The builder NPC makes construction real. The player chooses what to build; the builder takes time to finish it.
 
@@ -93,6 +93,8 @@ Complete when:
 - Tests cover job start, blocked start, progress, and completion.
 
 ## Milestone 5: Persistent Settlement State
+
+Status: In progress.
 
 Player experience: The house, time state, recruited NPCs, construction progress, and completed milestones persist across sessions.
 

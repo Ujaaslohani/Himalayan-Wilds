@@ -53,6 +53,8 @@ public:
 
 	bool ConsumePendingSchema(FGameplayTag BuildingTag, FHSPendingBuildingSchema& OutPendingSchema);
 
+	void RestoreSettlementPlan(bool bNewHasSettlementClaim, FVector NewSettlementClaimCenter, const TArray<FHSPendingBuildingSchema>& NewPendingSchemas);
+
 	UFUNCTION(BlueprintPure, Category = "Settlement")
 	bool HasSettlementClaim() const { return bHasSettlementClaim; }
 

@@ -14,6 +14,7 @@
 #include "InputCoreTypes.h"
 #include "Hunting/HSHuntingComponent.h"
 #include "Interaction/HSInteractionSensorComponent.h"
+#include "Persistence/HSSettlementPersistenceComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
 #include "Settlement/HSConstructionComponent.h"
@@ -52,6 +53,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	InteractionSensor = CreateDefaultSubobject<UHSInteractionSensorComponent>(TEXT("InteractionSensor"));
 	HuntingComponent = CreateDefaultSubobject<UHSHuntingComponent>(TEXT("HuntingComponent"));
 	ConstructionComponent = CreateDefaultSubobject<UHSConstructionComponent>(TEXT("ConstructionComponent"));
+	SettlementPersistenceComponent = CreateDefaultSubobject<UHSSettlementPersistenceComponent>(TEXT("SettlementPersistenceComponent"));
 	PlayerProgressComponent = CreateDefaultSubobject<UHSPlayerProgressComponent>(TEXT("PlayerProgressComponent"));
 	ResourceCarryComponent = CreateDefaultSubobject<UHSResourceCarryComponent>(TEXT("ResourceCarryComponent"));
 	SettlementPlanComponent = CreateDefaultSubobject<UHSSettlementPlanComponent>(TEXT("SettlementPlanComponent"));
@@ -99,6 +101,14 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	ProneAction->ValueType = EInputActionValueType::Boolean;
 	PlayerMappingContext->MapKey(ProneAction, EKeys::Z);
 	PlayerMappingContext->MapKey(ProneAction, EKeys::Gamepad_FaceButton_Right);
+
+	SaveAction = CreateDefaultSubobject<UInputAction>(TEXT("SaveAction"));
+	SaveAction->ValueType = EInputActionValueType::Boolean;
+	PlayerMappingContext->MapKey(SaveAction, EKeys::F5);
+
+	LoadAction = CreateDefaultSubobject<UInputAction>(TEXT("LoadAction"));
+	LoadAction->ValueType = EInputActionValueType::Boolean;
+	PlayerMappingContext->MapKey(LoadAction, EKeys::F9);
 }
 
 void AHSPlayerCharacter::PawnClientRestart()
@@ -120,6 +130,8 @@ void AHSPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &AHSPlayerCharacter::StopJump);
 	EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::ToggleCrouchStance);
 	EnhancedInputComponent->BindAction(ProneAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::ToggleProneStance);
+	EnhancedInputComponent->BindAction(SaveAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::SaveSettlementState);
+	EnhancedInputComponent->BindAction(LoadAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::LoadSettlementState);
 }
 
 void AHSPlayerCharacter::Move(const FInputActionValue& InputValue)
@@ -191,6 +203,18 @@ void AHSPlayerCharacter::ToggleCrouchStance(const FInputActionValue& InputValue)
 void AHSPlayerCharacter::ToggleProneStance(const FInputActionValue& InputValue)
 {
 	SetPlayerStance(PlayerStance == EHSPlayerStance::Prone ? EHSPlayerStance::Standing : EHSPlayerStance::Prone);
+}
+
+void AHSPlayerCharacter::SaveSettlementState(const FInputActionValue& InputValue)
+{
+	const bool bSaved = SettlementPersistenceComponent && SettlementPersistenceComponent->SaveToSlot(SettlementPersistenceComponent->GetDefaultSlotName());
+	UE_LOG(LogHSSettlement, Log, TEXT("%s manual settlement save result: %s."), *GetNameSafe(this), bSaved ? TEXT("saved") : TEXT("failed"));
+}
+
+void AHSPlayerCharacter::LoadSettlementState(const FInputActionValue& InputValue)
+{
+	const bool bLoaded = SettlementPersistenceComponent && SettlementPersistenceComponent->LoadFromSlot(SettlementPersistenceComponent->GetDefaultSlotName());
+	UE_LOG(LogHSSettlement, Log, TEXT("%s manual settlement load result: %s."), *GetNameSafe(this), bLoaded ? TEXT("loaded") : TEXT("failed"));
 }
 
 void AHSPlayerCharacter::SetPlayerStance(EHSPlayerStance NewStance)

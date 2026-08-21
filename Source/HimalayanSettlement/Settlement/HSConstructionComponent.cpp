@@ -123,6 +123,53 @@ bool UHSConstructionComponent::HasCompletedBuilding(FGameplayTag BuildingTag) co
 	return BuildingTag.IsValid() && CompletedBuildings.HasTagExact(BuildingTag);
 }
 
+void UHSConstructionComponent::RestoreConstructionState(const TArray<FHSConstructionJob>& NewConstructionJobs, const FGameplayTagContainer& NewCompletedBuildings)
+{
+	ConstructionJobs.Reset();
+	bool bRestoredActiveJob = false;
+
+	for (FHSConstructionJob ConstructionJob : NewConstructionJobs)
+	{
+		if (!ConstructionJob.IsValid())
+		{
+			continue;
+		}
+
+		ConstructionJob.ProgressDays = FMath::Clamp(ConstructionJob.ProgressDays, 0.0f, ConstructionJob.RequiredDays);
+		if (ConstructionJob.State == EHSConstructionJobState::Complete || ConstructionJob.ProgressDays >= ConstructionJob.RequiredDays)
+		{
+			ConstructionJob.State = EHSConstructionJobState::Complete;
+			ConstructionJob.ProgressDays = ConstructionJob.RequiredDays;
+			ConstructionJobs.Add(ConstructionJob);
+			continue;
+		}
+
+		if (!bRestoredActiveJob)
+		{
+			ConstructionJob.State = EHSConstructionJobState::Active;
+			ConstructionJobs.Add(ConstructionJob);
+			bRestoredActiveJob = true;
+		}
+	}
+
+	CompletedBuildings.Reset();
+	for (const FGameplayTag& BuildingTag : NewCompletedBuildings)
+	{
+		if (BuildingTag.IsValid())
+		{
+			CompletedBuildings.AddTag(BuildingTag);
+		}
+	}
+
+	for (const FHSConstructionJob& ConstructionJob : ConstructionJobs)
+	{
+		if (ConstructionJob.IsComplete())
+		{
+			CompletedBuildings.AddTag(ConstructionJob.BuildingTag);
+		}
+	}
+}
+
 void UHSConstructionComponent::HandleTimeAdvanced(EHSTimePhase NewTimePhase, float ElapsedDays)
 {
 	const float DeltaDays = FMath::Max(0.0f, ElapsedDays - LastObservedElapsedDays);

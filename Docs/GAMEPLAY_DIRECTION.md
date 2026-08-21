@@ -53,6 +53,7 @@ Current implementation boundary:
 - Pending means the player has chosen intent; it is not a finished house.
 - Construction duration, builder assignment, and completion are intentionally reserved for the builder milestone.
 - The first builder slice starts with one builder, one active job, and a `1.0` day basic house duration.
+- The first persistence slice stores time, progress, carried resources, unlocks, settlement claim, pending schemas, construction jobs, and completed buildings through a versioned native SaveGame.
 
 ## NPC Role Use Cases
 
