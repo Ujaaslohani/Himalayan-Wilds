@@ -8,6 +8,7 @@
 #include "HSAnimalActor.generated.h"
 
 class UBoxComponent;
+class AHSWoundClueActor;
 class UHSAnimalDefinition;
 class UStaticMeshComponent;
 
@@ -89,6 +90,7 @@ private:
 	void ResetRuntimeStateFromDefinition();
 	float GetMaxHealth() const;
 	void ReactToNonlethalDamage(AActor* DamageInstigator);
+	void SpawnWoundClue(FVector ClueLocation);
 
 	UPROPERTY(VisibleAnywhere, Category = "Interaction")
 	TObjectPtr<UBoxComponent> InteractionBounds;
@@ -119,4 +121,10 @@ private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Animal|Reaction", meta = (ClampMin = "0.0", Units = "cm"))
 	float FleeStepDistance;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Animal|Tracking")
+	TSubclassOf<AHSWoundClueActor> WoundClueClass;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Animal|Tracking", meta = (ClampMin = "1.0", Units = "s"))
+	float WoundClueLifetimeSeconds;
 };

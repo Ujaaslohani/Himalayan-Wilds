@@ -6,6 +6,8 @@
 #include "Components/StaticMeshComponent.h"
 #include "Core/HSGameplayTags.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
+#include "Hunting/HSWoundClueActor.h"
 #include "Interaction/HSInteractable.h"
 
 namespace
@@ -115,6 +117,13 @@ bool FHSAnimalActorFleesWhenBadlyWoundedTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Badly wounded deer should still be alive."), Deer->IsDead());
 	TestTrue(TEXT("Badly wounded deer should enter fleeing state."), Deer->IsFleeing());
 	TestGreaterThan(TEXT("Fleeing deer should move away from the attacker."), Deer->GetActorLocation().X, StartLocation.X);
+
+	bool bFoundWoundClue = false;
+	for (TActorIterator<AHSWoundClueActor> It(World); It; ++It)
+	{
+		bFoundWoundClue |= It->GetSourceAnimal() == Deer && !It->PrimaryActorTick.bCanEverTick;
+	}
+	TestTrue(TEXT("Nonlethal hit should leave a no-tick wound clue linked to the deer."), bFoundWoundClue);
 
 	World->DestroyWorld(false);
 	return true;

@@ -5,6 +5,8 @@
 #include "Components/StaticMeshComponent.h"
 #include "Core/HSGameplayTags.h"
 #include "Core/HSLogCategories.h"
+#include "Engine/World.h"
+#include "Hunting/HSWoundClueActor.h"
 #include "Resources/HSResourceCarryComponent.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -17,6 +19,8 @@ AHSAnimalActor::AHSAnimalActor()
 	, bHarvested(false)
 	, AlertStepDistance(60.0f)
 	, FleeStepDistance(180.0f)
+	, WoundClueClass(AHSWoundClueActor::StaticClass())
+	, WoundClueLifetimeSeconds(45.0f)
 {
 	PrimaryActorTick.bCanEverTick = false;
 
@@ -73,7 +77,9 @@ float AHSAnimalActor::ApplyHuntingDamage(float DamageAmount, AActor* DamageInsti
 	}
 	else
 	{
+		const FVector WoundClueLocation = GetActorLocation();
 		RuntimeState = CurrentHealth <= (GetMaxHealth() * 0.5f) ? EHSAnimalRuntimeState::Fleeing : EHSAnimalRuntimeState::Alert;
+		SpawnWoundClue(WoundClueLocation);
 		ReactToNonlethalDamage(DamageInstigator);
 		UE_LOG(LogHSAI, Verbose, TEXT("%s wounded %s; state is now %d."), *GetNameSafe(DamageInstigator), *GetNameSafe(this), static_cast<int32>(RuntimeState));
 	}
@@ -175,6 +181,25 @@ void AHSAnimalActor::ReactToNonlethalDamage(AActor* DamageInstigator)
 	SetActorRotation(ReactionDirection.Rotation());
 	const float StepDistance = RuntimeState == EHSAnimalRuntimeState::Fleeing ? FleeStepDistance : AlertStepDistance;
 	AddActorWorldOffset(ReactionDirection * StepDistance, true);
+}
+
+void AHSAnimalActor::SpawnWoundClue(FVector ClueLocation)
+{
+	UWorld* World = GetWorld();
+	if (!World || !WoundClueClass)
+	{
+		return;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Owner = this;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	AHSWoundClueActor* WoundClue = World->SpawnActor<AHSWoundClueActor>(WoundClueClass, ClueLocation, FRotator::ZeroRotator, SpawnParameters);
+	if (WoundClue)
+	{
+		WoundClue->ConfigureWoundClue(this, WoundClueLifetimeSeconds);
+	}
 }
 
 #undef LOCTEXT_NAMESPACE

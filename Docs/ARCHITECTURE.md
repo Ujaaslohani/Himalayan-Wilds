@@ -84,7 +84,7 @@ Native placeholder actors own simple non-colliding static mesh components using 
 
 ## Animal Runtime
 
-`AHSAnimalActor` is the first native runtime animal shell. It references a `UHSAnimalDefinition`, tracks health plus idle/alert/fleeing/dead state, and exposes one-shot harvesting of configured drop stacks. Non-lethal damage performs one cheap no-tick reaction by rotating and stepping the animal away from the attacker. Alert and fleeing remain state hooks for later tracking and AI; they do not yet drive pathfinding, animation, or ecology simulation.
+`AHSAnimalActor` is the first native runtime animal shell. It references a `UHSAnimalDefinition`, tracks health plus idle/alert/fleeing/dead state, and exposes one-shot harvesting of configured drop stacks. Non-lethal damage performs one cheap no-tick reaction by rotating and stepping the animal away from the attacker, and spawns a short-lived no-tick `AHSWoundClueActor` at the hit location. Alert, fleeing, and wound clues are early hooks for later tracking and AI; they do not yet drive pathfinding, animation, or ecology simulation.
 
 ## Hunting
 
