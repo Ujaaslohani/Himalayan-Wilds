@@ -16,6 +16,7 @@
 #include "Interaction/HSInteractionSensorComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
+#include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
 #include "Settlement/HSSettlementUnlockComponent.h"
 
@@ -50,6 +51,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 
 	InteractionSensor = CreateDefaultSubobject<UHSInteractionSensorComponent>(TEXT("InteractionSensor"));
 	HuntingComponent = CreateDefaultSubobject<UHSHuntingComponent>(TEXT("HuntingComponent"));
+	ConstructionComponent = CreateDefaultSubobject<UHSConstructionComponent>(TEXT("ConstructionComponent"));
 	PlayerProgressComponent = CreateDefaultSubobject<UHSPlayerProgressComponent>(TEXT("PlayerProgressComponent"));
 	ResourceCarryComponent = CreateDefaultSubobject<UHSResourceCarryComponent>(TEXT("ResourceCarryComponent"));
 	SettlementPlanComponent = CreateDefaultSubobject<UHSSettlementPlanComponent>(TEXT("SettlementPlanComponent"));

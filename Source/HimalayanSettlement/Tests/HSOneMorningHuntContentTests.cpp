@@ -45,6 +45,7 @@ bool FHSOneMorningHuntDefinitionsValidateTest::RunTest(const FString& Parameters
 	const UHSItemDefinition* Hide = LoadRequiredAsset<UHSItemDefinition>(*this, TEXT("/Game/Data/Items/DA_Item_DeerHide.DA_Item_DeerHide"));
 	const UHSAnimalDefinition* Deer = LoadRequiredAsset<UHSAnimalDefinition>(*this, TEXT("/Game/Data/Animals/DA_Animal_Deer.DA_Animal_Deer"));
 	const UHSNPCDefinition* Hunter = LoadRequiredAsset<UHSNPCDefinition>(*this, TEXT("/Game/Data/NPCs/DA_NPC_Hunter.DA_NPC_Hunter"));
+	const UHSNPCDefinition* Builder = LoadRequiredAsset<UHSNPCDefinition>(*this, TEXT("/Game/Data/NPCs/DA_NPC_Builder.DA_NPC_Builder"));
 	const UHSBuildingDefinition* DryingRack = LoadRequiredAsset<UHSBuildingDefinition>(*this, TEXT("/Game/Data/Buildings/DA_Building_BasicDryingRack.DA_Building_BasicDryingRack"));
 	const UHSBuildingDefinition* BasicHouse = LoadRequiredAsset<UHSBuildingDefinition>(*this, TEXT("/Game/Data/Buildings/DA_Building_BasicHouse.DA_Building_BasicHouse"));
 	const UHSQuestDefinition* Quest = LoadRequiredAsset<UHSQuestDefinition>(*this, TEXT("/Game/Data/Quests/DA_Quest_OneMorningHunt.DA_Quest_OneMorningHunt"));
@@ -55,6 +56,7 @@ bool FHSOneMorningHuntDefinitionsValidateTest::RunTest(const FString& Parameters
 	if (Hide) { TestTrue(TEXT("Deer hide definition should validate."), Hide->IsDefinitionValid()); }
 	if (Deer) { TestTrue(TEXT("Deer definition should validate."), Deer->IsDefinitionValid()); }
 	if (Hunter) { TestTrue(TEXT("Hunter definition should validate."), Hunter->IsDefinitionValid()); }
+	if (Builder) { TestTrue(TEXT("Builder definition should validate."), Builder->IsDefinitionValid()); }
 	if (DryingRack) { TestTrue(TEXT("Drying rack definition should validate."), DryingRack->IsDefinitionValid()); }
 	if (BasicHouse) { TestTrue(TEXT("Basic house definition should validate."), BasicHouse->IsDefinitionValid()); }
 	if (Quest) { TestTrue(TEXT("One Morning Hunt quest definition should validate."), Quest->IsDefinitionValid()); }
@@ -74,6 +76,7 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 
 	bool bFoundHunter = false;
 	bool bFoundHunterQuestHandoff = false;
+	bool bFoundBuilder = false;
 	bool bFoundConfiguredDeer = false;
 	bool bFoundInteractionTarget = false;
 	bool bFoundRestPoint = false;
@@ -88,9 +91,11 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 		{
 			if (const AHSNPCActor* Hunter = Cast<AHSNPCActor>(Actor))
 			{
-				bFoundHunter = true;
+				bFoundHunter |= Hunter->GetProfessionTag() == TAG_HS_NPC_Profession_Hunter;
+				bFoundBuilder |= Hunter->GetProfessionTag() == TAG_HS_NPC_Profession_Builder;
 				const UHSQuestHandoffComponent* Handoff = Hunter->GetQuestHandoffComponent();
-				bFoundHunterQuestHandoff |= Handoff
+				bFoundHunterQuestHandoff |= Hunter->GetProfessionTag() == TAG_HS_NPC_Profession_Hunter
+					&& Handoff
 					&& Handoff->GetQuestDefinition()
 					&& Handoff->GetHandoffState() == EHSQuestHandoffState::Available;
 			}
@@ -129,6 +134,7 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("One Morning Hunt map should contain a native NPC actor."), bFoundHunter);
 	TestTrue(TEXT("One Morning Hunt hunter should offer the first quest handoff."), bFoundHunterQuestHandoff);
+	TestTrue(TEXT("One Morning Hunt map should contain a native builder NPC actor."), bFoundBuilder);
 	TestTrue(TEXT("One Morning Hunt map should contain a configured native deer actor."), bFoundConfiguredDeer);
 	TestTrue(TEXT("One Morning Hunt map should contain a native interaction target."), bFoundInteractionTarget);
 	TestTrue(TEXT("One Morning Hunt map should contain a native end-of-day rest point."), bFoundRestPoint);

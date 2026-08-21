@@ -92,9 +92,18 @@ template <typename T>
 T* GetOrCreateAsset(const TCHAR* LongPackageName, const TCHAR* AssetName)
 {
 	const FString ObjectPath = FString::Printf(TEXT("%s.%s"), LongPackageName, AssetName);
-	if (T* Existing = LoadObject<T>(nullptr, *ObjectPath))
+	if (T* Existing = FindObject<T>(nullptr, *ObjectPath))
 	{
 		return Existing;
+	}
+
+	FString ExistingPackageFileName;
+	if (FPackageName::DoesPackageExist(LongPackageName, &ExistingPackageFileName))
+	{
+		if (T* Existing = LoadObject<T>(nullptr, *ObjectPath))
+		{
+			return Existing;
+		}
 	}
 
 	UPackage* Package = CreatePackage(LongPackageName);
@@ -154,6 +163,13 @@ void CreateDefinitions()
 	Hunter->KnowledgeTags = Tags({ TEXT("Knowledge.Hunting.Basic") });
 	Hunter->UnlockTags = Tags({ TEXT("Building.BasicDryingRack") });
 	SaveAssetPackage(Hunter);
+
+	UHSNPCDefinition* Builder = ConfigureAsset<UHSNPCDefinition>(TEXT("/Game/Data/NPCs/DA_NPC_Builder"), TEXT("DA_NPC_Builder"));
+	Builder->DisplayName = FText::FromString(TEXT("Builder"));
+	Builder->ProfessionTag = Tag(TEXT("NPC.Profession.Builder"));
+	Builder->KnowledgeTags = Tags({ TEXT("Knowledge.Settlement.BasicCrafting") });
+	Builder->UnlockTags.Reset();
+	SaveAssetPackage(Builder);
 
 	UHSBuildingDefinition* Rack = ConfigureAsset<UHSBuildingDefinition>(TEXT("/Game/Data/Buildings/DA_Building_BasicDryingRack"), TEXT("DA_Building_BasicDryingRack"));
 	Rack->DisplayName = FText::FromString(TEXT("Basic Drying Rack"));
@@ -259,6 +275,9 @@ void CreateMap()
 	{
 		Hunter->SetOfferedQuest(QuestDefinition);
 	}
+
+	AHSNPCActor* Builder = SpawnNamedActor<AHSNPCActor>(World, TEXT("NPC_Builder"), FVector(-360.0f, -260.0f, 90.0f), FRotator(0.0f, 80.0f, 0.0f));
+	Builder->SetNPCDefinition(GetOrCreateAsset<UHSNPCDefinition>(TEXT("/Game/Data/NPCs/DA_NPC_Builder"), TEXT("DA_NPC_Builder")));
 
 	AHSAnimalActor* Deer = SpawnNamedActor<AHSAnimalActor>(World, TEXT("Animal_Deer_Prototype"), FVector(650.0f, -180.0f, 70.0f), FRotator(0.0f, -35.0f, 0.0f));
 	if (UHSAnimalDefinition* DeerDefinition = LoadObject<UHSAnimalDefinition>(nullptr, TEXT("/Game/Data/Animals/DA_Animal_Deer.DA_Animal_Deer")))

@@ -70,6 +70,8 @@ Complete when:
 
 ## Milestone 4: Builder NPC And Construction Time
 
+Status: In progress.
+
 Player experience: The builder NPC makes construction real. The player chooses what to build; the builder takes time to finish it.
 
 Scope:

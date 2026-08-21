@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 3: Settlement Claim And House Schema: in progress.
+Milestone 4: Builder NPC And Construction Time: in progress.
 
 ## Engine Version
 
@@ -57,6 +57,11 @@ Unreal Engine 5.5.4.
 - Native settlement claim marker and basic house schema marker added for the first permanent building intent flow.
 - Native HUD feedback added for settlement claim and pending schema placement.
 - Basic house building definition and `Building.BasicHouse` / `Settlement.Stage.Claimed` tags added.
+- Native construction component added for one active builder job, half-day time progress, and completed building state.
+- Builder profession tag, builder data asset, and builder NPC bootstrap path added.
+- Native HUD feedback added for construction start and completion.
+- Milestone 4 builder construction-time foundation compiles.
+- Content bootstrap succeeds with zero warnings and regenerates the builder NPC/data asset.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
@@ -65,11 +70,11 @@ Unreal Engine 5.5.4.
 - Hands-on movement playtest passed for jump, crouch, and prone.
 - Milestone 3 settlement claim and house schema foundation compiles.
 - Content bootstrap succeeds with zero warnings and regenerates the basic house schema marker.
-- All 44 `HimalayanSettlement` automation tests pass.
+- All 49 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
-- Milestone 3 hands-on playtest.
+- Milestone 4 hands-on playtest.
 
 ## Known Blockers
 
@@ -89,5 +94,5 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Run hands-on playtest for claiming a settlement site and placing the basic house schema.
+1. Run hands-on playtest: place house schema, ask builder to start it, sleep twice, and confirm completion feedback.
 2. Record numeric FPS using the low-end profile task before forest density increases.

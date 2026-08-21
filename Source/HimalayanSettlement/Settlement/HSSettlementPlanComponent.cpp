@@ -113,4 +113,25 @@ bool UHSSettlementPlanComponent::HasPendingSchema(FGameplayTag BuildingTag) cons
 	return false;
 }
 
+bool UHSSettlementPlanComponent::ConsumePendingSchema(FGameplayTag BuildingTag, FHSPendingBuildingSchema& OutPendingSchema)
+{
+	if (!BuildingTag.IsValid())
+	{
+		return false;
+	}
+
+	for (int32 Index = 0; Index < PendingSchemas.Num(); ++Index)
+	{
+		if (PendingSchemas[Index].BuildingTag == BuildingTag)
+		{
+			OutPendingSchema = PendingSchemas[Index];
+			PendingSchemas.RemoveAt(Index);
+			UE_LOG(LogHSSettlement, Log, TEXT("%s promoted pending schema %s into construction."), *GetNameSafe(GetOwner()), *BuildingTag.ToString());
+			return true;
+		}
+	}
+
+	return false;
+}
+
 #undef LOCTEXT_NAMESPACE

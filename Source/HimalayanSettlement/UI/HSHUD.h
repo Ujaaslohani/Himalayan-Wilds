@@ -6,6 +6,7 @@
 #include "HSHUD.generated.h"
 
 struct FHSPendingBuildingSchema;
+struct FHSConstructionJob;
 
 UCLASS()
 class HIMALAYANSETTLEMENT_API AHSHUD : public AHUD
@@ -38,9 +39,16 @@ public:
 	UFUNCTION()
 	void HandleBuildingSchemaPlaced(const FHSPendingBuildingSchema& PendingSchema);
 
+	UFUNCTION()
+	void HandleConstructionJobStarted(const FHSConstructionJob& ConstructionJob);
+
+	UFUNCTION()
+	void HandleConstructionJobCompleted(const FHSConstructionJob& ConstructionJob);
+
 private:
 	void BindProgressComponent();
 	void BindSettlementPlanComponent();
+	void BindConstructionComponent();
 	void ShowCompletionMessage(FText Message);
 	void DrawCenteredTextLine(const FString& Text, float Y, float Scale, const FLinearColor& Color);
 
@@ -58,6 +66,9 @@ private:
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<class UHSSettlementPlanComponent> BoundSettlementPlanComponent;
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<class UHSConstructionComponent> BoundConstructionComponent;
 
 	UPROPERTY(Transient)
 	FText CompletionMessage;

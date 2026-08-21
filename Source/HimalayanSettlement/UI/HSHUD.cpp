@@ -4,6 +4,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Interaction/HSInteractionSensorComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
+#include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
 #include "World/HSGameState.h"
 #include "World/HSWorldTimeComponent.h"
@@ -27,6 +28,7 @@ void AHSHUD::DrawHUD()
 
 	BindProgressComponent();
 	BindSettlementPlanComponent();
+	BindConstructionComponent();
 
 	if (const AHSGameState* GameState = GetWorld() ? GetWorld()->GetGameState<AHSGameState>() : nullptr)
 	{
@@ -82,6 +84,16 @@ void AHSHUD::HandleBuildingSchemaPlaced(const FHSPendingBuildingSchema& PendingS
 	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "SchemaPending", "Schema pending: {Building}"), FText::FromString(PendingSchema.BuildingTag.ToString())));
 }
 
+void AHSHUD::HandleConstructionJobStarted(const FHSConstructionJob& ConstructionJob)
+{
+	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "ConstructionStarted", "Construction started: {Building}"), FText::FromString(ConstructionJob.BuildingTag.ToString())));
+}
+
+void AHSHUD::HandleConstructionJobCompleted(const FHSConstructionJob& ConstructionJob)
+{
+	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "ConstructionComplete", "Construction complete: {Building}"), FText::FromString(ConstructionJob.BuildingTag.ToString())));
+}
+
 void AHSHUD::BindProgressComponent()
 {
 	if (!PlayerOwner)
@@ -128,6 +140,31 @@ void AHSHUD::BindSettlementPlanComponent()
 	BoundSettlementPlanComponent = SettlementPlanComponent;
 	SettlementPlanComponent->OnSettlementClaimed.AddUniqueDynamic(this, &AHSHUD::HandleSettlementClaimed);
 	SettlementPlanComponent->OnBuildingSchemaPlaced.AddUniqueDynamic(this, &AHSHUD::HandleBuildingSchemaPlaced);
+}
+
+void AHSHUD::BindConstructionComponent()
+{
+	if (!PlayerOwner)
+	{
+		return;
+	}
+
+	APawn* Pawn = PlayerOwner->GetPawn();
+	UHSConstructionComponent* ConstructionComponent = Pawn ? Pawn->FindComponentByClass<UHSConstructionComponent>() : nullptr;
+	if (!ConstructionComponent || BoundConstructionComponent.Get() == ConstructionComponent)
+	{
+		return;
+	}
+
+	if (UHSConstructionComponent* PreviousConstructionComponent = BoundConstructionComponent.Get())
+	{
+		PreviousConstructionComponent->OnConstructionJobStarted.RemoveDynamic(this, &AHSHUD::HandleConstructionJobStarted);
+		PreviousConstructionComponent->OnConstructionJobCompleted.RemoveDynamic(this, &AHSHUD::HandleConstructionJobCompleted);
+	}
+
+	BoundConstructionComponent = ConstructionComponent;
+	ConstructionComponent->OnConstructionJobStarted.AddUniqueDynamic(this, &AHSHUD::HandleConstructionJobStarted);
+	ConstructionComponent->OnConstructionJobCompleted.AddUniqueDynamic(this, &AHSHUD::HandleConstructionJobCompleted);
 }
 
 void AHSHUD::ShowCompletionMessage(FText Message)

@@ -52,6 +52,7 @@ Current implementation boundary:
 - The first settlement slice records a permanent claim marker and one pending `Basic House` schema.
 - Pending means the player has chosen intent; it is not a finished house.
 - Construction duration, builder assignment, and completion are intentionally reserved for the builder milestone.
+- The first builder slice starts with one builder, one active job, and a `1.0` day basic house duration.
 
 ## NPC Role Use Cases
 

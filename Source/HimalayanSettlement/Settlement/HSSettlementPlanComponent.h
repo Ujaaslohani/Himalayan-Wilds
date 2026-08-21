@@ -51,6 +51,8 @@ public:
 
 	bool PlaceSchema(const UHSBuildingDefinition* BuildingDefinition, FVector Location, float YawDegrees, FHSPendingBuildingSchema& OutPendingSchema);
 
+	bool ConsumePendingSchema(FGameplayTag BuildingTag, FHSPendingBuildingSchema& OutPendingSchema);
+
 	UFUNCTION(BlueprintPure, Category = "Settlement")
 	bool HasSettlementClaim() const { return bHasSettlementClaim; }
 
@@ -62,6 +64,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Settlement")
 	bool HasPendingSchema(FGameplayTag BuildingTag) const;
+
+	UFUNCTION(BlueprintPure, Category = "Settlement")
+	bool HasAnyPendingSchema() const { return PendingSchemas.Num() > 0; }
 
 	UFUNCTION(BlueprintPure, Category = "Settlement")
 	const TArray<FHSPendingBuildingSchema>& GetPendingSchemas() const { return PendingSchemas; }

@@ -17,6 +17,7 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Knowledge_Settlement_BasicCrafting, "Knowledge.Set
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Milestone_OneMorningHunt_DayEnded, "Milestone.OneMorningHunt.DayEnded");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Milestone_TemporaryShelter_Slept, "Milestone.TemporaryShelter.Slept");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_NPC_Profession_Hunter, "NPC.Profession.Hunter");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_NPC_Profession_Builder, "NPC.Profession.Builder");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Quest_OneMorningHunt, "Quest.OneMorningHunt");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Resource_Hide_Deer, "Resource.Hide.Deer");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Resource_Meat_Deer, "Resource.Meat.Deer");
