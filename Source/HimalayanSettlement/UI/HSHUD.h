@@ -96,6 +96,7 @@ private:
 	void DrawPauseMenu(const class AHSPlayerCharacter* PlayerCharacter);
 	void DrawInventoryMenu(const class AHSPlayerCharacter* PlayerCharacter);
 	void DrawBuildMenu(const class AHSPlayerCharacter* PlayerCharacter);
+	void DrawPlayerMenuFeedback(const class AHSPlayerCharacter* PlayerCharacter, float Y);
 
 	UPROPERTY(EditDefaultsOnly, Category = "HUD", meta = (ClampMin = "0.0"))
 	float PromptVerticalOffset;

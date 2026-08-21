@@ -43,6 +43,7 @@ Epic's documentation describes Lumen as UE5's default dynamic global illuminatio
 
 - Open `UE: Open One Morning Hunt Map Low-End Profile` from VS Code.
 - Record FPS in editor with the current prototype map using the `stat fps` and `stat unit` overlays.
+- Use `UE: Run Low-End Benchmark Smoke` only as a repeatable low-end launch smoke; the current editor run does not emit a trustworthy averaged FPS result into the log.
 - Compare against the normal `UE: Open One Morning Hunt Map` task.
 - Check whether Game, Draw, or GPU time is highest in the `stat unit` overlay.
 - Add a packaged Development build performance check once packaging is introduced.
@@ -54,14 +55,16 @@ Epic's documentation describes Lumen as UE5's default dynamic global illuminatio
 - Project renderer defaults disable Lumen global illumination, Lumen reflections, Virtual Shadow Maps, motion blur, and ambient occlusion.
 - The generated prototype map uses movable no-shadow sun/skylight lights to keep the test arena cheap and avoid lighting rebuild work during early gameplay iteration.
 - VS Code includes `UE: Open One Morning Hunt Map Low-End Profile`, which launches the map with low scalability CVars plus `stat fps` and `stat unit`.
+- VS Code also includes `UE: Run Low-End Benchmark Smoke`, which launches the map in a 1280x720 low-end benchmark window for repeatability, but manual overlay readings are still required for the baseline table.
 
 ## Current Baseline Result
 
-- Date: 2026-08-15
-- Automation: 37 `HimalayanSettlement` tests passed.
+- Date: 2026-08-21
+- Automation: 79 `HimalayanSettlement` tests passed.
 - Headless map launch: passes.
 - Hands-on low-end profile launch: confirmed working in the editor.
-- Numeric FPS/Game/Draw/GPU readings: not recorded yet.
+- Low-end benchmark smoke launch: command path confirmed, but no reliable averaged FPS was emitted to the log.
+- Numeric FPS/Game/Draw/GPU readings: still need manual recording from the live `stat fps` and `stat unit` overlay.
 
 ## Target Philosophy
 

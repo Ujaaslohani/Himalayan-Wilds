@@ -101,7 +101,12 @@ void AHSHUD::DrawHUD()
 		}
 	}
 
-	if (HasActiveCompletionMessage())
+	if (PlayerCharacter && PlayerCharacter->HasActiveMenuFeedback())
+	{
+		const float MessageY = FMath::Max(0.0f, Canvas->ClipY - PromptVerticalOffset - 36.0f);
+		DrawCenteredTextLine(PlayerCharacter->GetLastMenuFeedback().ToString(), MessageY, PromptScale, FLinearColor(0.75f, 1.0f, 0.72f, 1.0f));
+	}
+	else if (HasActiveCompletionMessage())
 	{
 		const float MessageY = FMath::Max(0.0f, Canvas->ClipY - PromptVerticalOffset - 36.0f);
 		DrawCenteredTextLine(CompletionMessage.ToString(), MessageY, PromptScale, FLinearColor(0.55f, 1.0f, 0.55f, 1.0f));
@@ -568,6 +573,8 @@ void AHSHUD::DrawPauseMenu(const AHSPlayerCharacter* PlayerCharacter)
 		LineY += 22.0f;
 		DrawText(TEXT("Audio and mouse sensitivity controls come later."), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
 	}
+
+	DrawPlayerMenuFeedback(PlayerCharacter, PanelY + PanelHeight - 22.0f);
 }
 
 void AHSHUD::DrawInventoryMenu(const AHSPlayerCharacter* PlayerCharacter)
@@ -605,6 +612,8 @@ void AHSHUD::DrawInventoryMenu(const AHSPlayerCharacter* PlayerCharacter)
 		}
 	}
 
+	DrawText(TEXT("[1] Inspect first   [2] Drop one   [3] Drop stack"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, PanelY + PanelHeight - 70.0f, GEngine->GetSmallFont(), 0.85f, false);
+	DrawPlayerMenuFeedback(PlayerCharacter, PanelY + PanelHeight - 54.0f);
 	DrawText(TEXT("[I/Tab/Esc] Close"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, PanelY + PanelHeight - 42.0f, GEngine->GetSmallFont(), 0.85f, false);
 }
 
@@ -626,13 +635,24 @@ void AHSHUD::DrawBuildMenu(const AHSPlayerCharacter* PlayerCharacter)
 	DrawCenteredTextLine(TEXT("Build"), LineY, 1.25f, FLinearColor(0.95f, 0.95f, 0.86f, 1.0f));
 	LineY += 50.0f;
 
-	const UHSSettlementPlanComponent* SettlementPlanComponent = PlayerCharacter->GetSettlementPlanComponent();
-	const bool bHasClaim = SettlementPlanComponent && SettlementPlanComponent->HasSettlementClaim();
-	const FLinearColor SchemaColor = bHasClaim ? FLinearColor::White : FLinearColor(1.0f, 0.55f, 0.45f, 1.0f);
+	FText BuildReason;
+	const bool bCanStartBasicHouse = PlayerCharacter->CanStartBasicHouseFromBuildMenu(&BuildReason);
+	const FLinearColor SchemaColor = bCanStartBasicHouse ? FLinearColor::White : FLinearColor(1.0f, 0.55f, 0.45f, 1.0f);
 
 	DrawText(TEXT("[1] Basic House"), SchemaColor, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.95f, false);
 	LineY += 32.0f;
-	DrawText(bHasClaim ? TEXT("Place a house schema for the Builder.") : TEXT("Claim the settlement site before building."), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
+	DrawText(BuildReason.ToString(), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, LineY, GEngine->GetSmallFont(), 0.85f, false);
 
+	DrawPlayerMenuFeedback(PlayerCharacter, PanelY + PanelHeight - 60.0f);
 	DrawText(TEXT("[B/Esc] Close"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, PanelY + PanelHeight - 42.0f, GEngine->GetSmallFont(), 0.85f, false);
+}
+
+void AHSHUD::DrawPlayerMenuFeedback(const AHSPlayerCharacter* PlayerCharacter, float Y)
+{
+	if (!PlayerCharacter || !PlayerCharacter->HasActiveMenuFeedback())
+	{
+		return;
+	}
+
+	DrawCenteredTextLine(PlayerCharacter->GetLastMenuFeedback().ToString(), Y, 0.85f, FLinearColor(0.75f, 1.0f, 0.72f, 1.0f));
 }

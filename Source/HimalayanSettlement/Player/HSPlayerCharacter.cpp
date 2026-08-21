@@ -2,6 +2,7 @@
 
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Core/HSGameplayTags.h"
 #include "Core/HSLogCategories.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -44,6 +45,8 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	, bInventoryOpen(false)
 	, bBuildMenuOpen(false)
 	, GraphicsQualityPreset(0)
+	, MenuFeedbackDuration(4.0f)
+	, MenuFeedbackExpireTime(0.0)
 	, bAutosaveSuppressed(false)
 {
 	bUseControllerRotationPitch = false;
@@ -437,6 +440,12 @@ void AHSPlayerCharacter::HandlePauseMenuResume(const FInputActionValue& InputVal
 	if (bBuildMenuOpen)
 	{
 		StartBasicHouseFromBuildMenu();
+		return;
+	}
+
+	if (bInventoryOpen)
+	{
+		InspectInventoryStack(0);
 	}
 }
 
@@ -445,6 +454,12 @@ void AHSPlayerCharacter::HandlePauseMenuSave(const FInputActionValue& InputValue
 	if (bPauseMenuOpen)
 	{
 		SaveFromPauseMenu();
+		return;
+	}
+
+	if (bInventoryOpen)
+	{
+		DropInventoryStackQuantity(0, 1);
 	}
 }
 
@@ -453,6 +468,12 @@ void AHSPlayerCharacter::HandlePauseMenuLoad(const FInputActionValue& InputValue
 	if (bPauseMenuOpen)
 	{
 		LoadFromPauseMenu();
+		return;
+	}
+
+	if (bInventoryOpen)
+	{
+		DropInventoryStackQuantity(0, TNumericLimits<int32>::Max());
 	}
 }
 
@@ -515,6 +536,9 @@ void AHSPlayerCharacter::ClosePauseMenu()
 bool AHSPlayerCharacter::SaveFromPauseMenu()
 {
 	const bool bSaved = SettlementPersistenceComponent && SettlementPersistenceComponent->SaveToSlot(SettlementPersistenceComponent->GetDefaultSlotName());
+	SetMenuFeedback(bSaved
+		? NSLOCTEXT("HSPlayerCharacter", "PauseSaveSucceeded", "Saved game.")
+		: NSLOCTEXT("HSPlayerCharacter", "PauseSaveFailed", "Save failed."));
 	UE_LOG(LogHSSettlement, Log, TEXT("%s pause menu save result: %s."), *GetNameSafe(this), bSaved ? TEXT("saved") : TEXT("failed"));
 	return bSaved;
 }
@@ -525,6 +549,9 @@ bool AHSPlayerCharacter::LoadFromPauseMenu()
 	const bool bLoaded = SettlementPersistenceComponent && SettlementPersistenceComponent->LoadFromSlot(SettlementPersistenceComponent->GetDefaultSlotName());
 	bAutosaveSuppressed = false;
 	UE_LOG(LogHSSettlement, Log, TEXT("%s pause menu load result: %s."), *GetNameSafe(this), bLoaded ? TEXT("loaded") : TEXT("failed"));
+	SetMenuFeedback(bLoaded
+		? NSLOCTEXT("HSPlayerCharacter", "PauseLoadSucceeded", "Loaded game.")
+		: NSLOCTEXT("HSPlayerCharacter", "PauseLoadFailed", "Load failed."));
 	if (bLoaded)
 	{
 		BindAutosaveSources();
@@ -542,6 +569,11 @@ bool AHSPlayerCharacter::AutosaveSettlementState(const FString& Reason)
 	const bool bSaved = SettlementPersistenceComponent->SaveToSlot(SettlementPersistenceComponent->GetAutosaveSlotName());
 	UE_LOG(LogHSSettlement, Log, TEXT("%s autosave after %s: %s."), *GetNameSafe(this), *Reason, bSaved ? TEXT("saved") : TEXT("failed"));
 	return bSaved;
+}
+
+bool AHSPlayerCharacter::HasActiveMenuFeedback() const
+{
+	return !LastMenuFeedback.IsEmpty() && FPlatformTime::Seconds() < MenuFeedbackExpireTime;
 }
 
 FString AHSPlayerCharacter::GetGraphicsQualityPresetName() const
@@ -573,11 +605,99 @@ void AHSPlayerCharacter::StartBasicHouseFromBuildMenu()
 {
 	if (!BuildPlacementComponent)
 	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "NoBuildPlacementComponent", "Build placement is unavailable."));
+		return;
+	}
+
+	FText BlockReason;
+	if (!CanStartBasicHouseFromBuildMenu(&BlockReason))
+	{
+		SetMenuFeedback(BlockReason);
 		return;
 	}
 
 	SetBuildMenuOpen(false);
-	BuildPlacementComponent->StartBasicHousePlacement();
+	if (!BuildPlacementComponent->StartBasicHousePlacement())
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "BuildPlacementStartFailed", "Could not start house placement."));
+	}
+}
+
+bool AHSPlayerCharacter::CanStartBasicHouseFromBuildMenu(FText* OutReason) const
+{
+	if (!SettlementPlanComponent || !SettlementPlanComponent->HasSettlementClaim())
+	{
+		if (OutReason)
+		{
+			*OutReason = NSLOCTEXT("HSPlayerCharacter", "BuildMenuNeedsClaim", "Claim a settlement site before placing a house.");
+		}
+		return false;
+	}
+
+	if (ConstructionComponent && ConstructionComponent->HasCompletedBuilding(TAG_HS_Building_BasicHouse))
+	{
+		if (OutReason)
+		{
+			*OutReason = NSLOCTEXT("HSPlayerCharacter", "BuildMenuHouseComplete", "Basic House is already complete.");
+		}
+		return false;
+	}
+
+	if (ConstructionComponent && ConstructionComponent->HasActiveJob())
+	{
+		if (OutReason)
+		{
+			*OutReason = NSLOCTEXT("HSPlayerCharacter", "BuildMenuConstructionActive", "Builder is already working on a construction job.");
+		}
+		return false;
+	}
+
+	if (SettlementPlanComponent->HasPendingSchema(TAG_HS_Building_BasicHouse))
+	{
+		if (OutReason)
+		{
+			*OutReason = NSLOCTEXT("HSPlayerCharacter", "BuildMenuHousePending", "Basic House schema is already placed. Ask the Builder to start it.");
+		}
+		return false;
+	}
+
+	if (OutReason)
+	{
+		*OutReason = NSLOCTEXT("HSPlayerCharacter", "BuildMenuHouseReady", "Ready: place a Basic House schema for the Builder.");
+	}
+	return true;
+}
+
+bool AHSPlayerCharacter::InspectInventoryStack(int32 StackIndex)
+{
+	FHSItemStack Stack;
+	if (!ResourceCarryComponent || !ResourceCarryComponent->GetStackAtIndex(StackIndex, Stack))
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "InventoryInspectEmpty", "No carried item in that slot."));
+		return false;
+	}
+
+	SetMenuFeedback(FText::Format(
+		NSLOCTEXT("HSPlayerCharacter", "InventoryInspectStack", "{0} x{1}. Carried stack for quests and services."),
+		FText::FromString(Stack.ItemTag.ToString()),
+		FText::AsNumber(Stack.Quantity)));
+	return true;
+}
+
+bool AHSPlayerCharacter::DropInventoryStackQuantity(int32 StackIndex, int32 Quantity)
+{
+	FHSItemStack ConsumedStack;
+	if (!ResourceCarryComponent || !ResourceCarryComponent->TryConsumeStackAtIndex(StackIndex, Quantity, ConsumedStack))
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "InventoryDropEmpty", "No carried item to drop."));
+		return false;
+	}
+
+	SetMenuFeedback(FText::Format(
+		NSLOCTEXT("HSPlayerCharacter", "InventoryDroppedStack", "Dropped {0} x{1}."),
+		FText::FromString(ConsumedStack.ItemTag.ToString()),
+		FText::AsNumber(ConsumedStack.Quantity)));
+	return true;
 }
 
 void AHSPlayerCharacter::CycleGraphicsQualityPreset()
@@ -594,6 +714,9 @@ void AHSPlayerCharacter::CycleGraphicsQualityPreset()
 	UKismetSystemLibrary::ExecuteConsoleCommand(this, FString::Printf(TEXT("sg.TextureQuality %s"), *PresetValue));
 	UKismetSystemLibrary::ExecuteConsoleCommand(this, FString::Printf(TEXT("sg.EffectsQuality %s"), *PresetValue));
 	UKismetSystemLibrary::ExecuteConsoleCommand(this, FString::Printf(TEXT("sg.FoliageQuality %s"), *PresetValue));
+	SetMenuFeedback(FText::Format(
+		NSLOCTEXT("HSPlayerCharacter", "GraphicsPresetChanged", "Graphics preset: {0}."),
+		FText::FromString(GetGraphicsQualityPresetName())));
 }
 
 void AHSPlayerCharacter::SetPlayerStance(EHSPlayerStance NewStance)
@@ -703,6 +826,12 @@ void AHSPlayerCharacter::ExitGameFromPauseMenu() const
 {
 	APlayerController* PlayerController = Cast<APlayerController>(Controller);
 	UKismetSystemLibrary::QuitGame(this, PlayerController, EQuitPreference::Quit, false);
+}
+
+void AHSPlayerCharacter::SetMenuFeedback(FText Feedback)
+{
+	LastMenuFeedback = Feedback;
+	MenuFeedbackExpireTime = FPlatformTime::Seconds() + MenuFeedbackDuration;
 }
 
 void AHSPlayerCharacter::BindAutosaveSources()

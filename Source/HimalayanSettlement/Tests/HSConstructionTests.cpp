@@ -63,8 +63,12 @@ bool FHSCompletedBuildingVisualDefaultsTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Completed building actor should not tick."), CompletedBuilding ? CompletedBuilding->PrimaryActorTick.bCanEverTick : true);
 	TestNotNull(TEXT("Completed building should own a wall mesh."), CompletedBuilding ? CompletedBuilding->GetWallMesh() : nullptr);
 	TestNotNull(TEXT("Completed building should own a roof mesh."), CompletedBuilding ? CompletedBuilding->GetRoofMesh() : nullptr);
+	TestNotNull(TEXT("Completed building should own a door mesh."), CompletedBuilding ? CompletedBuilding->GetDoorMesh() : nullptr);
+	TestNotNull(TEXT("Completed building should own a chimney mesh."), CompletedBuilding ? CompletedBuilding->GetChimneyMesh() : nullptr);
 	TestEqual(TEXT("Wall mesh should not use collision yet."), CompletedBuilding && CompletedBuilding->GetWallMesh() ? CompletedBuilding->GetWallMesh()->GetCollisionEnabled() : ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::NoCollision);
 	TestEqual(TEXT("Roof mesh should not use collision yet."), CompletedBuilding && CompletedBuilding->GetRoofMesh() ? CompletedBuilding->GetRoofMesh()->GetCollisionEnabled() : ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::NoCollision);
+	TestEqual(TEXT("Door mesh should not use collision yet."), CompletedBuilding && CompletedBuilding->GetDoorMesh() ? CompletedBuilding->GetDoorMesh()->GetCollisionEnabled() : ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::NoCollision);
+	TestEqual(TEXT("Chimney mesh should not use collision yet."), CompletedBuilding && CompletedBuilding->GetChimneyMesh() ? CompletedBuilding->GetChimneyMesh()->GetCollisionEnabled() : ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::NoCollision);
 
 	CompletedBuilding->ConfigureCompletedBuilding(TAG_HS_Building_BasicHouse);
 	TestTrue(TEXT("Completed building should store configured tag."), CompletedBuilding->GetBuildingTag() == TAG_HS_Building_BasicHouse);

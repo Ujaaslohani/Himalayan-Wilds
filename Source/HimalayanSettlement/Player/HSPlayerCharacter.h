@@ -91,6 +91,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Player|Menu")
 	FString GetGraphicsQualityPresetName() const;
 
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	const FText& GetLastMenuFeedback() const { return LastMenuFeedback; }
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	bool HasActiveMenuFeedback() const;
+
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
 	void OpenPauseMenu();
 
@@ -114,6 +120,14 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
 	void StartBasicHouseFromBuildMenu();
+
+	bool CanStartBasicHouseFromBuildMenu(FText* OutReason = nullptr) const;
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	bool InspectInventoryStack(int32 StackIndex);
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	bool DropInventoryStackQuantity(int32 StackIndex, int32 Quantity);
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
 	void CycleGraphicsQualityPreset();
@@ -151,6 +165,7 @@ private:
 	void CloseNonPauseMenus();
 	void ExitGameFromPauseMenu() const;
 	void BindAutosaveSources();
+	void SetMenuFeedback(FText Feedback);
 
 	UFUNCTION()
 	void HandleAutosaveMilestoneCompleted(FGameplayTag MilestoneTag);
@@ -307,6 +322,14 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
 	int32 GraphicsQualityPreset;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Player|Menu", meta = (ClampMin = "0.1", Units = "s"))
+	float MenuFeedbackDuration;
+
+	UPROPERTY(Transient)
+	FText LastMenuFeedback;
+
+	double MenuFeedbackExpireTime;
 
 	UPROPERTY(Transient)
 	bool bAutosaveSuppressed;

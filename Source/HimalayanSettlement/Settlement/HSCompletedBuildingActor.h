@@ -28,6 +28,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Visual")
 	UStaticMeshComponent* GetRoofMesh() const { return RoofMesh; }
 
+	UFUNCTION(BlueprintPure, Category = "Visual")
+	UStaticMeshComponent* GetDoorMesh() const { return DoorMesh; }
+
+	UFUNCTION(BlueprintPure, Category = "Visual")
+	UStaticMeshComponent* GetChimneyMesh() const { return ChimneyMesh; }
+
 private:
 	UPROPERTY(VisibleAnywhere, Category = "Visual")
 	TObjectPtr<USceneComponent> SceneRoot;
@@ -37,6 +43,12 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Visual")
 	TObjectPtr<UStaticMeshComponent> RoofMesh;
+
+	UPROPERTY(VisibleAnywhere, Category = "Visual")
+	TObjectPtr<UStaticMeshComponent> DoorMesh;
+
+	UPROPERTY(VisibleAnywhere, Category = "Visual")
+	TObjectPtr<UStaticMeshComponent> ChimneyMesh;
 
 	UPROPERTY(VisibleAnywhere, Category = "Building")
 	FGameplayTag BuildingTag;

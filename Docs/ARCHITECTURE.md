@@ -67,19 +67,19 @@ The first quest handoff is intentionally small: `UHSQuestHandoffComponent` refer
 
 ## HUD
 
-`AHSHUD` is the first native HUD layer. It draws a minimal interaction prompt from the player interaction sensor cache, short feedback messages for progress, settlement planning, construction, hunter intel, plant effects, and world-time advancement, plus a compact vertical-slice status/objective readout. Objective guidance is derived from existing native state such as quest completion, carried deer resources, settlement claim, pending schemas, construction jobs, and completed house state. It is intentionally not a broader inventory, dialogue, quest log, or survival HUD.
+`AHSHUD` is the first native HUD layer. It draws a minimal interaction prompt from the player interaction sensor cache, short feedback messages for progress, settlement planning, construction, hunter intel, plant effects, world-time advancement, save/load/options actions, and first inventory/build actions, plus a compact vertical-slice status/objective readout. Objective guidance is derived from existing native state such as quest completion, carried deer resources, settlement claim, pending schemas, construction jobs, and completed house state. It is intentionally not a broader dialogue, quest log, or survival HUD.
 
 Pause menu presentation is currently native Canvas HUD. `Esc` cancels active build placement first; otherwise it pauses/unpauses the game and shows keyboard commands for Resume, Save, Load, Options, and Exit. This is the first functional menu layer and may later be replaced by richer UMG/Slate widgets without moving gameplay rules out of C++.
 
-Inventory and build menu presentation also live in the native Canvas HUD for now. `I`/`Tab` shows carried item stacks from `UHSResourceCarryComponent`; `B` opens a schema menu and `[1]` starts the Basic House free-placement preview. The pause options panel can cycle a simple graphics scalability preset. These are first-pass control surfaces, not final visual UI.
+Inventory and build menu presentation also live in the native Canvas HUD for now. `I`/`Tab` shows carried item stacks from `UHSResourceCarryComponent`; `[1]` inspects the first visible stack, `[2]` drops one item from it, and `[3]` drops that stack for prototype cleanup. `B` opens a schema menu and `[1]` starts the Basic House free-placement preview only when native settlement/construction state allows it. The pause options panel can cycle a simple graphics scalability preset. These are first-pass control surfaces, not final visual UI.
 
 ## Prototype Visual Markers
 
-Native placeholder actors own simple non-colliding static mesh components using engine basic shapes. These markers make the current test map readable while real art, animation, and Blueprint visual setup remain out of scope for this milestone slice.
+Native placeholder actors own simple non-colliding static mesh components using engine basic shapes. These markers make the current test map readable while real art, animation, and Blueprint visual setup remain out of scope for this milestone slice. Marker readability should come from cheap silhouette differences first, not expensive material or lighting work.
 
 ## Exploration Markers
 
-`AHSExplorationMarkerActor` is a no-tick native landmark marker used for the first village/forest readability pass. Markers are gameplay-tagged as village, forest, trail, or animal area so tests and later navigation/HUD systems can query them without depending on actor labels.
+`AHSExplorationMarkerActor` is a no-tick native landmark marker used for the first village/forest readability pass. Markers are gameplay-tagged as village, forest, trail, or animal area so tests and later navigation/HUD systems can query them without depending on actor labels. Trail, village, forest, and animal-area markers use different basic-mesh silhouettes so route readability improves without adding asset cost.
 
 ## Animal Runtime
 
@@ -91,7 +91,7 @@ Native placeholder actors own simple non-colliding static mesh components using 
 
 ## Resource Carry State
 
-`UHSResourceCarryComponent` is the first lightweight resource state on the player. It stores harvested `FHSItemStack` values merged by gameplay tag so quest return logic and the first inventory screen can query carried resources. It is not yet a full container, weight, equipment, crafting, or item-use system.
+`UHSResourceCarryComponent` is the first lightweight resource state on the player. It stores harvested `FHSItemStack` values merged by gameplay tag so quest return logic and the first inventory screen can query carried resources. It supports index-based inspect/drop actions for visible inventory rows, but it is not yet a full container, weight, equipment, crafting, world-drop, or item-use system.
 
 ## Player Progress
 
@@ -109,7 +109,7 @@ NPC services are coordinated by `UHSNPCServiceComponent`, a no-tick native compo
 
 `UHSBuildPlacementComponent` owns the player-facing free-build schema placement flow. It starts disabled, ticks only while a placement preview is active, drives a lightweight no-tick preview actor, validates against `UHSSettlementPlanComponent`, and records a pending schema when confirmed. The first build menu selects Basic House before entering placement. Builder construction still consumes the pending schema and takes the configured time to complete it.
 
-`AHSCompletedBuildingActor` is the first no-tick completed-building visual. `UHSConstructionComponent` spawns it when a construction job completes and rebuilds it from completed construction jobs during save restore. It is a prototype visual marker, not final house art or collision.
+`AHSCompletedBuildingActor` is the first no-tick completed-building visual. `UHSConstructionComponent` spawns it when a construction job completes and rebuilds it from completed construction jobs during save restore. The prototype house uses basic wall, roof, door, and chimney meshes for readability, but it is not final house art or collision.
 
 ## Herbalism
 

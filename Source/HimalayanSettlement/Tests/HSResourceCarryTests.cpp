@@ -99,6 +99,37 @@ bool FHSResourceCarryConsumesStacksAtomicallyTest::RunTest(const FString& Parame
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSResourceCarryConsumesVisibleStackByIndexTest,
+	"HimalayanSettlement.Resources.CarryConsumesVisibleStackByIndex",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSResourceCarryConsumesVisibleStackByIndexTest::RunTest(const FString& Parameters)
+{
+	UHSResourceCarryComponent* Carry = NewObject<UHSResourceCarryComponent>();
+	Carry->AddStack(FHSItemStack{ TAG_HS_Resource_Meat_Deer, 3 });
+	Carry->AddStack(FHSItemStack{ TAG_HS_Resource_Hide_Deer, 1 });
+
+	FHSItemStack VisibleStack;
+	TestTrue(TEXT("Visible inventory row should be queryable."), Carry->GetStackAtIndex(0, VisibleStack));
+	TestTrue(TEXT("First visible row should be deer meat."), VisibleStack.ItemTag == TAG_HS_Resource_Meat_Deer);
+	TestEqual(TEXT("First visible row should expose quantity."), VisibleStack.Quantity, 3);
+
+	FHSItemStack ConsumedStack;
+	TestTrue(TEXT("Consuming one item from the first visible row should succeed."), Carry->TryConsumeStackAtIndex(0, 1, ConsumedStack));
+	TestTrue(TEXT("Consumed row should report its tag."), ConsumedStack.ItemTag == TAG_HS_Resource_Meat_Deer);
+	TestEqual(TEXT("Consumed row should report consumed quantity."), ConsumedStack.Quantity, 1);
+	TestEqual(TEXT("Remaining meat should stay in the row."), Carry->GetQuantityForTag(TAG_HS_Resource_Meat_Deer), 2);
+
+	TestTrue(TEXT("Oversized consume should drop only the available stack quantity."), Carry->TryConsumeStackAtIndex(0, 999, ConsumedStack));
+	TestEqual(TEXT("Oversized consume should report available quantity."), ConsumedStack.Quantity, 2);
+	TestEqual(TEXT("Meat should be fully removed after oversized consume."), Carry->GetQuantityForTag(TAG_HS_Resource_Meat_Deer), 0);
+	TestTrue(TEXT("Hide should now become the first visible row."), Carry->GetStackAtIndex(0, VisibleStack) && VisibleStack.ItemTag == TAG_HS_Resource_Hide_Deer);
+	TestFalse(TEXT("Invalid visible row should be blocked."), Carry->TryConsumeStackAtIndex(4, 1, ConsumedStack));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHSAnimalHarvestTransfersToPlayerCarryTest,
 	"HimalayanSettlement.Resources.HarvestTransfersDropsToPlayerCarry",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

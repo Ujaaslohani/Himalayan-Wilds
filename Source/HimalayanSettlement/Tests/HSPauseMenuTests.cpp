@@ -1,7 +1,11 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Core/HSGameplayTags.h"
 #include "Player/HSPlayerCharacter.h"
+#include "Resources/HSResourceCarryComponent.h"
+#include "Settlement/HSConstructionComponent.h"
+#include "Settlement/HSSettlementPlanComponent.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHSPauseMenuStateTest,
@@ -53,6 +57,85 @@ bool FHSPauseMenuStateTest::RunTest(const FString& Parameters)
 	Player->CycleGraphicsQualityPreset();
 	TestNotEqual(TEXT("Cycling graphics should change preset index."), Player->GetGraphicsQualityPreset(), InitialPreset);
 	TestNotEqual(TEXT("Cycling graphics should change preset label."), Player->GetGraphicsQualityPresetName(), InitialPresetName);
+	TestTrue(TEXT("Cycling graphics should produce visible menu feedback."), Player->HasActiveMenuFeedback());
+	TestTrue(TEXT("Graphics feedback should name the preset."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Graphics preset")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSInventoryMenuActionsTest,
+	"HimalayanSettlement.UI.InventoryMenuActionsInspectAndDrop",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSInventoryMenuActionsTest::RunTest(const FString& Parameters)
+{
+	AHSPlayerCharacter* Player = NewObject<AHSPlayerCharacter>();
+
+	TestNotNull(TEXT("Player should be constructible."), Player);
+	TestNotNull(TEXT("Player should own resource carry."), Player ? Player->GetResourceCarryComponent() : nullptr);
+	if (!Player || !Player->GetResourceCarryComponent())
+	{
+		return false;
+	}
+
+	Player->GetResourceCarryComponent()->AddStack(FHSItemStack{ TAG_HS_Resource_Meat_Deer, 2 });
+
+	TestTrue(TEXT("Inspecting the first carried stack should succeed."), Player->InspectInventoryStack(0));
+	TestTrue(TEXT("Inspect action should expose menu feedback."), Player->HasActiveMenuFeedback());
+	TestTrue(TEXT("Inspect feedback should mention the item tag."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Resource.Meat.Deer")));
+
+	TestTrue(TEXT("Dropping one item from the first stack should succeed."), Player->DropInventoryStackQuantity(0, 1));
+	TestEqual(TEXT("One meat should remain after dropping one."), Player->GetResourceCarryComponent()->GetQuantityForTag(TAG_HS_Resource_Meat_Deer), 1);
+	TestTrue(TEXT("Drop feedback should mention the dropped item."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Dropped Resource.Meat.Deer")));
+
+	TestTrue(TEXT("Dropping the remaining stack should succeed."), Player->DropInventoryStackQuantity(0, 999));
+	TestEqual(TEXT("No meat should remain after dropping the stack."), Player->GetResourceCarryComponent()->GetQuantityForTag(TAG_HS_Resource_Meat_Deer), 0);
+	TestFalse(TEXT("Inspecting an empty row should fail."), Player->InspectInventoryStack(0));
+	TestTrue(TEXT("Empty inspect should explain the missing slot."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("No carried item")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSBuildMenuAvailabilityFeedbackTest,
+	"HimalayanSettlement.UI.BuildMenuAvailabilityExplainsBlockedHouse",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSBuildMenuAvailabilityFeedbackTest::RunTest(const FString& Parameters)
+{
+	AHSPlayerCharacter* Player = NewObject<AHSPlayerCharacter>();
+	FText Reason;
+
+	TestNotNull(TEXT("Player should be constructible."), Player);
+	TestNotNull(TEXT("Player should own settlement plan."), Player ? Player->GetSettlementPlanComponent() : nullptr);
+	if (!Player || !Player->GetSettlementPlanComponent())
+	{
+		return false;
+	}
+
+	TestFalse(TEXT("Basic house should be blocked before claim."), Player->CanStartBasicHouseFromBuildMenu(&Reason));
+	TestTrue(TEXT("Blocked build reason should mention settlement claim."), Reason.ToString().Contains(TEXT("Claim")));
+
+	Player->GetSettlementPlanComponent()->RestoreSettlementPlan(true, FVector::ZeroVector, {});
+	TestTrue(TEXT("Basic house should be available after claim."), Player->CanStartBasicHouseFromBuildMenu(&Reason));
+	TestTrue(TEXT("Available build reason should mention readiness."), Reason.ToString().Contains(TEXT("Ready")));
+
+	FHSPendingBuildingSchema PendingSchema;
+	PendingSchema.BuildingTag = TAG_HS_Building_BasicHouse;
+	Player->GetSettlementPlanComponent()->RestoreSettlementPlan(true, FVector::ZeroVector, { PendingSchema });
+	TestFalse(TEXT("Basic house should be blocked when schema is already pending."), Player->CanStartBasicHouseFromBuildMenu(&Reason));
+	TestTrue(TEXT("Pending build reason should mention Builder."), Reason.ToString().Contains(TEXT("Builder")));
+
+	FHSConstructionJob CompletedJob;
+	CompletedJob.BuildingTag = TAG_HS_Building_BasicHouse;
+	CompletedJob.State = EHSConstructionJobState::Complete;
+	FGameplayTagContainer CompletedBuildings;
+	CompletedBuildings.AddTag(TAG_HS_Building_BasicHouse);
+	Player->GetConstructionComponent()->RestoreConstructionState({ CompletedJob }, CompletedBuildings);
+	Player->GetSettlementPlanComponent()->RestoreSettlementPlan(true, FVector::ZeroVector, {});
+	TestFalse(TEXT("Basic house should be blocked once complete."), Player->CanStartBasicHouseFromBuildMenu(&Reason));
+	TestTrue(TEXT("Completed build reason should mention completion."), Reason.ToString().Contains(TEXT("complete")));
 
 	return true;
 }

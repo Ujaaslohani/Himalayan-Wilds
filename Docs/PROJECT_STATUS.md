@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 11: Vertical Slice Closeout: implementation started with basic native HUD status/objective overlay, sleep/time feedback, pause menu, manual save/load, autosave foundation, inventory screen, build schema menu, and first options control; hands-on closeout pending.
+Milestone 11: Vertical Slice Closeout: implementation started with basic native HUD status/objective overlay, sleep/time feedback, pause menu, manual save/load, autosave foundation, first inventory actions, build schema menu feedback, first options control, and clearer prototype visuals; hands-on closeout pending.
 
 ## Engine Version
 
@@ -94,11 +94,17 @@ Unreal Engine 5.5.4.
 - Native HUD objective guidance added for the early loop: hunter hunt/turn-in, settlement claim, house placement, builder start, construction sleep, and post-house exploration.
 - Native HUD time-advance feedback added so sleep/day changes clearly report the new phase and refreshed services.
 - Native pause menu foundation added: `Esc` cancels build placement first, otherwise pauses/resumes and shows Resume, Save, Load, Options, and Exit commands.
+- Pause, save/load, inventory, build, and graphics option actions now surface short native menu feedback messages.
 - Manual pause-menu save/load uses the default save slot; event-driven autosave uses a separate autosave slot.
 - Autosave now runs on milestone completion, time advance/sleep, construction start, and construction completion, with suppression during manual load restore.
 - Native inventory screen added on `I` / `Tab`, showing carried item stacks from the resource carry component.
+- First native inventory actions added: inspect first visible stack, drop one item, and drop the first visible stack for prototype cleanup.
 - Native build menu added on `B`; Basic House is selected with `[1]` before entering free placement.
+- Build menu now explains blocked Basic House placement states such as missing settlement claim, pending schema, active construction, or completed house.
 - Pause options can cycle a simple graphics scalability preset with `[6]`.
+- Exploration markers now use distinct cheap silhouettes for trail, village, forest, and animal-area landmarks.
+- Completed house prototype visual now includes no-tick wall, roof, door, and chimney meshes.
+- VS Code low-end benchmark smoke task added; real-renderer command path confirmed, but numeric FPS still requires manual overlay recording.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
@@ -107,7 +113,7 @@ Unreal Engine 5.5.4.
 - Hands-on movement playtest passed for jump, crouch, and prone.
 - Milestone 3 settlement claim and house schema foundation compiles.
 - Content bootstrap succeeds with zero warnings and regenerates the basic house schema marker.
-- All 76 `HimalayanSettlement` automation tests pass.
+- All 79 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
@@ -127,7 +133,7 @@ Unreal Engine 5.5.4.
 - Gameplay Tags are intentionally minimal and should be expanded only when milestone features require them.
 - Data assets are prototype-authored and should stay narrow until each milestone system needs more fields.
 - Input config is intentionally minimal because gameplay input mappings are created in native C++.
-- Low-end renderer/scalability baseline is configured and confirmed working; numeric FPS readings should still be captured before forest density increases.
+- Low-end renderer/scalability baseline and benchmark smoke launch are configured; numeric FPS/Game/Draw/GPU readings should still be captured from the live overlay before forest density increases.
 
 ## Next Tasks
 
@@ -138,8 +144,8 @@ Unreal Engine 5.5.4.
 5. Run hands-on service-framework sanity pass: confirm Builder/Hunter/Herbalist/Soldier prompts still appear only when their service is available.
 6. Run hands-on exploration pass: walk settlement to village core, follow trail markers to forest edge, find animal ridge, and confirm the route is readable without explanation.
 7. Run hands-on closeout for Milestones 3-5 if not already confirmed in-editor.
-8. Record numeric FPS using the low-end profile task before forest density increases.
-9. Run hands-on HUD pass: confirm status/objective lines appear clearly without blocking the center interaction prompt.
-10. Run hands-on pause/save pass: press `Esc`, test Resume/Save/Load/Options, confirm build placement `Esc` still cancels placement before pausing, and confirm autosave files are produced after sleep/construction/progress events.
-11. Run hands-on inventory/build/options pass: confirm `I`/`Tab` opens inventory, `B` opens build menu, `[1]` enters Basic House placement, and `[6]` cycles graphics preset when pause options are open.
+8. Record numeric FPS/Game/Draw/GPU readings from the live low-end `stat fps` and `stat unit` overlays before forest density increases.
+9. Run hands-on HUD pass: confirm status/objective lines and menu feedback appear clearly without blocking the center interaction prompt.
+10. Run hands-on pause/save pass: press `Esc`, test Resume/Save/Load/Options feedback, confirm build placement `Esc` still cancels placement before pausing, and confirm autosave files are produced after sleep/construction/progress events.
+11. Run hands-on inventory/build/options pass: confirm `I`/`Tab` opens inventory, `[1]` inspects, `[2]` drops one item, `[3]` drops the stack, `B` opens build menu, `[1]` enters Basic House placement only when available, and `[6]` cycles graphics preset when pause options are open.
 12. Add mouse-driven UMG/Slate polish later if the native Canvas controls test well.

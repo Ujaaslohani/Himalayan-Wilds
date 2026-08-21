@@ -28,8 +28,22 @@ public:
 	void ConfigureMarker(FText NewDisplayName, FGameplayTag NewMarkerTag);
 
 private:
+	void ApplyMarkerVisuals();
+
 	UPROPERTY(VisibleAnywhere, Category = "Visual")
 	TObjectPtr<UStaticMeshComponent> PrototypeMesh;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> ConeMesh;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> CubeMesh;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> CylinderMesh;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> SphereMesh;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Exploration", meta = (AllowPrivateAccess = "true"))
 	FText DisplayName;
