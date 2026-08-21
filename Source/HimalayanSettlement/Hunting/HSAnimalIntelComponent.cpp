@@ -52,6 +52,19 @@ bool UHSAnimalIntelComponent::RequestDailyAnimalLead()
 	return true;
 }
 
+bool UHSAnimalIntelComponent::RefreshActiveAnimalLead()
+{
+	if (!ActiveLead.IsValid())
+	{
+		return RequestDailyAnimalLead();
+	}
+
+	SpawnOrUpdateLeadMarker();
+	OnAnimalLeadReported.Broadcast(ActiveLead);
+	UE_LOG(LogHSAI, Log, TEXT("%s refreshed animal lead %s at %s."), *GetNameSafe(GetOwner()), *ActiveLead.AnimalTag.ToString(), *ActiveLead.Location.ToCompactString());
+	return true;
+}
+
 void UHSAnimalIntelComponent::ExpireActiveLead()
 {
 	if (!ActiveLead.IsValid())

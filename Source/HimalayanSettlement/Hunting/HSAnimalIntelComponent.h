@@ -54,6 +54,9 @@ public:
 	bool RequestDailyAnimalLead();
 
 	UFUNCTION(BlueprintCallable, Category = "Animal Intel")
+	bool RefreshActiveAnimalLead();
+
+	UFUNCTION(BlueprintCallable, Category = "Animal Intel")
 	void ExpireActiveLead();
 
 	UFUNCTION(BlueprintCallable, Category = "Animal Intel")

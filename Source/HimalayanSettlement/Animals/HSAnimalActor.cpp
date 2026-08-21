@@ -74,6 +74,11 @@ float AHSAnimalActor::ApplyHuntingDamage(float DamageAmount, AActor* DamageInsti
 	if (CurrentHealth <= 0.0f)
 	{
 		RuntimeState = EHSAnimalRuntimeState::Dead;
+		if (PrototypeMesh)
+		{
+			PrototypeMesh->SetRelativeRotation(FRotator(0.0f, 0.0f, 90.0f));
+			PrototypeMesh->SetRelativeLocation(FVector(0.0f, 0.0f, -45.0f));
+		}
 		UE_LOG(LogHSAI, Log, TEXT("%s killed %s."), *GetNameSafe(DamageInstigator), *GetNameSafe(this));
 	}
 	else
@@ -152,6 +157,11 @@ void AHSAnimalActor::ResetRuntimeStateFromDefinition()
 	RuntimeState = EHSAnimalRuntimeState::Idle;
 	bHarvested = false;
 	HarvestedDrops.Reset();
+	if (PrototypeMesh)
+	{
+		PrototypeMesh->SetRelativeRotation(FRotator::ZeroRotator);
+		PrototypeMesh->SetRelativeLocation(FVector(0.0f, 0.0f, -10.0f));
+	}
 }
 
 float AHSAnimalActor::GetMaxHealth() const

@@ -184,6 +184,11 @@ void UHSConstructionComponent::HandleTimeAdvanced(EHSTimePhase NewTimePhase, flo
 
 float UHSConstructionComponent::ResolveRequiredDays(FGameplayTag BuildingTag) const
 {
+	if (BuildingTag == TAG_HS_Building_BasicHouseMinorUpgrade)
+	{
+		return 0.25f;
+	}
+
 	return BuildingTag == TAG_HS_Building_BasicHouse ? HouseConstructionDays : HouseConstructionDays;
 }
 

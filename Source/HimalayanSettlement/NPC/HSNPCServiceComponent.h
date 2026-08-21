@@ -78,9 +78,13 @@ private:
 	void AddSoldierService(const AHSNPCActor& NPC, const AActor* Interactor, TArray<FHSNPCServiceOption>& OutServiceOptions) const;
 
 	bool ExecuteBuilderService(AActor* Interactor) const;
+	bool ExecuteBuilderMinorUpgradeService(AActor* Interactor) const;
 	bool ExecuteHunterService(AActor* Interactor) const;
+	bool ExecuteHunterRefreshLeadService(AActor* Interactor) const;
 	bool ExecuteHerbalistService(AActor* Interactor) const;
+	bool ExecuteHerbalistRestoreHealthService(AActor* Interactor) const;
 	bool ExecuteSoldierService(AActor* Interactor) const;
+	bool ExecuteSoldierArrowsService(AActor* Interactor) const;
 
 	class UHSWorldTimeComponent* ResolveWorldTime() const;
 

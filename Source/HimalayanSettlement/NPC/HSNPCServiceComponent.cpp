@@ -6,8 +6,10 @@
 #include "Herbalism/HSPlantEffectComponent.h"
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "NPC/HSNPCActor.h"
+#include "Building/HSBuildingDefinition.h"
 #include "Resources/HSItemStack.h"
 #include "Resources/HSResourceCarryComponent.h"
+#include "Player/HSPlayerHealthComponent.h"
 #include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
 #include "World/HSGameState.h"
@@ -198,9 +200,19 @@ bool UHSNPCServiceComponent::TryExecuteService(FGameplayTag ServiceTag, AActor* 
 		return ExecuteBuilderService(Interactor);
 	}
 
+	if (ServiceTag == TAG_HS_NPC_Service_Builder_PlanMinorUpgrade)
+	{
+		return ExecuteBuilderMinorUpgradeService(Interactor);
+	}
+
 	if (ServiceTag == TAG_HS_NPC_Service_Hunter_ReportAnimalLead)
 	{
 		return ExecuteHunterService(Interactor);
+	}
+
+	if (ServiceTag == TAG_HS_NPC_Service_Hunter_RefreshAnimalLead)
+	{
+		return ExecuteHunterRefreshLeadService(Interactor);
 	}
 
 	if (ServiceTag == TAG_HS_NPC_Service_Herbalist_TeachSpeedHerb)
@@ -208,9 +220,19 @@ bool UHSNPCServiceComponent::TryExecuteService(FGameplayTag ServiceTag, AActor* 
 		return ExecuteHerbalistService(Interactor);
 	}
 
+	if (ServiceTag == TAG_HS_NPC_Service_Herbalist_RestoreHealth)
+	{
+		return ExecuteHerbalistRestoreHealthService(Interactor);
+	}
+
 	if (ServiceTag == TAG_HS_NPC_Service_Soldier_ProvideBasicWeapons)
 	{
 		return ExecuteSoldierService(Interactor);
+	}
+
+	if (ServiceTag == TAG_HS_NPC_Service_Soldier_ProvideArrows)
+	{
+		return ExecuteSoldierArrowsService(Interactor);
 	}
 
 	return false;
@@ -255,6 +277,19 @@ void UHSNPCServiceComponent::AddBuilderService(const AHSNPCActor& NPC, const AAc
 	ServiceOption.bAvailable = ConstructionComponent && SettlementPlanComponent && SettlementPlanComponent->HasAnyPendingSchema() && !ConstructionComponent->HasActiveJob();
 	ServiceOption.Priority = 100;
 	OutServiceOptions.Add(ServiceOption);
+
+	FHSNPCServiceOption UpgradeOption;
+	UpgradeOption.ServiceTag = TAG_HS_NPC_Service_Builder_PlanMinorUpgrade;
+	UpgradeOption.ProfessionTag = TAG_HS_NPC_Profession_Builder;
+	UpgradeOption.Prompt = LOCTEXT("PlanMinorUpgradePrompt", "Plan minor house upgrade");
+	UpgradeOption.bAvailable = ConstructionComponent
+		&& SettlementPlanComponent
+		&& ConstructionComponent->HasCompletedBuilding(TAG_HS_Building_BasicHouse)
+		&& !ConstructionComponent->HasCompletedBuilding(TAG_HS_Building_BasicHouseMinorUpgrade)
+		&& !ConstructionComponent->HasActiveJob()
+		&& !SettlementPlanComponent->HasPendingSchema(TAG_HS_Building_BasicHouseMinorUpgrade);
+	UpgradeOption.Priority = 80;
+	OutServiceOptions.Add(UpgradeOption);
 }
 
 void UHSNPCServiceComponent::AddHunterService(const AHSNPCActor& NPC, const AActor* Interactor, TArray<FHSNPCServiceOption>& OutServiceOptions) const
@@ -273,6 +308,14 @@ void UHSNPCServiceComponent::AddHunterService(const AHSNPCActor& NPC, const AAct
 	ServiceOption.bAvailable = AnimalIntelComponent && AnimalIntelComponent->CanRequestDailyAnimalLead();
 	ServiceOption.Priority = 40;
 	OutServiceOptions.Add(ServiceOption);
+
+	FHSNPCServiceOption RefreshOption;
+	RefreshOption.ServiceTag = TAG_HS_NPC_Service_Hunter_RefreshAnimalLead;
+	RefreshOption.ProfessionTag = TAG_HS_NPC_Profession_Hunter;
+	RefreshOption.Prompt = LOCTEXT("RefreshHunterAnimalSignsPrompt", "Refresh animal marker");
+	RefreshOption.bAvailable = AnimalIntelComponent && AnimalIntelComponent->HasActiveLead();
+	RefreshOption.Priority = 35;
+	OutServiceOptions.Add(RefreshOption);
 }
 
 void UHSNPCServiceComponent::AddHerbalistService(const AHSNPCActor& NPC, const AActor* Interactor, TArray<FHSNPCServiceOption>& OutServiceOptions) const
@@ -291,6 +334,15 @@ void UHSNPCServiceComponent::AddHerbalistService(const AHSNPCActor& NPC, const A
 	ServiceOption.bAvailable = PlantEffectComponent && !PlantEffectComponent->HasPlantKnowledge(TAG_HS_Plant_SpeedHerb);
 	ServiceOption.Priority = 30;
 	OutServiceOptions.Add(ServiceOption);
+
+	const UHSPlayerHealthComponent* HealthComponent = Interactor ? Interactor->FindComponentByClass<UHSPlayerHealthComponent>() : nullptr;
+	FHSNPCServiceOption HealOption;
+	HealOption.ServiceTag = TAG_HS_NPC_Service_Herbalist_RestoreHealth;
+	HealOption.ProfessionTag = TAG_HS_NPC_Profession_Herbalist;
+	HealOption.Prompt = LOCTEXT("RestoreHealthPrompt", "Restore health");
+	HealOption.bAvailable = HealthComponent && !HealthComponent->IsDead() && HealthComponent->GetCurrentHealth() < HealthComponent->GetMaxHealth();
+	HealOption.Priority = 45;
+	OutServiceOptions.Add(HealOption);
 }
 
 void UHSNPCServiceComponent::AddSoldierService(const AHSNPCActor& NPC, const AActor* Interactor, TArray<FHSNPCServiceOption>& OutServiceOptions) const
@@ -309,6 +361,14 @@ void UHSNPCServiceComponent::AddSoldierService(const AHSNPCActor& NPC, const AAc
 	ServiceOption.bAvailable = ResourceCarry && ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic) <= 0;
 	ServiceOption.Priority = 30;
 	OutServiceOptions.Add(ServiceOption);
+
+	FHSNPCServiceOption ArrowOption;
+	ArrowOption.ServiceTag = TAG_HS_NPC_Service_Soldier_ProvideArrows;
+	ArrowOption.ProfessionTag = TAG_HS_NPC_Profession_Soldier;
+	ArrowOption.Prompt = LOCTEXT("RequestExtraArrowsPrompt", "Request extra arrows");
+	ArrowOption.bAvailable = ResourceCarry && ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic) > 0 && ResourceCarry->GetQuantityForTag(TAG_HS_Item_Arrow_Basic) < 6;
+	ArrowOption.Priority = 20;
+	OutServiceOptions.Add(ArrowOption);
 }
 
 bool UHSNPCServiceComponent::ExecuteBuilderService(AActor* Interactor) const
@@ -318,16 +378,46 @@ bool UHSNPCServiceComponent::ExecuteBuilderService(AActor* Interactor) const
 	return ConstructionComponent && SettlementPlanComponent && ConstructionComponent->StartNextPendingSchema(SettlementPlanComponent);
 }
 
+bool UHSNPCServiceComponent::ExecuteBuilderMinorUpgradeService(AActor* Interactor) const
+{
+	UHSConstructionComponent* ConstructionComponent = Interactor ? Interactor->FindComponentByClass<UHSConstructionComponent>() : nullptr;
+	UHSSettlementPlanComponent* SettlementPlanComponent = Interactor ? Interactor->FindComponentByClass<UHSSettlementPlanComponent>() : nullptr;
+	if (!ConstructionComponent || !SettlementPlanComponent)
+	{
+		return false;
+	}
+
+	UHSBuildingDefinition* MinorUpgradeDefinition = NewObject<UHSBuildingDefinition>(const_cast<UHSNPCServiceComponent*>(this));
+	MinorUpgradeDefinition->DisplayName = LOCTEXT("MinorUpgradeDefinitionName", "Minor House Upgrade");
+	MinorUpgradeDefinition->BuildingTag = TAG_HS_Building_BasicHouseMinorUpgrade;
+
+	FHSPendingBuildingSchema PendingSchema;
+	const FVector UpgradeLocation = SettlementPlanComponent->GetSettlementClaimCenter() + FVector(220.0f, 120.0f, 0.0f);
+	return SettlementPlanComponent->PlaceSchema(MinorUpgradeDefinition, UpgradeLocation, 0.0f, PendingSchema);
+}
+
 bool UHSNPCServiceComponent::ExecuteHunterService(AActor* Interactor) const
 {
 	UHSAnimalIntelComponent* AnimalIntelComponent = Interactor ? Interactor->FindComponentByClass<UHSAnimalIntelComponent>() : nullptr;
 	return AnimalIntelComponent && AnimalIntelComponent->RequestDailyAnimalLead();
 }
 
+bool UHSNPCServiceComponent::ExecuteHunterRefreshLeadService(AActor* Interactor) const
+{
+	UHSAnimalIntelComponent* AnimalIntelComponent = Interactor ? Interactor->FindComponentByClass<UHSAnimalIntelComponent>() : nullptr;
+	return AnimalIntelComponent && AnimalIntelComponent->RefreshActiveAnimalLead();
+}
+
 bool UHSNPCServiceComponent::ExecuteHerbalistService(AActor* Interactor) const
 {
 	UHSPlantEffectComponent* PlantEffectComponent = Interactor ? Interactor->FindComponentByClass<UHSPlantEffectComponent>() : nullptr;
 	return PlantEffectComponent && PlantEffectComponent->LearnPlant(TAG_HS_Plant_SpeedHerb);
+}
+
+bool UHSNPCServiceComponent::ExecuteHerbalistRestoreHealthService(AActor* Interactor) const
+{
+	UHSPlayerHealthComponent* HealthComponent = Interactor ? Interactor->FindComponentByClass<UHSPlayerHealthComponent>() : nullptr;
+	return HealthComponent && HealthComponent->RestoreHealth(35.0f) > 0.0f;
 }
 
 bool UHSNPCServiceComponent::ExecuteSoldierService(AActor* Interactor) const
@@ -345,6 +435,18 @@ bool UHSNPCServiceComponent::ExecuteSoldierService(AActor* Interactor) const
 		Equipment->SetBowEquipped(true);
 	}
 
+	return true;
+}
+
+bool UHSNPCServiceComponent::ExecuteSoldierArrowsService(AActor* Interactor) const
+{
+	UHSResourceCarryComponent* ResourceCarry = Interactor ? Interactor->FindComponentByClass<UHSResourceCarryComponent>() : nullptr;
+	if (!ResourceCarry || ResourceCarry->GetQuantityForTag(TAG_HS_Item_Bow_Basic) <= 0)
+	{
+		return false;
+	}
+
+	ResourceCarry->AddStack(FHSItemStack{ TAG_HS_Item_Arrow_Basic, 6 });
 	return true;
 }
 

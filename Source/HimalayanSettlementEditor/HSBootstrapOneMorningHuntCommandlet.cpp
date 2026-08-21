@@ -336,6 +336,9 @@ void CreateMap()
 	SpawnExplorationMarker(World, TEXT("Trail_Settlement_01"), FVector(-260.0f, -245.0f, 95.0f), FText::FromString(TEXT("Village Trail")), TEXT("Location.Trail"));
 	SpawnExplorationMarker(World, TEXT("Trail_Forest_02"), FVector(180.0f, -300.0f, 95.0f), FText::FromString(TEXT("Forest Trail")), TEXT("Location.Trail"));
 	SpawnExplorationMarker(World, TEXT("Trail_Forest_03"), FVector(560.0f, -340.0f, 95.0f), FText::FromString(TEXT("Ridge Trail")), TEXT("Location.Trail"));
+	SpawnExplorationMarker(World, TEXT("Trail_Ridge_04"), FVector(780.0f, -520.0f, 95.0f), FText::FromString(TEXT("Ridge Return")), TEXT("Location.Trail"));
+	SpawnExplorationMarker(World, TEXT("Explore_Herb_Patch"), FVector(360.0f, 305.0f, 100.0f), FText::FromString(TEXT("Herb Patch")), TEXT("Location.Forest"));
+	SpawnExplorationMarker(World, TEXT("Explore_Builder_Yard"), FVector(-430.0f, -330.0f, 100.0f), FText::FromString(TEXT("Builder Yard")), TEXT("Location.Village"));
 
 	World->MarkPackageDirty();
 	SaveMapPackage(World);

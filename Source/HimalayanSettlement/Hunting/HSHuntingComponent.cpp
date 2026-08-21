@@ -19,11 +19,18 @@ UHSHuntingComponent::UHSHuntingComponent()
 	, ArrowSpawnForwardOffset(45.0f)
 	, ShotCooldown(1.2f)
 	, LastShotTime(-TNumericLimits<double>::Max())
+	, DrawStartTime(0.0)
+	, bBowDrawn(false)
 {
 	PrimaryComponentTick.bCanEverTick = false;
 }
 
 bool UHSHuntingComponent::TryHunt()
+{
+	return StartBowDraw() && ReleaseBowShot();
+}
+
+bool UHSHuntingComponent::StartBowDraw()
 {
 	const AActor* Owner = GetOwner();
 	const UHSPlayerEquipmentComponent* Equipment = Owner ? Owner->FindComponentByClass<UHSPlayerEquipmentComponent>() : nullptr;
@@ -42,20 +49,27 @@ bool UHSHuntingComponent::TryHunt()
 		return false;
 	}
 
+	bBowDrawn = true;
+	DrawStartTime = GetWorld() ? GetWorld()->GetTimeSeconds() : FPlatformTime::Seconds();
+	OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "BowDrawing", "Bow drawn."));
+	return true;
+}
+
+bool UHSHuntingComponent::ReleaseBowShot()
+{
+	if (!bBowDrawn)
+	{
+		return false;
+	}
+
+	bBowDrawn = false;
+
+	const AActor* Owner = GetOwner();
 	FVector TraceStart = FVector::ZeroVector;
 	FVector TraceDirection = FVector::ForwardVector;
 	if (!ResolveTraceView(TraceStart, TraceDirection))
 	{
 		OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "NoAim", "No clear aim."));
-		return false;
-	}
-
-	FHitResult Hit;
-	AHSAnimalActor* Target = FindHuntTargetFromView(TraceStart, TraceDirection, Hit);
-	if (!Target)
-	{
-		OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "NoTarget", "No animal target."));
-		UE_LOG(LogHSAI, Verbose, TEXT("%s found no hunting target."), *GetNameSafe(GetOwner()));
 		return false;
 	}
 

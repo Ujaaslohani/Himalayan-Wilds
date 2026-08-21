@@ -166,6 +166,9 @@ public:
 	void StartBasicHouseFromBuildMenu();
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void StartBasicHouseMinorUpgradeFromBuildMenu();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
 	void StartBasicCampsiteFromBuildMenu();
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
@@ -175,6 +178,8 @@ public:
 	void SelectBuildMenuDelta(int32 Delta);
 
 	bool CanStartBasicHouseFromBuildMenu(FText* OutReason = nullptr) const;
+
+	bool CanStartBasicHouseMinorUpgradeFromBuildMenu(FText* OutReason = nullptr) const;
 
 	bool CanStartBasicCampsiteFromBuildMenu(FText* OutReason = nullptr) const;
 
@@ -225,6 +230,7 @@ private:
 	void Look(const FInputActionValue& InputValue);
 	void Interact(const FInputActionValue& InputValue);
 	void Hunt(const FInputActionValue& InputValue);
+	void ReleaseHunt(const FInputActionValue& InputValue);
 	void StartJump(const FInputActionValue& InputValue);
 	void StopJump(const FInputActionValue& InputValue);
 	void ToggleCrouchStance(const FInputActionValue& InputValue);

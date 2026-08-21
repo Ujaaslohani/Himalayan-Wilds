@@ -60,6 +60,8 @@ Epic's documentation describes Lumen as UE5's default dynamic global illuminatio
 - VS Code also includes `UE: Run Low-End Benchmark Smoke`, which launches the map in a 1280x720 low-end benchmark window for repeatability, but manual overlay readings are still required for the baseline table.
 - Player input includes `F10` as a native shortcut for toggling both `stat fps` and `stat unit`.
 - Player input includes `F8` as a native shortcut for Emergency Low-End Mode.
+- Build placement, animal leads, NPC services, construction, campsites, exploration markers, and completed-building visuals remain native C++ and event-driven. New milestone work should not add broad actor ticks, dense dynamic foliage, dynamic shadow dependencies, or UE5 showcase rendering features unless the owner explicitly approves the cost.
+- Gameplay should keep using cheap readable placeholders until a specific feature proves it needs richer visuals. If a richer visual is added, it needs a low-end fallback in the same milestone.
 
 ## Current Baseline Result
 
@@ -69,6 +71,7 @@ Epic's documentation describes Lumen as UE5's default dynamic global illuminatio
 - Hands-on low-end profile launch: confirmed working in the editor.
 - Hands-on owner report: FPS was around 19, then dropped to around 7 after playing for a while.
 - Hands-on owner retest after Emergency Low-End Mode: around 40 FPS and stable.
+- Hands-on owner retest after the readability/visual fixes: more than 100 FPS in Emergency Low-End Mode and more than 50 FPS in normal mode.
 - Low-end benchmark smoke launch: command path confirmed, but no reliable averaged FPS was emitted to the log.
 - Numeric Game/Draw/GPU readings: still need manual recording from the live `stat unit` overlay to identify whether the main bottleneck is CPU/game thread, render thread, or GPU.
 

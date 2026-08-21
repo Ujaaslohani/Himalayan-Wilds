@@ -49,7 +49,11 @@ bool FHSPauseMenuStateTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Opening build menu should close inventory."), Player->IsInventoryOpen());
 	TestEqual(TEXT("Build menu should start on the first entry."), Player->GetSelectedBuildMenuIndex(), 0);
 	Player->SelectBuildMenuDelta(1);
-	TestEqual(TEXT("Build menu selection should move to campsite."), Player->GetSelectedBuildMenuIndex(), 1);
+	TestEqual(TEXT("Build menu selection should move to minor upgrade."), Player->GetSelectedBuildMenuIndex(), 1);
+	Player->SelectBuildMenuDelta(1);
+	TestEqual(TEXT("Build menu selection should move to campsite."), Player->GetSelectedBuildMenuIndex(), 2);
+	Player->SelectBuildMenuDelta(-1);
+	TestEqual(TEXT("Build menu selection should move back to minor upgrade."), Player->GetSelectedBuildMenuIndex(), 1);
 	Player->SelectBuildMenuDelta(-1);
 	TestEqual(TEXT("Build menu selection should move back to house."), Player->GetSelectedBuildMenuIndex(), 0);
 
@@ -179,14 +183,19 @@ bool FHSBuildMenuAvailabilityFeedbackTest::RunTest(const FString& Parameters)
 
 	TestFalse(TEXT("Basic house should be blocked before claim."), Player->CanStartBasicHouseFromBuildMenu(&Reason));
 	TestTrue(TEXT("Blocked build reason should mention settlement claim."), Reason.ToString().Contains(TEXT("Claim")));
+	TestFalse(TEXT("Minor upgrade should be blocked before claim."), Player->CanStartBasicHouseMinorUpgradeFromBuildMenu(&Reason));
+	TestTrue(TEXT("Blocked upgrade reason should mention settlement claim."), Reason.ToString().Contains(TEXT("Claim")));
 	TestTrue(TEXT("Basic campsite should be available without a settlement claim."), Player->CanStartBasicCampsiteFromBuildMenu(&Reason));
 	TestTrue(TEXT("Campsite reason should mention temporary placement."), Reason.ToString().Contains(TEXT("temporary")));
 
 	Player->GetSettlementPlanComponent()->RestoreSettlementPlan(true, FVector::ZeroVector, {});
 	TestTrue(TEXT("Basic house should be available after claim."), Player->CanStartBasicHouseFromBuildMenu(&Reason));
 	TestTrue(TEXT("Available build reason should mention readiness."), Reason.ToString().Contains(TEXT("Ready")));
+	TestFalse(TEXT("Minor upgrade should be blocked before a completed house."), Player->CanStartBasicHouseMinorUpgradeFromBuildMenu(&Reason));
+	TestTrue(TEXT("Blocked upgrade reason should mention the basic house."), Reason.ToString().Contains(TEXT("Basic House")));
 	Player->SelectBuildMenuDelta(1);
-	TestEqual(TEXT("Build menu selection should support the campsite entry."), Player->GetSelectedBuildMenuIndex(), 1);
+	Player->SelectBuildMenuDelta(1);
+	TestEqual(TEXT("Build menu selection should support the campsite entry."), Player->GetSelectedBuildMenuIndex(), 2);
 
 	FHSPendingBuildingSchema PendingSchema;
 	PendingSchema.BuildingTag = TAG_HS_Building_BasicHouse;
@@ -203,6 +212,8 @@ bool FHSBuildMenuAvailabilityFeedbackTest::RunTest(const FString& Parameters)
 	Player->GetSettlementPlanComponent()->RestoreSettlementPlan(true, FVector::ZeroVector, {});
 	TestFalse(TEXT("Basic house should be blocked once complete."), Player->CanStartBasicHouseFromBuildMenu(&Reason));
 	TestTrue(TEXT("Completed build reason should mention completion."), Reason.ToString().Contains(TEXT("complete")));
+	TestTrue(TEXT("Minor upgrade should be available after house completion."), Player->CanStartBasicHouseMinorUpgradeFromBuildMenu(&Reason));
+	TestTrue(TEXT("Available upgrade reason should mention readiness."), Reason.ToString().Contains(TEXT("Ready")));
 
 	return true;
 }

@@ -52,6 +52,9 @@ public:
 	bool StartBasicHousePlacement();
 
 	UFUNCTION(BlueprintCallable, Category = "Build Placement")
+	bool StartBasicHouseMinorUpgradePlacement();
+
+	UFUNCTION(BlueprintCallable, Category = "Build Placement")
 	bool StartBasicCampsitePlacement();
 
 	UFUNCTION(BlueprintCallable, Category = "Build Placement")
@@ -89,6 +92,7 @@ private:
 	void UpdatePreview();
 	void DestroyPreview();
 	UHSBuildingDefinition* ResolveBasicHouseDefinition();
+	UHSBuildingDefinition* ResolveBasicHouseMinorUpgradeDefinition();
 	UHSSettlementPlanComponent* ResolveSettlementPlan() const;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Build Placement")
@@ -106,8 +110,14 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "Build Placement", meta = (ClampMin = "0.0", Units = "cm"))
 	float PlacementHeightOffset;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Build Placement", meta = (ClampMin = "0.0", ClampMax = "89.0", Units = "deg"))
+	float MaxPlacementSlopeDegrees;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UHSBuildingDefinition> ActiveBuildingDefinition;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UHSBuildingDefinition> RuntimeMinorUpgradeDefinition;
 
 	UPROPERTY(VisibleAnywhere, Category = "Build Placement")
 	EHSBuildPlacementMode PlacementMode;

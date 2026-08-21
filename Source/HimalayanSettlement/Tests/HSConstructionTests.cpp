@@ -23,6 +23,14 @@ UHSBuildingDefinition* CreateConstructionTestHouseDefinition()
 	return BuildingDefinition;
 }
 
+UHSBuildingDefinition* CreateConstructionTestMinorUpgradeDefinition()
+{
+	UHSBuildingDefinition* BuildingDefinition = NewObject<UHSBuildingDefinition>();
+	BuildingDefinition->DisplayName = FText::FromString(TEXT("Minor House Upgrade"));
+	BuildingDefinition->BuildingTag = TAG_HS_Building_BasicHouseMinorUpgrade;
+	return BuildingDefinition;
+}
+
 bool PlacePendingHouseSchema(UHSSettlementPlanComponent& SettlementPlan)
 {
 	UHSBuildingDefinition* BuildingDefinition = CreateConstructionTestHouseDefinition();
@@ -102,6 +110,28 @@ bool FHSConstructionStartsFromPendingSchemaTest::RunTest(const FString& Paramete
 	TestTrue(TEXT("Active job should be for the basic house."), Construction->GetConstructionJobs()[0].BuildingTag == TAG_HS_Building_BasicHouse);
 	TestEqual(TEXT("Basic house job should require one day."), Construction->GetConstructionJobs()[0].RequiredDays, 1.0f);
 	TestFalse(TEXT("A second active job should be blocked."), Construction->StartNextPendingSchema(SettlementPlan));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSConstructionMinorUpgradeTakesQuarterDayTest,
+	"HimalayanSettlement.Construction.MinorHouseUpgradeTakesQuarterDay",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSConstructionMinorUpgradeTakesQuarterDayTest::RunTest(const FString& Parameters)
+{
+	UHSSettlementPlanComponent* SettlementPlan = NewObject<UHSSettlementPlanComponent>();
+	UHSConstructionComponent* Construction = NewObject<UHSConstructionComponent>();
+	UHSBuildingDefinition* MinorUpgradeDefinition = CreateConstructionTestMinorUpgradeDefinition();
+
+	FHSPendingBuildingSchema PendingSchema;
+	TestTrue(TEXT("Settlement should be claimed."), SettlementPlan->ClaimSettlement(FVector::ZeroVector));
+	TestTrue(TEXT("Minor upgrade schema should be placed."), SettlementPlan->PlaceSchema(MinorUpgradeDefinition, FVector(220.0f, 120.0f, 0.0f), 0.0f, PendingSchema));
+	TestTrue(TEXT("Construction should start from minor upgrade schema."), Construction->StartNextPendingSchema(SettlementPlan));
+	TestEqual(TEXT("Minor upgrade should require a quarter day."), Construction->GetConstructionJobs()[0].RequiredDays, 0.25f);
+	TestTrue(TEXT("Quarter-day progress should complete the minor upgrade."), Construction->AdvanceConstruction(0.25f));
+	TestTrue(TEXT("Minor upgrade should be marked complete."), Construction->HasCompletedBuilding(TAG_HS_Building_BasicHouseMinorUpgrade));
 
 	return true;
 }

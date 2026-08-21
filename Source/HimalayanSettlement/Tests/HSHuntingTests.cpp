@@ -4,6 +4,7 @@
 #include "Animals/HSAnimalActor.h"
 #include "Animals/HSAnimalDefinition.h"
 #include "Core/HSGameplayTags.h"
+#include "EngineUtils.h"
 #include "Engine/World.h"
 #include "Equipment/HSPlayerEquipmentComponent.h"
 #include "Hunting/HSArrowProjectileActor.h"
@@ -165,6 +166,53 @@ bool FHSHuntingShotCooldownBlocksArrowSpamTest::RunTest(const FString& Parameter
 	TestEqual(TEXT("First shot should consume one arrow."), Carry->GetQuantityForTag(TAG_HS_Item_Arrow_Basic), 1);
 	TestFalse(TEXT("Immediate second shot should be blocked by cooldown."), Hunting->TryHunt());
 	TestEqual(TEXT("Blocked cooldown shot should not consume another arrow."), Carry->GetQuantityForTag(TAG_HS_Item_Arrow_Basic), 1);
+
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSHuntingFreeShotConsumesArrowWithoutTargetTest,
+	"HimalayanSettlement.Hunting.FreeShotConsumesArrowWithoutAnimalTarget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSHuntingFreeShotConsumesArrowWithoutTargetTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Transient test world should be created."), World);
+	if (!World)
+	{
+		return false;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AHSPlayerCharacter* Player = World->SpawnActor<AHSPlayerCharacter>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+	UHSHuntingComponent* Hunting = Player ? Player->GetHuntingComponent() : nullptr;
+	UHSPlayerEquipmentComponent* Equipment = Player ? Player->GetPlayerEquipmentComponent() : nullptr;
+	UHSResourceCarryComponent* Carry = Player ? Player->GetResourceCarryComponent() : nullptr;
+	if (!Player || !Hunting || !Equipment || !Carry)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	Carry->AddStack(FHSItemStack{ TAG_HS_Item_Bow_Basic, 1 });
+	Carry->AddStack(FHSItemStack{ TAG_HS_Item_Arrow_Basic, 1 });
+	Equipment->SetBowEquipped(true);
+
+	TestTrue(TEXT("Bow draw should start with equipped bow and arrow."), Hunting->StartBowDraw());
+	TestTrue(TEXT("Bow should report drawn state."), Hunting->IsBowDrawn());
+	TestTrue(TEXT("Releasing a free shot should spawn an arrow even without an animal target."), Hunting->ReleaseBowShot());
+	TestFalse(TEXT("Bow should no longer report drawn state after release."), Hunting->IsBowDrawn());
+	TestEqual(TEXT("Free shot should consume the arrow."), Carry->GetQuantityForTag(TAG_HS_Item_Arrow_Basic), 0);
+
+	int32 ArrowCount = 0;
+	for (TActorIterator<AHSArrowProjectileActor> ArrowIt(World); ArrowIt; ++ArrowIt)
+	{
+		++ArrowCount;
+	}
+	TestEqual(TEXT("Exactly one native arrow projectile should exist after free shot."), ArrowCount, 1);
 
 	World->DestroyWorld(false);
 	return true;

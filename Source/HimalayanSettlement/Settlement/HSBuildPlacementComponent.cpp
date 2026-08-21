@@ -1,6 +1,7 @@
 #include "Settlement/HSBuildPlacementComponent.h"
 
 #include "Building/HSBuildingDefinition.h"
+#include "Core/HSGameplayTags.h"
 #include "Core/HSLogCategories.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
@@ -16,6 +17,7 @@ UHSBuildPlacementComponent::UHSBuildPlacementComponent()
 	, PlacementTraceDistance(1800.0f)
 	, RotationStepDegrees(15.0f)
 	, PlacementHeightOffset(0.0f)
+	, MaxPlacementSlopeDegrees(35.0f)
 	, PlacementMode(EHSBuildPlacementMode::None)
 	, bPlacementActive(false)
 	, bCurrentPlacementValid(false)
@@ -51,6 +53,11 @@ void UHSBuildPlacementComponent::TickComponent(float DeltaTime, ELevelTick TickT
 bool UHSBuildPlacementComponent::StartBasicHousePlacement()
 {
 	return StartPlacement(ResolveBasicHouseDefinition());
+}
+
+bool UHSBuildPlacementComponent::StartBasicHouseMinorUpgradePlacement()
+{
+	return StartPlacement(ResolveBasicHouseMinorUpgradeDefinition());
 }
 
 bool UHSBuildPlacementComponent::StartBasicCampsitePlacement()
@@ -242,9 +249,13 @@ void UHSBuildPlacementComponent::UpdatePreview()
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(HSBuildPlacementTrace), false, GetOwner());
 
 	UWorld* World = GetWorld();
+	bool bHasGroundHit = false;
+	FVector GroundNormal = FVector::UpVector;
 	if (World && World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_Visibility, QueryParams))
 	{
 		PreviewLocation = Hit.ImpactPoint + FVector(0.0f, 0.0f, PlacementHeightOffset);
+		GroundNormal = Hit.ImpactNormal.GetSafeNormal();
+		bHasGroundHit = true;
 	}
 	else
 	{
@@ -252,19 +263,23 @@ void UHSBuildPlacementComponent::UpdatePreview()
 		PreviewLocation.Z = GetOwner() ? GetOwner()->GetActorLocation().Z : PreviewLocation.Z;
 	}
 
+	const float MinGroundNormalZ = FMath::Cos(FMath::DegreesToRadians(MaxPlacementSlopeDegrees));
+	const bool bGroundIsUsable = bHasGroundHit && GroundNormal.Z >= MinGroundNormalZ;
 	if (PlacementMode == EHSBuildPlacementMode::TemporaryShelter)
 	{
-		bCurrentPlacementValid = true;
-		PlacementStatusText = LOCTEXT("CampsitePlacementValid", "Basic Campsite placement ready");
+		bCurrentPlacementValid = bGroundIsUsable;
+		PlacementStatusText = bCurrentPlacementValid
+			? LOCTEXT("CampsitePlacementValid", "Basic Campsite placement ready")
+			: LOCTEXT("CampsiteNeedsGround", "Aim at flatter ground for campsite placement");
 	}
 	else
 	{
 		FText FailureReason;
 		UHSSettlementPlanComponent* SettlementPlan = ResolveSettlementPlan();
-		bCurrentPlacementValid = ActiveBuildingDefinition && SettlementPlan && SettlementPlan->CanPlaceSchema(ActiveBuildingDefinition, PreviewLocation, &FailureReason);
+		bCurrentPlacementValid = bGroundIsUsable && ActiveBuildingDefinition && SettlementPlan && SettlementPlan->CanPlaceSchema(ActiveBuildingDefinition, PreviewLocation, &FailureReason);
 		PlacementStatusText = bCurrentPlacementValid
 			? FText::Format(LOCTEXT("BuildPlacementValid", "{0} placement ready"), ActiveBuildingDefinition->DisplayName)
-			: FailureReason;
+			: (!bGroundIsUsable ? LOCTEXT("BuildPlacementNeedsGround", "Aim at flatter ground for schema placement") : FailureReason);
 	}
 
 	if (PreviewActor)
@@ -291,6 +306,18 @@ UHSBuildingDefinition* UHSBuildPlacementComponent::ResolveBasicHouseDefinition()
 	}
 
 	return BasicHouseDefinition.LoadSynchronous();
+}
+
+UHSBuildingDefinition* UHSBuildPlacementComponent::ResolveBasicHouseMinorUpgradeDefinition()
+{
+	if (!RuntimeMinorUpgradeDefinition)
+	{
+		RuntimeMinorUpgradeDefinition = NewObject<UHSBuildingDefinition>(this, TEXT("RuntimeBasicHouseMinorUpgradeDefinition"));
+		RuntimeMinorUpgradeDefinition->DisplayName = NSLOCTEXT("HSBuildPlacementComponent", "MinorUpgradeDisplayName", "Minor House Upgrade");
+		RuntimeMinorUpgradeDefinition->BuildingTag = TAG_HS_Building_BasicHouseMinorUpgrade;
+	}
+
+	return RuntimeMinorUpgradeDefinition;
 }
 
 UHSSettlementPlanComponent* UHSBuildPlacementComponent::ResolveSettlementPlan() const

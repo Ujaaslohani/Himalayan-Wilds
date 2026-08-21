@@ -142,6 +142,7 @@ Unreal Engine 5.5.4.
 ## In Progress
 
 - Hands-on closeout results have been reported working by the project owner; equipment/hunting polish is ready for the next manual pass.
+- Current implementation batch adds native bow draw/release free-shooting, target miss support, minor house upgrade placement/construction, slope-aware build placement, second-pass NPC services, clearer build menu entries, and extra cheap exploration markers.
 
 ## Known Blockers
 
@@ -161,15 +162,11 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Run hands-on hunter intel playtest: ask hunter for animal signs, confirm marker appears, sleep into next day, and confirm a fresh report is available.
-2. Run hands-on herbalist playtest: talk to Herbalist, use Speed Herb, confirm movement is faster, sleep/advance time, and confirm the effect expires.
-3. Run hands-on soldier/equipment playtest: talk to Soldier, confirm bow and arrows are granted once, confirm bow auto-equips, press `G` to store/equip bow, and confirm repeat interaction does not duplicate supplies.
-4. Run hands-on free-build playtest: claim settlement, press `B`, choose Basic House with `[1]`, rotate with `Q/R`, place house with left mouse or `E`, ask Builder to start construction, then sleep until the 1-day build completes and a completed house visual appears.
-5. Run hands-on service-framework sanity pass: confirm Builder/Hunter/Herbalist/Soldier prompts still appear only when their service is available.
-6. Run hands-on exploration pass: walk settlement to village core, follow trail markers to forest edge, find animal ridge, and confirm the route is readable without explanation.
-7. Run hands-on closeout for Milestones 3-5 if not already confirmed in-editor.
-8. Keep tracking numeric FPS/Game/Draw/GPU readings from the live low-end `stat fps` and `stat unit` overlays before forest density increases.
-9. Run hands-on HUD/hunting pass: confirm status/objective lines, bow/arrows status, visible arrow flight, animal impact feedback, and menu feedback appear clearly without blocking the center interaction prompt.
-10. Run hands-on pause/save pass: press `Esc`, test Resume/Save/Load/Options feedback, confirm build placement `Esc` still cancels placement before pausing, and confirm autosave files are produced after sleep/construction/progress events.
-11. Run hands-on inventory/build/options pass: confirm `I`/`Tab` opens inventory, `Q`/`R` changes selected stack, `[1]` inspects the selected stack, `[2]` drops one selected item, `[3]` drops the selected stack, `B` opens build menu, `[1]` enters Basic House placement only when available, `[2]` places a Basic Campsite, and `[6]` cycles graphics preset when pause options are open.
-12. Add mouse-driven UMG/Slate polish later if the native Canvas controls test well.
+1. Run hands-on bow playtest: hold/release hunt input, confirm the visible arrow flies forward, confirm misses are visible, and confirm target hits/death are readable.
+2. Run hands-on build playtest: place Basic House, complete it through Builder/time, place Minor House Upgrade, confirm it completes after 0.25 day, and place Basic Campsite for one-use sleep.
+3. Run hands-on NPC services pass: Hunter refreshes an active marker, Herbalist restores health when wounded, and Soldier supplies arrows when the player owns a bow with low arrows.
+4. Run hands-on placement pass: confirm houses/campsites snap to ground and reject steep or non-ground aim points.
+5. Run hands-on performance pass: compare normal and Emergency Low-End Mode with `F10` overlay during hunting, building, NPC use, sleep, save/load, and exploration.
+6. Run hands-on exploration pass: walk settlement to village core, builder yard, herb patch, forest edge, ridge trail, and animal ridge, and confirm the route is readable without dense foliage.
+7. Keep tracking numeric FPS/Game/Draw/GPU readings from the live low-end `stat fps` and `stat unit` overlays before forest density increases.
+8. Add mouse-driven UMG/Slate polish later if the native Canvas controls test well.

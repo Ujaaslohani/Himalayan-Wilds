@@ -315,6 +315,7 @@ void AHSPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AHSPlayerCharacter::Look);
 	EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::Interact);
 	EnhancedInputComponent->BindAction(HuntAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::Hunt);
+	EnhancedInputComponent->BindAction(HuntAction, ETriggerEvent::Completed, this, &AHSPlayerCharacter::ReleaseHunt);
 	EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::StartJump);
 	EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &AHSPlayerCharacter::StopJump);
 	EnhancedInputComponent->BindAction(CrouchAction, ETriggerEvent::Started, this, &AHSPlayerCharacter::ToggleCrouchStance);
@@ -410,11 +411,29 @@ void AHSPlayerCharacter::Hunt(const FInputActionValue& InputValue)
 
 	if (HuntingComponent)
 	{
-		HuntingComponent->TryHunt();
+		HuntingComponent->StartBowDraw();
 	}
 	else
 	{
 		UE_LOG(LogHSAI, Warning, TEXT("%s has no hunting component."), *GetNameSafe(this));
+	}
+}
+
+void AHSPlayerCharacter::ReleaseHunt(const FInputActionValue& InputValue)
+{
+	if (bPauseMenuOpen || bInventoryOpen || bBuildMenuOpen)
+	{
+		return;
+	}
+
+	if (BuildPlacementComponent && BuildPlacementComponent->IsPlacementActive())
+	{
+		return;
+	}
+
+	if (HuntingComponent)
+	{
+		HuntingComponent->ReleaseBowShot();
 	}
 }
 
@@ -609,7 +628,7 @@ void AHSPlayerCharacter::HandlePauseMenuSave(const FInputActionValue& InputValue
 
 	if (bBuildMenuOpen)
 	{
-		StartBasicCampsiteFromBuildMenu();
+		StartSelectedBuildMenuEntry();
 	}
 }
 
@@ -906,6 +925,28 @@ void AHSPlayerCharacter::StartBasicCampsiteFromBuildMenu()
 	}
 }
 
+void AHSPlayerCharacter::StartBasicHouseMinorUpgradeFromBuildMenu()
+{
+	if (!BuildPlacementComponent)
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "NoUpgradePlacementComponent", "Upgrade placement is unavailable."));
+		return;
+	}
+
+	FText BlockReason;
+	if (!CanStartBasicHouseMinorUpgradeFromBuildMenu(&BlockReason))
+	{
+		SetMenuFeedback(BlockReason);
+		return;
+	}
+
+	SetBuildMenuOpen(false);
+	if (!BuildPlacementComponent->StartBasicHouseMinorUpgradePlacement())
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "UpgradePlacementStartFailed", "Could not start minor upgrade placement."));
+	}
+}
+
 void AHSPlayerCharacter::StartSelectedBuildMenuEntry()
 {
 	ClampSelectedBuildMenuIndex();
@@ -915,15 +956,30 @@ void AHSPlayerCharacter::StartSelectedBuildMenuEntry()
 		return;
 	}
 
+	if (SelectedBuildMenuIndex == 1)
+	{
+		StartBasicHouseMinorUpgradeFromBuildMenu();
+		return;
+	}
+
 	StartBasicCampsiteFromBuildMenu();
 }
 
 void AHSPlayerCharacter::SelectBuildMenuDelta(int32 Delta)
 {
-	SelectedBuildMenuIndex = FMath::Clamp(SelectedBuildMenuIndex + Delta, 0, 1);
-	SetMenuFeedback(SelectedBuildMenuIndex == 0
-		? NSLOCTEXT("HSPlayerCharacter", "BuildMenuSelectedHouse", "Selected Basic House.")
-		: NSLOCTEXT("HSPlayerCharacter", "BuildMenuSelectedCampsite", "Selected Basic Campsite."));
+	SelectedBuildMenuIndex = FMath::Clamp(SelectedBuildMenuIndex + Delta, 0, 2);
+	if (SelectedBuildMenuIndex == 0)
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "BuildMenuSelectedHouse", "Selected Basic House."));
+	}
+	else if (SelectedBuildMenuIndex == 1)
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "BuildMenuSelectedUpgrade", "Selected Minor House Upgrade."));
+	}
+	else
+	{
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "BuildMenuSelectedCampsite", "Selected Basic Campsite."));
+	}
 }
 
 bool AHSPlayerCharacter::CanStartBasicHouseFromBuildMenu(FText* OutReason) const
@@ -967,6 +1023,60 @@ bool AHSPlayerCharacter::CanStartBasicHouseFromBuildMenu(FText* OutReason) const
 	if (OutReason)
 	{
 		*OutReason = NSLOCTEXT("HSPlayerCharacter", "BuildMenuHouseReady", "Ready: place a Basic House schema for the Builder.");
+	}
+	return true;
+}
+
+bool AHSPlayerCharacter::CanStartBasicHouseMinorUpgradeFromBuildMenu(FText* OutReason) const
+{
+	if (!SettlementPlanComponent || !SettlementPlanComponent->HasSettlementClaim())
+	{
+		if (OutReason)
+		{
+			*OutReason = NSLOCTEXT("HSPlayerCharacter", "BuildMenuUpgradeNeedsClaim", "Claim a settlement site before placing an upgrade.");
+		}
+		return false;
+	}
+
+	if (!ConstructionComponent || !ConstructionComponent->HasCompletedBuilding(TAG_HS_Building_BasicHouse))
+	{
+		if (OutReason)
+		{
+			*OutReason = NSLOCTEXT("HSPlayerCharacter", "BuildMenuUpgradeNeedsHouse", "Complete the Basic House before placing an upgrade.");
+		}
+		return false;
+	}
+
+	if (ConstructionComponent->HasCompletedBuilding(TAG_HS_Building_BasicHouseMinorUpgrade))
+	{
+		if (OutReason)
+		{
+			*OutReason = NSLOCTEXT("HSPlayerCharacter", "BuildMenuUpgradeComplete", "Minor House Upgrade is already complete.");
+		}
+		return false;
+	}
+
+	if (ConstructionComponent->HasActiveJob())
+	{
+		if (OutReason)
+		{
+			*OutReason = NSLOCTEXT("HSPlayerCharacter", "BuildMenuUpgradeConstructionActive", "Builder is already working on a construction job.");
+		}
+		return false;
+	}
+
+	if (SettlementPlanComponent->HasPendingSchema(TAG_HS_Building_BasicHouseMinorUpgrade))
+	{
+		if (OutReason)
+		{
+			*OutReason = NSLOCTEXT("HSPlayerCharacter", "BuildMenuUpgradePending", "Minor House Upgrade schema is already placed. Ask the Builder to start it.");
+		}
+		return false;
+	}
+
+	if (OutReason)
+	{
+		*OutReason = NSLOCTEXT("HSPlayerCharacter", "BuildMenuUpgradeReady", "Ready: place a minor upgrade schema for the Builder.");
 	}
 	return true;
 }
@@ -1459,7 +1569,7 @@ void AHSPlayerCharacter::ClampSelectedInventoryIndex()
 
 void AHSPlayerCharacter::ClampSelectedBuildMenuIndex()
 {
-	SelectedBuildMenuIndex = FMath::Clamp(SelectedBuildMenuIndex, 0, 1);
+	SelectedBuildMenuIndex = FMath::Clamp(SelectedBuildMenuIndex, 0, 2);
 }
 
 void AHSPlayerCharacter::BindAutosaveSources()

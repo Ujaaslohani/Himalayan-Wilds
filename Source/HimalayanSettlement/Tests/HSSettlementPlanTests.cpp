@@ -4,10 +4,12 @@
 #include "Building/HSBuildingDefinition.h"
 #include "Core/HSGameplayTags.h"
 #include "Engine/Engine.h"
+#include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
 #include "Interaction/HSInteractable.h"
 #include "Player/HSPlayerCharacter.h"
+#include "Components/StaticMeshComponent.h"
 #include "Settlement/HSBuildPlacementComponent.h"
 #include "Settlement/HSBuildingSchemaActor.h"
 #include "Settlement/HSSettlementClaimActor.h"
@@ -22,6 +24,27 @@ UHSBuildingDefinition* CreateValidBasicHouseDefinition()
 	BuildingDefinition->DisplayName = FText::FromString(TEXT("Basic House"));
 	BuildingDefinition->BuildingTag = TAG_HS_Building_BasicHouse;
 	return BuildingDefinition;
+}
+
+void AddPlacementGround(UWorld* World)
+{
+	if (!World)
+	{
+		return;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AStaticMeshActor* Ground = World->SpawnActor<AStaticMeshActor>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+	if (Ground)
+	{
+		Ground->SetActorScale3D(FVector(20.0f, 20.0f, 1.0f));
+		if (UStaticMesh* PlaneMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane")))
+		{
+			Ground->GetStaticMeshComponent()->SetStaticMesh(PlaneMesh);
+		}
+		Ground->GetStaticMeshComponent()->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	}
 }
 }
 
@@ -116,6 +139,9 @@ bool FHSFreeBuildPlacementRecordsHouseSchemaTest::RunTest(const FString& Paramet
 	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
 	AHSPlayerCharacter* Player = World->SpawnActor<AHSPlayerCharacter>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+	AddPlacementGround(World);
+	Player->SetActorLocation(FVector(0.0f, 0.0f, 90.0f));
+	Player->SetActorRotation(FRotator(-15.0f, 0.0f, 0.0f));
 	UHSBuildingDefinition* BasicHouse = CreateValidBasicHouseDefinition();
 	UHSSettlementPlanComponent* SettlementPlan = Player ? Player->GetSettlementPlanComponent() : nullptr;
 	UHSBuildPlacementComponent* BuildPlacement = Player ? Player->GetBuildPlacementComponent() : nullptr;
@@ -154,6 +180,50 @@ bool FHSFreeBuildPlacementRecordsHouseSchemaTest::RunTest(const FString& Paramet
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSFreeBuildPlacementRecordsMinorUpgradeSchemaTest,
+	"HimalayanSettlement.Settlement.FreeBuildPlacementRecordsMinorUpgradeSchema",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSFreeBuildPlacementRecordsMinorUpgradeSchemaTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Transient test world should be created."), World);
+	if (!World)
+	{
+		return false;
+	}
+	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+	WorldContext.SetCurrentWorld(World);
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	AHSPlayerCharacter* Player = World->SpawnActor<AHSPlayerCharacter>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+	AddPlacementGround(World);
+	Player->SetActorLocation(FVector(0.0f, 0.0f, 90.0f));
+	Player->SetActorRotation(FRotator(-15.0f, 0.0f, 0.0f));
+	UHSSettlementPlanComponent* SettlementPlan = Player ? Player->GetSettlementPlanComponent() : nullptr;
+	UHSBuildPlacementComponent* BuildPlacement = Player ? Player->GetBuildPlacementComponent() : nullptr;
+
+	if (!Player || !SettlementPlan || !BuildPlacement)
+	{
+		World->DestroyWorld(false);
+		GEngine->DestroyWorldContext(World);
+		return false;
+	}
+
+	TestTrue(TEXT("Settlement claim should succeed."), SettlementPlan->ClaimSettlement(FVector::ZeroVector));
+	TestTrue(TEXT("Free-build placement should start for minor upgrade."), BuildPlacement->StartBasicHouseMinorUpgradePlacement());
+	TestTrue(TEXT("Minor upgrade placement should be confirmable inside claim."), BuildPlacement->CanConfirmPlacement());
+	TestTrue(TEXT("Confirming minor upgrade placement should record a pending schema."), BuildPlacement->ConfirmPlacement());
+	TestTrue(TEXT("Minor upgrade should be pending after free-build confirmation."), SettlementPlan->HasPendingSchema(TAG_HS_Building_BasicHouseMinorUpgrade));
+
+	World->DestroyWorld(false);
+	GEngine->DestroyWorldContext(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FHSFreeBuildPlacementBlocksBeforeSettlementClaimTest,
 	"HimalayanSettlement.Settlement.FreeBuildPlacementBlocksBeforeClaim",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -173,6 +243,9 @@ bool FHSFreeBuildPlacementBlocksBeforeSettlementClaimTest::RunTest(const FString
 	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
 	AHSPlayerCharacter* Player = World->SpawnActor<AHSPlayerCharacter>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+	AddPlacementGround(World);
+	Player->SetActorLocation(FVector(0.0f, 0.0f, 90.0f));
+	Player->SetActorRotation(FRotator(-15.0f, 0.0f, 0.0f));
 	UHSBuildingDefinition* BasicHouse = CreateValidBasicHouseDefinition();
 	UHSBuildPlacementComponent* BuildPlacement = Player ? Player->GetBuildPlacementComponent() : nullptr;
 
@@ -217,6 +290,9 @@ bool FHSFreeBuildPlacementSpawnsBasicCampsiteTest::RunTest(const FString& Parame
 	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
 	AHSPlayerCharacter* Player = World->SpawnActor<AHSPlayerCharacter>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+	AddPlacementGround(World);
+	Player->SetActorLocation(FVector(0.0f, 0.0f, 90.0f));
+	Player->SetActorRotation(FRotator(-15.0f, 0.0f, 0.0f));
 	UHSBuildPlacementComponent* BuildPlacement = Player ? Player->GetBuildPlacementComponent() : nullptr;
 
 	TestNotNull(TEXT("Player should spawn."), Player);

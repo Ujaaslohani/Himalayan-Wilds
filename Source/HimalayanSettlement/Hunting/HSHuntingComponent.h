@@ -21,6 +21,12 @@ public:
 	bool TryHunt();
 
 	UFUNCTION(BlueprintCallable, Category = "Hunting")
+	bool StartBowDraw();
+
+	UFUNCTION(BlueprintCallable, Category = "Hunting")
+	bool ReleaseBowShot();
+
+	UFUNCTION(BlueprintCallable, Category = "Hunting")
 	AHSAnimalActor* FindHuntTarget(FHitResult& OutHit) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Hunting")
@@ -52,6 +58,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Hunting")
 	bool IsShotReady() const { return GetShotCooldownRemaining() <= 0.0f; }
+
+	UFUNCTION(BlueprintPure, Category = "Hunting")
+	bool IsBowDrawn() const { return bBowDrawn; }
 
 	UPROPERTY(BlueprintAssignable, Category = "Hunting")
 	FHSHuntingFeedbackSignature OnHuntingFeedback;
@@ -85,4 +94,6 @@ private:
 	float ShotCooldown;
 
 	double LastShotTime;
+	double DrawStartTime;
+	bool bBowDrawn;
 };
