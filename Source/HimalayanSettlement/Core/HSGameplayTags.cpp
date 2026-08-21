@@ -8,6 +8,7 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Animal_State_Fleeing, "Animal.State.Fleeing");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Animal_State_Idle, "Animal.State.Idle");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Building_BasicDryingRack, "Building.BasicDryingRack");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Building_BasicHouse, "Building.BasicHouse");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Effect_Plant_Speed, "Effect.Plant.Speed");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Interaction_Harvest, "Interaction.Harvest");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Interaction_Talk, "Interaction.Talk");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Item_Arrow_Basic, "Item.Arrow.Basic");
@@ -18,6 +19,8 @@ UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Milestone_OneMorningHunt_DayEnded, "Milestone.OneM
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Milestone_TemporaryShelter_Slept, "Milestone.TemporaryShelter.Slept");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_NPC_Profession_Hunter, "NPC.Profession.Hunter");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_NPC_Profession_Builder, "NPC.Profession.Builder");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_NPC_Profession_Herbalist, "NPC.Profession.Herbalist");
+UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Plant_SpeedHerb, "Plant.SpeedHerb");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Quest_OneMorningHunt, "Quest.OneMorningHunt");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Resource_Hide_Deer, "Resource.Hide.Deer");
 UE_DEFINE_GAMEPLAY_TAG(TAG_HS_Resource_Meat_Deer, "Resource.Meat.Deer");

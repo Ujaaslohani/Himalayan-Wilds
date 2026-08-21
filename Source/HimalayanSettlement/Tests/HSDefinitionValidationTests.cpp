@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "Animals/HSAnimalDefinition.h"
 #include "Building/HSBuildingDefinition.h"
+#include "Herbalism/HSPlantDefinition.h"
 #include "NPC/HSNPCDefinition.h"
 #include "Quests/HSQuestDefinition.h"
 #include "Resources/HSItemDefinition.h"
@@ -28,6 +29,18 @@ bool FHSDefinitionValidationRejectsEmptyAnimal::RunTest(const FString& Parameter
 {
 	const UHSAnimalDefinition* AnimalDefinition = NewObject<UHSAnimalDefinition>();
 	TestFalse(TEXT("A blank animal definition should not validate."), AnimalDefinition->IsDefinitionValid());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSDefinitionValidationRejectsEmptyPlant,
+	"HimalayanSettlement.DataDefinitions.PlantRejectsMissingRequiredFields",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSDefinitionValidationRejectsEmptyPlant::RunTest(const FString& Parameters)
+{
+	const UHSPlantDefinition* PlantDefinition = NewObject<UHSPlantDefinition>();
+	TestFalse(TEXT("A blank plant definition should not validate."), PlantDefinition->IsDefinitionValid());
 	return true;
 }
 

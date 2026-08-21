@@ -55,6 +55,7 @@ Current implementation boundary:
 - The first builder slice starts with one builder, one active job, and a `1.0` day basic house duration.
 - The first persistence slice stores time, progress, carried resources, unlocks, settlement claim, pending schemas, construction jobs, and completed buildings through a versioned native SaveGame.
 - The first hunter intel slice gives one event-driven deer lead per in-game day and spawns a lightweight temporary marker; it does not run a broad ecology simulation.
+- The first herbalist slice teaches one speed herb, applies a temporary movement multiplier, expires through world time, and persists known plants/effects; it does not run a broad plant ecology simulation.
 
 ## NPC Role Use Cases
 

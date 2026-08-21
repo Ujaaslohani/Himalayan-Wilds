@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/HUD.h"
 #include "GameplayTagContainer.h"
+#include "Herbalism/HSPlantEffectComponent.h"
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "HSHUD.generated.h"
 
@@ -52,9 +53,19 @@ public:
 	UFUNCTION()
 	void HandleAnimalLeadExpired(const FHSAnimalLead& AnimalLead);
 
+	UFUNCTION()
+	void HandlePlantKnowledgeLearned(FGameplayTag PlantTag);
+
+	UFUNCTION()
+	void HandlePlantEffectApplied(const FHSPlantEffectState& PlantEffect);
+
+	UFUNCTION()
+	void HandlePlantEffectExpired(const FHSPlantEffectState& PlantEffect);
+
 private:
 	void BindProgressComponent();
 	void BindAnimalIntelComponent();
+	void BindPlantEffectComponent();
 	void BindSettlementPlanComponent();
 	void BindConstructionComponent();
 	void ShowCompletionMessage(FText Message);
@@ -74,6 +85,9 @@ private:
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<class UHSAnimalIntelComponent> BoundAnimalIntelComponent;
+
+	UPROPERTY(Transient)
+	TWeakObjectPtr<class UHSPlantEffectComponent> BoundPlantEffectComponent;
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<class UHSSettlementPlanComponent> BoundSettlementPlanComponent;

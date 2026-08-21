@@ -7,6 +7,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "Herbalism/HSPlantEffectComponent.h"
 #include "InputAction.h"
 #include "InputActionValue.h"
 #include "InputMappingContext.h"
@@ -53,6 +54,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 
 	InteractionSensor = CreateDefaultSubobject<UHSInteractionSensorComponent>(TEXT("InteractionSensor"));
 	AnimalIntelComponent = CreateDefaultSubobject<UHSAnimalIntelComponent>(TEXT("AnimalIntelComponent"));
+	PlantEffectComponent = CreateDefaultSubobject<UHSPlantEffectComponent>(TEXT("PlantEffectComponent"));
 	HuntingComponent = CreateDefaultSubobject<UHSHuntingComponent>(TEXT("HuntingComponent"));
 	ConstructionComponent = CreateDefaultSubobject<UHSConstructionComponent>(TEXT("ConstructionComponent"));
 	SettlementPersistenceComponent = CreateDefaultSubobject<UHSSettlementPersistenceComponent>(TEXT("SettlementPersistenceComponent"));
@@ -111,6 +113,17 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	LoadAction = CreateDefaultSubobject<UInputAction>(TEXT("LoadAction"));
 	LoadAction->ValueType = EInputActionValueType::Boolean;
 	PlayerMappingContext->MapKey(LoadAction, EKeys::F9);
+}
+
+void AHSPlayerCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (PlantEffectComponent)
+	{
+		PlantEffectComponent->OnPlantEffectApplied.AddUniqueDynamic(this, &AHSPlayerCharacter::HandlePlantEffectMovementChanged);
+		PlantEffectComponent->OnPlantEffectExpired.AddUniqueDynamic(this, &AHSPlayerCharacter::HandlePlantEffectMovementChanged);
+	}
 }
 
 void AHSPlayerCharacter::PawnClientRestart()
@@ -247,6 +260,11 @@ void AHSPlayerCharacter::ApplyInputMappingContext()
 	}
 }
 
+void AHSPlayerCharacter::HandlePlantEffectMovementChanged(const FHSPlantEffectState& PlantEffect)
+{
+	ApplyStanceMovementSettings();
+}
+
 void AHSPlayerCharacter::ApplyStanceMovementSettings()
 {
 	UCharacterMovementComponent* MovementComponent = GetCharacterMovement();
@@ -256,13 +274,15 @@ void AHSPlayerCharacter::ApplyStanceMovementSettings()
 		return;
 	}
 
+	const float PlantSpeedMultiplier = PlantEffectComponent ? PlantEffectComponent->GetMovementSpeedMultiplier() : 1.0f;
+
 	switch (PlayerStance)
 	{
 	case EHSPlayerStance::Crouching:
 		UnCrouch(false);
 		Capsule->SetCapsuleHalfHeight(CrouchCapsuleHalfHeight, true);
 		FirstPersonCamera->SetRelativeLocation(FVector(0.0f, 0.0f, CrouchCameraHeight));
-		MovementComponent->MaxWalkSpeed = CrouchWalkSpeed;
+		MovementComponent->MaxWalkSpeed = CrouchWalkSpeed * PlantSpeedMultiplier;
 		Crouch(false);
 		break;
 
@@ -270,7 +290,7 @@ void AHSPlayerCharacter::ApplyStanceMovementSettings()
 		UnCrouch(false);
 		Capsule->SetCapsuleHalfHeight(ProneCapsuleHalfHeight, true);
 		FirstPersonCamera->SetRelativeLocation(FVector(0.0f, 0.0f, ProneCameraHeight));
-		MovementComponent->MaxWalkSpeed = ProneMoveSpeed;
+		MovementComponent->MaxWalkSpeed = ProneMoveSpeed * PlantSpeedMultiplier;
 		break;
 
 	case EHSPlayerStance::Standing:
@@ -278,7 +298,7 @@ void AHSPlayerCharacter::ApplyStanceMovementSettings()
 		UnCrouch(false);
 		Capsule->SetCapsuleHalfHeight(StandingCapsuleHalfHeight, true);
 		FirstPersonCamera->SetRelativeLocation(FVector(0.0f, 0.0f, StandingCameraHeight));
-		MovementComponent->MaxWalkSpeed = StandingWalkSpeed;
+		MovementComponent->MaxWalkSpeed = StandingWalkSpeed * PlantSpeedMultiplier;
 		break;
 	}
 }

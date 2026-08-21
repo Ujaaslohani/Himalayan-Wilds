@@ -11,9 +11,9 @@ Target split:
 
 ## Scope Boundary
 
-Current milestone: One Morning Hunt.
+Current milestone: early vertical-slice foundations through One Morning Hunt, temporary sleep, settlement schema, builder construction, persistence, hunter intel, and herbalist plant knowledge.
 
-The player starts in a primitive settlement, talks to one hunter NPC, receives a deer-hunting task, tracks and hunts a deer, harvests resources, returns to the NPC, unlocks one object, builds it, and ends the day.
+The player starts in a primitive settlement, talks to one hunter NPC, receives a deer-hunting task, tracks and hunts a deer, harvests resources, returns to the NPC, unlocks early settlement progression, places a house schema, uses specialist NPC services, and advances time through sleep.
 
 No multiplayer, large procedural world, economy simulation, complex story framework, advanced survival model, or broad animal roster should be added during this milestone.
 
@@ -29,12 +29,13 @@ Source/HimalayanSettlement/
   Animals/
   AI/
   Hunting/
+  Herbalism/
   NPC/
   Settlement/
   Building/
   Quests/
   Progression/
-  Save/
+  Persistence/
   World/
   Tests/
 ```
@@ -47,6 +48,7 @@ Initial definition types:
 
 - `UHSItemDefinition`
 - `UHSAnimalDefinition`
+- `UHSPlantDefinition`
 - `UHSNPCDefinition`
 - `UHSBuildingDefinition`
 - `UHSQuestDefinition`
@@ -63,7 +65,7 @@ The first quest handoff is intentionally small: `UHSQuestHandoffComponent` refer
 
 ## HUD
 
-`AHSHUD` is the first native HUD layer. It draws a minimal interaction prompt from the player interaction sensor cache and a short completion message when player progress reports a completed milestone. It is intentionally not a broader inventory, dialogue, quest log, or survival HUD.
+`AHSHUD` is the first native HUD layer. It draws a minimal interaction prompt from the player interaction sensor cache and short feedback messages for progress, settlement planning, construction, hunter intel, and plant effects. It is intentionally not a broader inventory, dialogue, quest log, or survival HUD.
 
 ## Prototype Visual Markers
 
@@ -88,6 +90,18 @@ Native placeholder actors own simple non-colliding static mesh components using 
 ## Settlement Unlock State
 
 `UHSSettlementUnlockComponent` is the first lightweight settlement unlock state on the player. Quest reward unlock tags are granted once and can be queried by later building/placeable systems. It is not yet building placement, construction, resource spending, UI, settlement storage, or persistence.
+
+## Specialist Role Services
+
+NPC services are currently direct native role slices rather than a broad role framework. Builder starts pending schema construction, Hunter reports one daily animal lead, and Herbalist teaches one known plant. Each slice stays event-driven and can later move behind a shared role-service interface when duplication becomes real.
+
+## Herbalism
+
+`UHSPlantEffectComponent` stores known plants and one active temporary effect on the player. `AHSPlantActor` is a no-tick interactable that applies a known plant definition and consumes itself. Plant effects expire from `UHSWorldTimeComponent` events, not per-frame checks.
+
+## Persistence
+
+`UHSSettlementSaveGame` is versioned and stores time, milestones, carried resources, settlement unlocks, schema state, construction jobs, hunter intel, and herbalist plant state. `UHSSettlementPersistenceComponent` snapshots and restores from native components and rejects unsupported save versions.
 
 ## Performance Rules
 

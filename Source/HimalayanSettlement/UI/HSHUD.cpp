@@ -2,6 +2,7 @@
 
 #include "Engine/Canvas.h"
 #include "GameFramework/PlayerController.h"
+#include "Herbalism/HSPlantEffectComponent.h"
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "Interaction/HSInteractionSensorComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
@@ -29,6 +30,7 @@ void AHSHUD::DrawHUD()
 
 	BindProgressComponent();
 	BindAnimalIntelComponent();
+	BindPlantEffectComponent();
 	BindSettlementPlanComponent();
 	BindConstructionComponent();
 
@@ -73,7 +75,7 @@ void AHSHUD::HandleMilestoneCompleted(FGameplayTag MilestoneTag)
 		return;
 	}
 
-	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "MilestoneCompleted", "Completed: {Milestone}"), FText::FromString(MilestoneTag.ToString())));
+	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "MilestoneCompleted", "Completed: {0}"), FText::FromString(MilestoneTag.ToString())));
 }
 
 void AHSHUD::HandleSettlementClaimed(FVector ClaimCenter)
@@ -83,27 +85,42 @@ void AHSHUD::HandleSettlementClaimed(FVector ClaimCenter)
 
 void AHSHUD::HandleBuildingSchemaPlaced(const FHSPendingBuildingSchema& PendingSchema)
 {
-	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "SchemaPending", "Schema pending: {Building}"), FText::FromString(PendingSchema.BuildingTag.ToString())));
+	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "SchemaPending", "Schema pending: {0}"), FText::FromString(PendingSchema.BuildingTag.ToString())));
 }
 
 void AHSHUD::HandleConstructionJobStarted(const FHSConstructionJob& ConstructionJob)
 {
-	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "ConstructionStarted", "Construction started: {Building}"), FText::FromString(ConstructionJob.BuildingTag.ToString())));
+	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "ConstructionStarted", "Construction started: {0}"), FText::FromString(ConstructionJob.BuildingTag.ToString())));
 }
 
 void AHSHUD::HandleConstructionJobCompleted(const FHSConstructionJob& ConstructionJob)
 {
-	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "ConstructionComplete", "Construction complete: {Building}"), FText::FromString(ConstructionJob.BuildingTag.ToString())));
+	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "ConstructionComplete", "Construction complete: {0}"), FText::FromString(ConstructionJob.BuildingTag.ToString())));
 }
 
 void AHSHUD::HandleAnimalLeadReported(const FHSAnimalLead& AnimalLead)
 {
-	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "AnimalLeadReported", "Animal spotted: {Animal}"), FText::FromString(AnimalLead.AnimalTag.ToString())));
+	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "AnimalLeadReported", "Animal spotted: {0}"), FText::FromString(AnimalLead.AnimalTag.ToString())));
 }
 
 void AHSHUD::HandleAnimalLeadExpired(const FHSAnimalLead& AnimalLead)
 {
-	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "AnimalLeadExpired", "Animal lead expired: {Animal}"), FText::FromString(AnimalLead.AnimalTag.ToString())));
+	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "AnimalLeadExpired", "Animal lead expired: {0}"), FText::FromString(AnimalLead.AnimalTag.ToString())));
+}
+
+void AHSHUD::HandlePlantKnowledgeLearned(FGameplayTag PlantTag)
+{
+	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "PlantKnowledgeLearned", "Plant learned: {0}"), FText::FromString(PlantTag.ToString())));
+}
+
+void AHSHUD::HandlePlantEffectApplied(const FHSPlantEffectState& PlantEffect)
+{
+	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "PlantEffectApplied", "Plant effect active: {0}"), FText::FromString(PlantEffect.EffectTag.ToString())));
+}
+
+void AHSHUD::HandlePlantEffectExpired(const FHSPlantEffectState& PlantEffect)
+{
+	ShowCompletionMessage(FText::Format(NSLOCTEXT("HimalayanSettlementHUD", "PlantEffectExpired", "Plant effect expired: {0}"), FText::FromString(PlantEffect.EffectTag.ToString())));
 }
 
 void AHSHUD::BindProgressComponent()
@@ -152,6 +169,33 @@ void AHSHUD::BindAnimalIntelComponent()
 	BoundAnimalIntelComponent = AnimalIntelComponent;
 	AnimalIntelComponent->OnAnimalLeadReported.AddUniqueDynamic(this, &AHSHUD::HandleAnimalLeadReported);
 	AnimalIntelComponent->OnAnimalLeadExpired.AddUniqueDynamic(this, &AHSHUD::HandleAnimalLeadExpired);
+}
+
+void AHSHUD::BindPlantEffectComponent()
+{
+	if (!PlayerOwner)
+	{
+		return;
+	}
+
+	APawn* Pawn = PlayerOwner->GetPawn();
+	UHSPlantEffectComponent* PlantEffectComponent = Pawn ? Pawn->FindComponentByClass<UHSPlantEffectComponent>() : nullptr;
+	if (!PlantEffectComponent || BoundPlantEffectComponent.Get() == PlantEffectComponent)
+	{
+		return;
+	}
+
+	if (UHSPlantEffectComponent* PreviousPlantEffectComponent = BoundPlantEffectComponent.Get())
+	{
+		PreviousPlantEffectComponent->OnPlantKnowledgeLearned.RemoveDynamic(this, &AHSHUD::HandlePlantKnowledgeLearned);
+		PreviousPlantEffectComponent->OnPlantEffectApplied.RemoveDynamic(this, &AHSHUD::HandlePlantEffectApplied);
+		PreviousPlantEffectComponent->OnPlantEffectExpired.RemoveDynamic(this, &AHSHUD::HandlePlantEffectExpired);
+	}
+
+	BoundPlantEffectComponent = PlantEffectComponent;
+	PlantEffectComponent->OnPlantKnowledgeLearned.AddUniqueDynamic(this, &AHSHUD::HandlePlantKnowledgeLearned);
+	PlantEffectComponent->OnPlantEffectApplied.AddUniqueDynamic(this, &AHSHUD::HandlePlantEffectApplied);
+	PlantEffectComponent->OnPlantEffectExpired.AddUniqueDynamic(this, &AHSHUD::HandlePlantEffectExpired);
 }
 
 void AHSHUD::BindSettlementPlanComponent()

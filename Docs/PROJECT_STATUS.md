@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 6: Hunter Role: Daily Animal Intel: in progress.
+Milestone 7: Herbalist Role: Plant Knowledge: implementation complete; hands-on closeout pending.
 
 ## Engine Version
 
@@ -70,6 +70,13 @@ Unreal Engine 5.5.4.
 - Hunter NPC interaction now reports daily animal signs after quest handoff priority.
 - Native HUD feedback added for animal lead reported/expired.
 - Milestone 6 hunter daily animal intel foundation compiles.
+- Native plant definition asset class added for plant tags, effect tags, movement multiplier, and duration.
+- Native plant effect component added for learned plant knowledge, temporary player effects, time-based expiry, and persistence restore.
+- Native plant actor added as a no-tick interactable that applies known plant effects and consumes itself.
+- Herbalist profession tag, herbalist data asset, and herbalist NPC bootstrap path added.
+- Player movement now applies active plant speed multipliers across standing, crouch, and prone speeds.
+- Native HUD feedback added for plant knowledge learned, plant effect applied, and plant effect expired.
+- Milestone 7 herbalist plant knowledge foundation compiles.
 - Native One Morning Hunt loop smoke test added for accept, hunt, harvest, turn-in, milestone, and unlock flow.
 - VS Code tasks added for building, automation tests, content bootstrap, and opening the One Morning Hunt map.
 - Headless One Morning Hunt map launch smoke pass succeeds and loads `HSGameMode`.
@@ -78,11 +85,11 @@ Unreal Engine 5.5.4.
 - Hands-on movement playtest passed for jump, crouch, and prone.
 - Milestone 3 settlement claim and house schema foundation compiles.
 - Content bootstrap succeeds with zero warnings and regenerates the basic house schema marker.
-- All 57 `HimalayanSettlement` automation tests pass.
+- All 61 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 
-- Milestone 6 automation and hands-on hunter intel playtest.
+- Hands-on closeout for Milestone 6 hunter intel and Milestone 7 herbalist plant knowledge.
 
 ## Known Blockers
 
@@ -102,7 +109,7 @@ Unreal Engine 5.5.4.
 
 ## Next Tasks
 
-1. Run automation for hunter daily animal intel.
-2. Run hands-on playtest: ask hunter for animal signs, confirm marker appears, sleep into next day, and confirm a fresh report is available.
+1. Run hands-on hunter intel playtest: ask hunter for animal signs, confirm marker appears, sleep into next day, and confirm a fresh report is available.
+2. Run hands-on herbalist playtest: talk to Herbalist, use Speed Herb, confirm movement is faster, sleep/advance time, and confirm the effect expires.
 3. Run hands-on closeout for Milestones 3-5 if not already confirmed in-editor.
 4. Record numeric FPS using the low-end profile task before forest density increases.

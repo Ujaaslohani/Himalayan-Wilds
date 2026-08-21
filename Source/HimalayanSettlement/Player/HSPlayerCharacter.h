@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "Herbalism/HSPlantEffectComponent.h"
 #include "HSPlayerCharacter.generated.h"
 
 class UCameraComponent;
@@ -34,12 +35,14 @@ class HIMALAYANSETTLEMENT_API AHSPlayerCharacter : public ACharacter
 public:
 	AHSPlayerCharacter();
 
+	virtual void BeginPlay() override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 	virtual void PawnClientRestart() override;
 
 	UCameraComponent* GetFirstPersonCamera() const { return FirstPersonCamera; }
 	UHSInteractionSensorComponent* GetInteractionSensor() const { return InteractionSensor; }
 	UHSAnimalIntelComponent* GetAnimalIntelComponent() const { return AnimalIntelComponent; }
+	UHSPlantEffectComponent* GetPlantEffectComponent() const { return PlantEffectComponent; }
 	UHSHuntingComponent* GetHuntingComponent() const { return HuntingComponent; }
 	UHSConstructionComponent* GetConstructionComponent() const { return ConstructionComponent; }
 	UHSSettlementPersistenceComponent* GetSettlementPersistenceComponent() const { return SettlementPersistenceComponent; }
@@ -80,6 +83,9 @@ private:
 	void ApplyInputMappingContext();
 	void ApplyStanceMovementSettings();
 
+	UFUNCTION()
+	void HandlePlantEffectMovementChanged(const struct FHSPlantEffectState& PlantEffect);
+
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UCameraComponent> FirstPersonCamera;
 
@@ -88,6 +94,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSAnimalIntelComponent> AnimalIntelComponent;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player")
+	TObjectPtr<UHSPlantEffectComponent> PlantEffectComponent;
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSHuntingComponent> HuntingComponent;

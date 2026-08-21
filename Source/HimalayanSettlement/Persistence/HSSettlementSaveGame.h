@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/SaveGame.h"
 #include "GameplayTagContainer.h"
+#include "Herbalism/HSPlantEffectComponent.h"
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "Resources/HSItemStack.h"
 #include "Settlement/HSConstructionComponent.h"
@@ -16,7 +17,7 @@ class HIMALAYANSETTLEMENT_API UHSSettlementSaveGame : public USaveGame
 	GENERATED_BODY()
 
 public:
-	static constexpr int32 CurrentSaveVersion = 2;
+	static constexpr int32 CurrentSaveVersion = 3;
 
 	UHSSettlementSaveGame();
 
@@ -61,6 +62,12 @@ public:
 
 	UPROPERTY(VisibleAnywhere, Category = "Save|Hunter")
 	int32 LastAnimalLeadReportDay;
+
+	UPROPERTY(VisibleAnywhere, Category = "Save|Herbalism")
+	FGameplayTagContainer KnownPlants;
+
+	UPROPERTY(VisibleAnywhere, Category = "Save|Herbalism")
+	FHSPlantEffectState ActivePlantEffect;
 
 	bool IsSupportedVersion() const;
 };

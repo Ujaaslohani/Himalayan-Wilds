@@ -113,7 +113,7 @@ Complete when:
 
 ## Milestone 6: Hunter Role: Daily Animal Intel
 
-Status: In progress.
+Status: Implementation complete; hands-on closeout pending.
 
 Player experience: A recruited hunter becomes useful every day by reporting nearby animal activity. The player gets one daily lead, such as "deer spotted near the ridge," and a temporary marker appears.
 
@@ -133,6 +133,8 @@ Complete when:
 - Automation covers daily report generation and refresh gating.
 
 ## Milestone 7: Herbalist Role: Plant Knowledge
+
+Status: Implementation complete; hands-on closeout pending.
 
 Player experience: A herbalist makes the forest more interesting by identifying useful plants and effects. Plants become preparation tools for exploration and hunting.
 

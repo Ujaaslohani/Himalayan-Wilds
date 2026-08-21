@@ -16,6 +16,8 @@
 #include "Factories/WorldFactory.h"
 #include "GameFramework/PlayerStart.h"
 #include "GameplayTagsManager.h"
+#include "Herbalism/HSPlantActor.h"
+#include "Herbalism/HSPlantDefinition.h"
 #include "Interaction/HSInteractionTarget.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
@@ -171,6 +173,21 @@ void CreateDefinitions()
 	Builder->UnlockTags.Reset();
 	SaveAssetPackage(Builder);
 
+	UHSNPCDefinition* Herbalist = ConfigureAsset<UHSNPCDefinition>(TEXT("/Game/Data/NPCs/DA_NPC_Herbalist"), TEXT("DA_NPC_Herbalist"));
+	Herbalist->DisplayName = FText::FromString(TEXT("Herbalist"));
+	Herbalist->ProfessionTag = Tag(TEXT("NPC.Profession.Herbalist"));
+	Herbalist->KnowledgeTags = Tags({ TEXT("Plant.SpeedHerb") });
+	Herbalist->UnlockTags.Reset();
+	SaveAssetPackage(Herbalist);
+
+	UHSPlantDefinition* SpeedHerb = ConfigureAsset<UHSPlantDefinition>(TEXT("/Game/Data/Plants/DA_Plant_SpeedHerb"), TEXT("DA_Plant_SpeedHerb"));
+	SpeedHerb->DisplayName = FText::FromString(TEXT("Speed Herb"));
+	SpeedHerb->PlantTag = Tag(TEXT("Plant.SpeedHerb"));
+	SpeedHerb->EffectTag = Tag(TEXT("Effect.Plant.Speed"));
+	SpeedHerb->MovementSpeedMultiplier = 1.25f;
+	SpeedHerb->DurationDays = 0.5f;
+	SaveAssetPackage(SpeedHerb);
+
 	UHSBuildingDefinition* Rack = ConfigureAsset<UHSBuildingDefinition>(TEXT("/Game/Data/Buildings/DA_Building_BasicDryingRack"), TEXT("DA_Building_BasicDryingRack"));
 	Rack->DisplayName = FText::FromString(TEXT("Basic Drying Rack"));
 	Rack->BuildingTag = Tag(TEXT("Building.BasicDryingRack"));
@@ -279,6 +296,9 @@ void CreateMap()
 	AHSNPCActor* Builder = SpawnNamedActor<AHSNPCActor>(World, TEXT("NPC_Builder"), FVector(-360.0f, -260.0f, 90.0f), FRotator(0.0f, 80.0f, 0.0f));
 	Builder->SetNPCDefinition(GetOrCreateAsset<UHSNPCDefinition>(TEXT("/Game/Data/NPCs/DA_NPC_Builder"), TEXT("DA_NPC_Builder")));
 
+	AHSNPCActor* Herbalist = SpawnNamedActor<AHSNPCActor>(World, TEXT("NPC_Herbalist"), FVector(-460.0f, 120.0f, 90.0f), FRotator(0.0f, 65.0f, 0.0f));
+	Herbalist->SetNPCDefinition(GetOrCreateAsset<UHSNPCDefinition>(TEXT("/Game/Data/NPCs/DA_NPC_Herbalist"), TEXT("DA_NPC_Herbalist")));
+
 	AHSAnimalActor* Deer = SpawnNamedActor<AHSAnimalActor>(World, TEXT("Animal_Deer_Prototype"), FVector(650.0f, -180.0f, 70.0f), FRotator(0.0f, -35.0f, 0.0f));
 	if (UHSAnimalDefinition* DeerDefinition = LoadObject<UHSAnimalDefinition>(nullptr, TEXT("/Game/Data/Animals/DA_Animal_Deer.DA_Animal_Deer")))
 	{
@@ -291,6 +311,9 @@ void CreateMap()
 	SpawnNamedActor<AHSSettlementClaimActor>(World, TEXT("Settlement_Claim_Marker"), FVector(-80.0f, -260.0f, 55.0f), FRotator::ZeroRotator);
 	AHSBuildingSchemaActor* HouseSchema = SpawnNamedActor<AHSBuildingSchemaActor>(World, TEXT("Schema_BasicHouse_Pending"), FVector(260.0f, -300.0f, 75.0f), FRotator(0.0f, 18.0f, 0.0f));
 	HouseSchema->SetBuildingDefinition(GetOrCreateAsset<UHSBuildingDefinition>(TEXT("/Game/Data/Buildings/DA_Building_BasicHouse"), TEXT("DA_Building_BasicHouse")));
+
+	AHSPlantActor* SpeedHerb = SpawnNamedActor<AHSPlantActor>(World, TEXT("Plant_SpeedHerb"), FVector(360.0f, 230.0f, 45.0f), FRotator::ZeroRotator);
+	SpeedHerb->SetPlantDefinition(GetOrCreateAsset<UHSPlantDefinition>(TEXT("/Game/Data/Plants/DA_Plant_SpeedHerb"), TEXT("DA_Plant_SpeedHerb")));
 
 	World->MarkPackageDirty();
 	SaveMapPackage(World);

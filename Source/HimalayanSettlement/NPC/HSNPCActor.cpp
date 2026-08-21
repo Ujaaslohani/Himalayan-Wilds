@@ -4,6 +4,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Core/HSGameplayTags.h"
 #include "Core/HSLogCategories.h"
+#include "Herbalism/HSPlantEffectComponent.h"
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "NPC/HSNPCDefinition.h"
 #include "Quests/HSQuestHandoffComponent.h"
@@ -23,6 +24,11 @@ bool IsBuilderNPC(const AHSNPCActor& NPC)
 bool IsHunterNPC(const AHSNPCActor& NPC)
 {
 	return NPC.GetProfessionTag() == TAG_HS_NPC_Profession_Hunter;
+}
+
+bool IsHerbalistNPC(const AHSNPCActor& NPC)
+{
+	return NPC.GetProfessionTag() == TAG_HS_NPC_Profession_Herbalist;
 }
 
 bool TryStartBuilderConstruction(const AHSNPCActor& Builder, AActor* Interactor)
@@ -46,6 +52,17 @@ bool TryReportHunterAnimalLead(const AHSNPCActor& Hunter, AActor* Interactor)
 
 	UHSAnimalIntelComponent* AnimalIntelComponent = Interactor->FindComponentByClass<UHSAnimalIntelComponent>();
 	return AnimalIntelComponent && AnimalIntelComponent->RequestDailyAnimalLead();
+}
+
+bool TryTeachHerbalistPlantKnowledge(const AHSNPCActor& Herbalist, AActor* Interactor)
+{
+	if (!IsHerbalistNPC(Herbalist) || !Interactor)
+	{
+		return false;
+	}
+
+	UHSPlantEffectComponent* PlantEffectComponent = Interactor->FindComponentByClass<UHSPlantEffectComponent>();
+	return PlantEffectComponent && PlantEffectComponent->LearnPlant(TAG_HS_Plant_SpeedHerb);
 }
 }
 
@@ -130,6 +147,15 @@ FText AHSNPCActor::GetInteractionPrompt_Implementation(const AActor* Interactor)
 		}
 	}
 
+	if (IsHerbalistNPC(*this))
+	{
+		const UHSPlantEffectComponent* PlantEffectComponent = Interactor ? Interactor->FindComponentByClass<UHSPlantEffectComponent>() : nullptr;
+		if (PlantEffectComponent && !PlantEffectComponent->HasPlantKnowledge(TAG_HS_Plant_SpeedHerb))
+		{
+			return LOCTEXT("LearnPlantKnowledgePrompt", "Learn plant knowledge");
+		}
+	}
+
 	FFormatNamedArguments Arguments;
 	Arguments.Add(TEXT("Name"), GetDisplayName());
 	return FText::Format(InteractionPromptFormat, Arguments);
@@ -146,15 +172,17 @@ void AHSNPCActor::Interact_Implementation(AActor* Interactor)
 	const bool bStartedConstruction = TryStartBuilderConstruction(*this, Interactor);
 	const bool bAdvancedQuest = !bStartedConstruction && QuestHandoffComponent && QuestHandoffComponent->TryAdvanceQuest(Interactor);
 	const bool bReportedAnimalLead = !bStartedConstruction && !bAdvancedQuest && TryReportHunterAnimalLead(*this, Interactor);
+	const bool bTaughtPlantKnowledge = !bStartedConstruction && !bAdvancedQuest && !bReportedAnimalLead && TryTeachHerbalistPlantKnowledge(*this, Interactor);
 	UE_LOG(
 		LogHSInteraction,
 		Log,
-		TEXT("%s started conversation with %s. Construction started: %s. Quest advanced: %s. Animal lead reported: %s. Interaction count: %d."),
+		TEXT("%s started conversation with %s. Construction started: %s. Quest advanced: %s. Animal lead reported: %s. Plant knowledge taught: %s. Interaction count: %d."),
 		*GetNameSafe(Interactor),
 		*GetNameSafe(this),
 		bStartedConstruction ? TEXT("true") : TEXT("false"),
 		bAdvancedQuest ? TEXT("true") : TEXT("false"),
 		bReportedAnimalLead ? TEXT("true") : TEXT("false"),
+		bTaughtPlantKnowledge ? TEXT("true") : TEXT("false"),
 		InteractionCount);
 }
 

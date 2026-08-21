@@ -2,6 +2,7 @@
 
 #include "Core/HSLogCategories.h"
 #include "Engine/World.h"
+#include "Herbalism/HSPlantEffectComponent.h"
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Persistence/HSSettlementSaveGame.h"
@@ -75,6 +76,12 @@ bool UHSSettlementPersistenceComponent::CaptureToSaveGame(UHSSettlementSaveGame*
 		SaveGame->LastAnimalLeadReportDay = AnimalIntel->GetLastReportDay();
 	}
 
+	if (const UHSPlantEffectComponent* PlantEffect = Owner->FindComponentByClass<UHSPlantEffectComponent>())
+	{
+		SaveGame->KnownPlants = PlantEffect->GetKnownPlants();
+		SaveGame->ActivePlantEffect = PlantEffect->GetActiveEffect();
+	}
+
 	return true;
 }
 
@@ -122,6 +129,12 @@ bool UHSSettlementPersistenceComponent::RestoreFromSaveGame(const UHSSettlementS
 	{
 		AnimalIntel->RestoreAnimalIntelState(SaveGame->ActiveAnimalLead, SaveGame->LastAnimalLeadReportDay);
 		AnimalIntel->BindToWorldTime();
+	}
+
+	if (UHSPlantEffectComponent* PlantEffect = Owner->FindComponentByClass<UHSPlantEffectComponent>())
+	{
+		PlantEffect->RestorePlantState(SaveGame->KnownPlants, SaveGame->ActivePlantEffect);
+		PlantEffect->BindToWorldTime();
 	}
 
 	return true;

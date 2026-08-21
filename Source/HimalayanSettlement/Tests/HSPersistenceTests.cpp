@@ -3,6 +3,8 @@
 #include "Misc/AutomationTest.h"
 #include "Building/HSBuildingDefinition.h"
 #include "Core/HSGameplayTags.h"
+#include "Herbalism/HSPlantDefinition.h"
+#include "Herbalism/HSPlantEffectComponent.h"
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "Persistence/HSSettlementPersistenceComponent.h"
 #include "Persistence/HSSettlementSaveGame.h"
@@ -25,6 +27,17 @@ UHSBuildingDefinition* CreatePersistenceTestBuilding(UObject* Outer, FGameplayTa
 	return BuildingDefinition;
 }
 
+UHSPlantDefinition* CreatePersistenceTestPlant(UObject* Outer)
+{
+	UHSPlantDefinition* PlantDefinition = NewObject<UHSPlantDefinition>(Outer);
+	PlantDefinition->DisplayName = FText::FromString(TEXT("Speed Herb"));
+	PlantDefinition->PlantTag = TAG_HS_Plant_SpeedHerb;
+	PlantDefinition->EffectTag = TAG_HS_Effect_Plant_Speed;
+	PlantDefinition->MovementSpeedMultiplier = 1.25f;
+	PlantDefinition->DurationDays = 0.5f;
+	return PlantDefinition;
+}
+
 bool SeedPersistentSettlementState(AHSPlayerCharacter& Player, UHSWorldTimeComponent& WorldTime)
 {
 	UHSSettlementPlanComponent* SettlementPlan = Player.GetSettlementPlanComponent();
@@ -33,7 +46,8 @@ bool SeedPersistentSettlementState(AHSPlayerCharacter& Player, UHSWorldTimeCompo
 	UHSResourceCarryComponent* Carry = Player.GetResourceCarryComponent();
 	UHSSettlementUnlockComponent* Unlocks = Player.GetSettlementUnlockComponent();
 	UHSAnimalIntelComponent* AnimalIntel = Player.GetAnimalIntelComponent();
-	if (!SettlementPlan || !Construction || !Progress || !Carry || !Unlocks || !AnimalIntel)
+	UHSPlantEffectComponent* PlantEffect = Player.GetPlantEffectComponent();
+	if (!SettlementPlan || !Construction || !Progress || !Carry || !Unlocks || !AnimalIntel || !PlantEffect)
 	{
 		return false;
 	}
@@ -54,6 +68,8 @@ bool SeedPersistentSettlementState(AHSPlayerCharacter& Player, UHSWorldTimeCompo
 	Carry->AddStack(FHSItemStack{ TAG_HS_Resource_Meat_Deer, 3 });
 	Unlocks->GrantUnlock(TAG_HS_Building_BasicHouse);
 	AnimalIntel->RequestDailyAnimalLead();
+	PlantEffect->LearnPlant(TAG_HS_Plant_SpeedHerb);
+	PlantEffect->ApplyPlantEffect(CreatePersistenceTestPlant(&Player));
 
 	return bSeededSettlement;
 }
@@ -131,6 +147,8 @@ bool FHSPersistenceSnapshotRestoresSettlementStateTest::RunTest(const FString& P
 	TestEqual(TEXT("Snapshot should store one construction job."), Snapshot->ConstructionJobs.Num(), 1);
 	TestEqual(TEXT("Snapshot should store carried meat."), Snapshot->CarriedItems.Num(), 1);
 	TestTrue(TEXT("Snapshot should store active animal lead."), Snapshot->ActiveAnimalLead.IsValid());
+	TestTrue(TEXT("Snapshot should store known speed herb."), Snapshot->KnownPlants.HasTagExact(TAG_HS_Plant_SpeedHerb));
+	TestTrue(TEXT("Snapshot should store active plant effect."), Snapshot->ActivePlantEffect.IsValid());
 
 	TestTrue(TEXT("Snapshot should restore successfully."), RestoredPersistence->RestoreFromSaveGame(Snapshot));
 
@@ -140,6 +158,7 @@ bool FHSPersistenceSnapshotRestoresSettlementStateTest::RunTest(const FString& P
 	UHSResourceCarryComponent* RestoredCarry = RestoredPlayer->GetResourceCarryComponent();
 	UHSSettlementUnlockComponent* RestoredUnlocks = RestoredPlayer->GetSettlementUnlockComponent();
 	UHSAnimalIntelComponent* RestoredAnimalIntel = RestoredPlayer->GetAnimalIntelComponent();
+	UHSPlantEffectComponent* RestoredPlantEffect = RestoredPlayer->GetPlantEffectComponent();
 
 	TestTrue(TEXT("Restored plan should keep settlement claim."), RestoredPlan && RestoredPlan->HasSettlementClaim());
 	TestTrue(TEXT("Restored plan should keep pending drying rack schema."), RestoredPlan && RestoredPlan->HasPendingSchema(TAG_HS_Building_BasicDryingRack));
@@ -149,9 +168,12 @@ bool FHSPersistenceSnapshotRestoresSettlementStateTest::RunTest(const FString& P
 	TestEqual(TEXT("Restored carry should keep meat quantity."), RestoredCarry ? RestoredCarry->GetQuantityForTag(TAG_HS_Resource_Meat_Deer) : 0, 3);
 	TestTrue(TEXT("Restored unlocks should keep house unlock."), RestoredUnlocks && RestoredUnlocks->HasUnlock(TAG_HS_Building_BasicHouse));
 	TestTrue(TEXT("Restored animal intel should keep active deer lead."), RestoredAnimalIntel && RestoredAnimalIntel->HasActiveLead() && RestoredAnimalIntel->GetActiveLead().AnimalTag == TAG_HS_Animal_Deer);
+	TestTrue(TEXT("Restored plant knowledge should keep speed herb."), RestoredPlantEffect && RestoredPlantEffect->HasPlantKnowledge(TAG_HS_Plant_SpeedHerb));
+	TestTrue(TEXT("Restored plant effect should keep active speed effect."), RestoredPlantEffect && RestoredPlantEffect->HasActiveEffect() && RestoredPlantEffect->GetActiveEffect().EffectTag == TAG_HS_Effect_Plant_Speed);
 
 	WorldTime->AdvanceHalfDay();
 	TestTrue(TEXT("Restored active construction should complete after another half-day."), RestoredConstruction && RestoredConstruction->HasCompletedBuilding(TAG_HS_Building_BasicHouse));
+	TestFalse(TEXT("Restored active plant effect should expire with world time."), RestoredPlantEffect && RestoredPlantEffect->HasActiveEffect());
 
 	World->DestroyWorld(false);
 	return true;
