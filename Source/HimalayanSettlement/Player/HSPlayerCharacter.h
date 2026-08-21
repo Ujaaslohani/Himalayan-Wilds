@@ -93,6 +93,9 @@ public:
 	bool IsBuildMenuOpen() const { return bBuildMenuOpen; }
 
 	UFUNCTION(BlueprintPure, Category = "Player|Menu")
+	int32 GetSelectedInventoryIndex() const { return SelectedInventoryIndex; }
+
+	UFUNCTION(BlueprintPure, Category = "Player|Menu")
 	int32 GetGraphicsQualityPreset() const { return GraphicsQualityPreset; }
 
 	UFUNCTION(BlueprintPure, Category = "Player|Menu")
@@ -148,6 +151,15 @@ public:
 	bool DropInventoryStackQuantity(int32 StackIndex, int32 Quantity);
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	bool InspectSelectedInventoryStack();
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	bool DropSelectedInventoryStackQuantity(int32 Quantity);
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
+	void SelectInventoryDelta(int32 Delta);
+
+	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
 	void CycleGraphicsQualityPreset();
 
 	UFUNCTION(BlueprintCallable, Category = "Player|Menu")
@@ -197,6 +209,7 @@ private:
 	void BindAutosaveSources();
 	void SetMenuFeedback(FText Feedback);
 	void RefreshBowVisuals();
+	void ClampSelectedInventoryIndex();
 
 	UFUNCTION()
 	void HandleAutosaveMilestoneCompleted(FGameplayTag MilestoneTag);
@@ -377,6 +390,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
 	bool bBuildMenuOpen;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
+	int32 SelectedInventoryIndex;
 
 	UPROPERTY(VisibleAnywhere, Category = "Player|Menu")
 	int32 GraphicsQualityPreset;

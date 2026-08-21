@@ -652,17 +652,23 @@ void AHSHUD::DrawInventoryMenu(const AHSPlayerCharacter* PlayerCharacter)
 	}
 	else
 	{
-		for (const FHSItemStack& Stack : ResourceCarryComponent->GetCarriedItems())
+		const int32 SelectedInventoryIndex = PlayerCharacter->GetSelectedInventoryIndex();
+		const TArray<FHSItemStack>& CarriedItems = ResourceCarryComponent->GetCarriedItems();
+		for (int32 StackIndex = 0; StackIndex < CarriedItems.Num(); ++StackIndex)
 		{
+			const FHSItemStack& Stack = CarriedItems[StackIndex];
 			if (Stack.IsValidStack())
 			{
-				DrawText(FString::Printf(TEXT("%s   x%d"), *Stack.ItemTag.ToString(), Stack.Quantity), FLinearColor::White, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.9f, false);
+				const bool bSelected = StackIndex == SelectedInventoryIndex;
+				const FString SelectionMarker = bSelected ? TEXT(">") : TEXT(" ");
+				const FLinearColor StackColor = bSelected ? FLinearColor(0.75f, 1.0f, 0.72f, 1.0f) : FLinearColor::White;
+				DrawText(FString::Printf(TEXT("%s %s   x%d"), *SelectionMarker, *Stack.ItemTag.ToString(), Stack.Quantity), StackColor, PanelX + 58.0f, LineY, GEngine->GetMediumFont(), 0.9f, false);
 				LineY += 28.0f;
 			}
 		}
 	}
 
-	DrawText(TEXT("[1] Inspect first   [2] Drop one   [3] Drop stack"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, PanelY + PanelHeight - 70.0f, GEngine->GetSmallFont(), 0.85f, false);
+	DrawText(TEXT("[Q/R] Select   [1] Inspect   [2] Drop one   [3] Drop stack"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, PanelY + PanelHeight - 70.0f, GEngine->GetSmallFont(), 0.85f, false);
 	DrawPlayerMenuFeedback(PlayerCharacter, PanelY + PanelHeight - 54.0f);
 	DrawText(TEXT("[I/Tab/Esc] Close"), FLinearColor(0.82f, 0.86f, 0.86f, 1.0f), PanelX + 58.0f, PanelY + PanelHeight - 42.0f, GEngine->GetSmallFont(), 0.85f, false);
 }

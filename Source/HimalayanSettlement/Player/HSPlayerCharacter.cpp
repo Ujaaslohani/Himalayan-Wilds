@@ -47,6 +47,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	, bPauseOptionsOpen(false)
 	, bInventoryOpen(false)
 	, bBuildMenuOpen(false)
+	, SelectedInventoryIndex(0)
 	, GraphicsQualityPreset(0)
 	, bPerformanceOverlayEnabled(false)
 	, bEmergencyLowEndModeEnabled(false)
@@ -451,8 +452,14 @@ void AHSPlayerCharacter::ToggleBuildPlacement(const FInputActionValue& InputValu
 
 void AHSPlayerCharacter::RotateBuildPlacementLeft(const FInputActionValue& InputValue)
 {
-	if (bPauseMenuOpen || bInventoryOpen || bBuildMenuOpen)
+	if (bPauseMenuOpen || bBuildMenuOpen)
 	{
+		return;
+	}
+
+	if (bInventoryOpen)
+	{
+		SelectInventoryDelta(-1);
 		return;
 	}
 
@@ -464,8 +471,14 @@ void AHSPlayerCharacter::RotateBuildPlacementLeft(const FInputActionValue& Input
 
 void AHSPlayerCharacter::RotateBuildPlacementRight(const FInputActionValue& InputValue)
 {
-	if (bPauseMenuOpen || bInventoryOpen || bBuildMenuOpen)
+	if (bPauseMenuOpen || bBuildMenuOpen)
 	{
+		return;
+	}
+
+	if (bInventoryOpen)
+	{
+		SelectInventoryDelta(1);
 		return;
 	}
 
@@ -524,7 +537,7 @@ void AHSPlayerCharacter::HandlePauseMenuResume(const FInputActionValue& InputVal
 
 	if (bInventoryOpen)
 	{
-		InspectInventoryStack(0);
+		InspectSelectedInventoryStack();
 	}
 }
 
@@ -538,7 +551,7 @@ void AHSPlayerCharacter::HandlePauseMenuSave(const FInputActionValue& InputValue
 
 	if (bInventoryOpen)
 	{
-		DropInventoryStackQuantity(0, 1);
+		DropSelectedInventoryStackQuantity(1);
 		return;
 	}
 
@@ -558,7 +571,7 @@ void AHSPlayerCharacter::HandlePauseMenuLoad(const FInputActionValue& InputValue
 
 	if (bInventoryOpen)
 	{
-		DropInventoryStackQuantity(0, TNumericLimits<int32>::Max());
+		DropSelectedInventoryStackQuantity(TNumericLimits<int32>::Max());
 	}
 }
 
@@ -830,6 +843,8 @@ bool AHSPlayerCharacter::CanStartBasicCampsiteFromBuildMenu(FText* OutReason) co
 
 bool AHSPlayerCharacter::InspectInventoryStack(int32 StackIndex)
 {
+	ClampSelectedInventoryIndex();
+
 	FHSItemStack Stack;
 	if (!ResourceCarryComponent || !ResourceCarryComponent->GetStackAtIndex(StackIndex, Stack))
 	{
@@ -857,7 +872,41 @@ bool AHSPlayerCharacter::DropInventoryStackQuantity(int32 StackIndex, int32 Quan
 		NSLOCTEXT("HSPlayerCharacter", "InventoryDroppedStack", "Dropped {0} x{1}."),
 		FText::FromString(ConsumedStack.ItemTag.ToString()),
 		FText::AsNumber(ConsumedStack.Quantity)));
+	ClampSelectedInventoryIndex();
 	return true;
+}
+
+bool AHSPlayerCharacter::InspectSelectedInventoryStack()
+{
+	ClampSelectedInventoryIndex();
+	return InspectInventoryStack(SelectedInventoryIndex);
+}
+
+bool AHSPlayerCharacter::DropSelectedInventoryStackQuantity(int32 Quantity)
+{
+	ClampSelectedInventoryIndex();
+	return DropInventoryStackQuantity(SelectedInventoryIndex, Quantity);
+}
+
+void AHSPlayerCharacter::SelectInventoryDelta(int32 Delta)
+{
+	const int32 ItemCount = ResourceCarryComponent ? ResourceCarryComponent->GetCarriedItems().Num() : 0;
+	if (ItemCount <= 0)
+	{
+		SelectedInventoryIndex = 0;
+		SetMenuFeedback(NSLOCTEXT("HSPlayerCharacter", "InventorySelectionEmpty", "No carried items."));
+		return;
+	}
+
+	SelectedInventoryIndex = FMath::Clamp(SelectedInventoryIndex + Delta, 0, ItemCount - 1);
+	FHSItemStack Stack;
+	if (ResourceCarryComponent && ResourceCarryComponent->GetStackAtIndex(SelectedInventoryIndex, Stack))
+	{
+		SetMenuFeedback(FText::Format(
+			NSLOCTEXT("HSPlayerCharacter", "InventorySelectedStack", "Selected {0} x{1}."),
+			FText::FromString(Stack.ItemTag.ToString()),
+			FText::AsNumber(Stack.Quantity)));
+	}
 }
 
 void AHSPlayerCharacter::CycleGraphicsQualityPreset()
@@ -1063,6 +1112,7 @@ void AHSPlayerCharacter::SetInventoryOpen(bool bNewOpen)
 	if (bInventoryOpen)
 	{
 		bBuildMenuOpen = false;
+		ClampSelectedInventoryIndex();
 	}
 }
 
@@ -1101,6 +1151,12 @@ void AHSPlayerCharacter::SetMenuFeedback(FText Feedback)
 {
 	LastMenuFeedback = Feedback;
 	MenuFeedbackExpireTime = FPlatformTime::Seconds() + MenuFeedbackDuration;
+}
+
+void AHSPlayerCharacter::ClampSelectedInventoryIndex()
+{
+	const int32 ItemCount = ResourceCarryComponent ? ResourceCarryComponent->GetCarriedItems().Num() : 0;
+	SelectedInventoryIndex = ItemCount > 0 ? FMath::Clamp(SelectedInventoryIndex, 0, ItemCount - 1) : 0;
 }
 
 void AHSPlayerCharacter::BindAutosaveSources()

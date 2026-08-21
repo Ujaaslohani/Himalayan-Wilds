@@ -72,7 +72,7 @@ The first quest handoff is intentionally small: `UHSQuestHandoffComponent` refer
 
 Pause menu presentation is currently native Canvas HUD. `Esc` cancels active build placement first; otherwise it pauses/unpauses the game and shows keyboard commands for Resume, Save, Load, Options, and Exit. This is the first functional menu layer and may later be replaced by richer UMG/Slate widgets without moving gameplay rules out of C++.
 
-Inventory and build menu presentation also live in the native Canvas HUD for now. `I`/`Tab` shows carried item stacks from `UHSResourceCarryComponent`; `[1]` inspects the first visible stack, `[2]` drops one item from it, and `[3]` drops that stack for prototype cleanup. `B` opens a schema menu where `[1]` starts the Basic House free-placement preview only when native settlement/construction state allows it, while `[2]` starts Basic Campsite placement for a temporary one-use sleep point. The pause options panel can cycle a simple graphics scalability preset. `F10` toggles the FPS/unit performance overlays for profiling, and `F8` toggles an emergency low-end mode for weak hardware testing. These are first-pass control surfaces, not final visual UI.
+Inventory and build menu presentation also live in the native Canvas HUD for now. `I`/`Tab` shows carried item stacks from `UHSResourceCarryComponent`; `Q`/`R` moves a highlighted selected stack, `[1]` inspects it, `[2]` drops one item from it, and `[3]` drops that stack for prototype cleanup. `B` opens a schema menu where `[1]` starts the Basic House free-placement preview only when native settlement/construction state allows it, while `[2]` starts Basic Campsite placement for a temporary one-use sleep point. The pause options panel can cycle a simple graphics scalability preset. `F10` toggles the FPS/unit performance overlays for profiling, and `F8` toggles an emergency low-end mode for weak hardware testing. These are first-pass control surfaces, not final visual UI.
 
 ## Prototype Visual Markers
 
@@ -98,7 +98,7 @@ The first-person bow visual is a native placeholder on `AHSPlayerCharacter`, bui
 
 ## Resource Carry State
 
-`UHSResourceCarryComponent` is the first lightweight resource state on the player. It stores harvested `FHSItemStack` values merged by gameplay tag so quest return logic and the first inventory screen can query carried resources. It supports index-based inspect/drop actions for visible inventory rows, but it is not yet a full container, weight, equipment, crafting, world-drop, or item-use system.
+`UHSResourceCarryComponent` is the first lightweight resource state on the player. It stores harvested `FHSItemStack` values merged by gameplay tag so quest return logic and the first inventory screen can query carried resources. Player menu code keeps a selected row clamped against the current carried stacks and supports selected-row inspect/drop actions, but it is not yet a full container, weight, equipment, crafting, world-drop, or item-use system.
 
 ## Player Progress
 

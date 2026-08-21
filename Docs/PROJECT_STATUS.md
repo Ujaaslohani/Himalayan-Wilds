@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 11: Vertical Slice Closeout: implementation continues with basic native HUD status/objective overlay, sleep/time feedback, pause menu, manual save/load, autosave foundation, first inventory actions, build schema/campsite menu feedback, first options control, bow/ammo equipment rules, first-person bow placeholder, visible arrow projectiles, bow shot cooldown, visible wounded-animal reactions, wound tracking clues, and clearer prototype visuals; hands-on closeout pending.
+Milestone 11: Vertical Slice Closeout: implementation continues with basic native HUD status/objective overlay, sleep/time feedback, pause menu, manual save/load, autosave foundation, selected-stack inventory actions, build schema/campsite menu feedback, first options control, bow/ammo equipment rules, first-person bow placeholder, visible arrow projectiles, bow shot cooldown, visible wounded-animal reactions, wound tracking clues, and clearer prototype visuals; hands-on closeout pending.
 
 ## Engine Version
 
@@ -108,7 +108,7 @@ Unreal Engine 5.5.4.
 - Manual pause-menu save/load uses the default save slot; event-driven autosave uses a separate autosave slot.
 - Autosave now runs on milestone completion, time advance/sleep, construction start, and construction completion, with suppression during manual load restore.
 - Native inventory screen added on `I` / `Tab`, showing carried item stacks from the resource carry component.
-- First native inventory actions added: inspect first visible stack, drop one item, and drop the first visible stack for prototype cleanup.
+- Native inventory selection added: `Q`/`R` changes the selected carried stack, and `[1]`, `[2]`, `[3]` inspect/drop the selected stack.
 - Native build menu added on `B`; Basic House is selected with `[1]` before entering free placement.
 - Build menu now explains blocked Basic House placement states such as missing settlement claim, pending schema, active construction, or completed house.
 - Build menu now includes `[2] Basic Campsite`, which enters free placement and spawns a one-use temporary shelter for sleep/time skipping.
@@ -163,5 +163,5 @@ Unreal Engine 5.5.4.
 8. Keep tracking numeric FPS/Game/Draw/GPU readings from the live low-end `stat fps` and `stat unit` overlays before forest density increases.
 9. Run hands-on HUD/hunting pass: confirm status/objective lines, bow/arrows status, visible arrow flight, animal impact feedback, and menu feedback appear clearly without blocking the center interaction prompt.
 10. Run hands-on pause/save pass: press `Esc`, test Resume/Save/Load/Options feedback, confirm build placement `Esc` still cancels placement before pausing, and confirm autosave files are produced after sleep/construction/progress events.
-11. Run hands-on inventory/build/options pass: confirm `I`/`Tab` opens inventory, `[1]` inspects, `[2]` drops one item, `[3]` drops the stack, `B` opens build menu, `[1]` enters Basic House placement only when available, `[2]` places a Basic Campsite, and `[6]` cycles graphics preset when pause options are open.
+11. Run hands-on inventory/build/options pass: confirm `I`/`Tab` opens inventory, `Q`/`R` changes selected stack, `[1]` inspects the selected stack, `[2]` drops one selected item, `[3]` drops the selected stack, `B` opens build menu, `[1]` enters Basic House placement only when available, `[2]` places a Basic Campsite, and `[6]` cycles graphics preset when pause options are open.
 12. Add mouse-driven UMG/Slate polish later if the native Canvas controls test well.

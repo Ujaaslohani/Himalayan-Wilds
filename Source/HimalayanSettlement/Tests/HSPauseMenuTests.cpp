@@ -96,14 +96,26 @@ bool FHSInventoryMenuActionsTest::RunTest(const FString& Parameters)
 	}
 
 	Player->GetResourceCarryComponent()->AddStack(FHSItemStack{ TAG_HS_Resource_Meat_Deer, 2 });
+	Player->GetResourceCarryComponent()->AddStack(FHSItemStack{ TAG_HS_Resource_Hide_Deer, 2 });
 
 	TestTrue(TEXT("Inspecting the first carried stack should succeed."), Player->InspectInventoryStack(0));
 	TestTrue(TEXT("Inspect action should expose menu feedback."), Player->HasActiveMenuFeedback());
 	TestTrue(TEXT("Inspect feedback should mention the item tag."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Resource.Meat.Deer")));
 
-	TestTrue(TEXT("Dropping one item from the first stack should succeed."), Player->DropInventoryStackQuantity(0, 1));
-	TestEqual(TEXT("One meat should remain after dropping one."), Player->GetResourceCarryComponent()->GetQuantityForTag(TAG_HS_Resource_Meat_Deer), 1);
-	TestTrue(TEXT("Drop feedback should mention the dropped item."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Dropped Resource.Meat.Deer")));
+	TestEqual(TEXT("Inventory selection should start on the first stack."), Player->GetSelectedInventoryIndex(), 0);
+	Player->SelectInventoryDelta(1);
+	TestEqual(TEXT("Inventory selection should move to the second stack."), Player->GetSelectedInventoryIndex(), 1);
+	TestTrue(TEXT("Inspecting the selected carried stack should succeed."), Player->InspectSelectedInventoryStack());
+	TestTrue(TEXT("Selected inspect feedback should mention the selected item tag."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Resource.Hide.Deer")));
+
+	TestTrue(TEXT("Dropping one item from the selected stack should succeed."), Player->DropSelectedInventoryStackQuantity(1));
+	TestEqual(TEXT("Meat should remain untouched after dropping selected hide."), Player->GetResourceCarryComponent()->GetQuantityForTag(TAG_HS_Resource_Meat_Deer), 2);
+	TestEqual(TEXT("One hide should remain after dropping one selected hide."), Player->GetResourceCarryComponent()->GetQuantityForTag(TAG_HS_Resource_Hide_Deer), 1);
+	TestTrue(TEXT("Drop feedback should mention the selected dropped item."), Player->GetLastMenuFeedback().ToString().Contains(TEXT("Dropped Resource.Hide.Deer")));
+
+	TestTrue(TEXT("Dropping the remaining selected stack should succeed."), Player->DropSelectedInventoryStackQuantity(999));
+	TestEqual(TEXT("No hide should remain after dropping the selected stack."), Player->GetResourceCarryComponent()->GetQuantityForTag(TAG_HS_Resource_Hide_Deer), 0);
+	TestEqual(TEXT("Inventory selection should clamp back to the remaining stack."), Player->GetSelectedInventoryIndex(), 0);
 
 	TestTrue(TEXT("Dropping the remaining stack should succeed."), Player->DropInventoryStackQuantity(0, 999));
 	TestEqual(TEXT("No meat should remain after dropping the stack."), Player->GetResourceCarryComponent()->GetQuantityForTag(TAG_HS_Resource_Meat_Deer), 0);
