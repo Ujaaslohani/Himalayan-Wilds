@@ -59,6 +59,10 @@ bool FHSPlayerHasEquipmentComponentTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Player should own a first-person lower bow limb mesh."), Player ? Player->GetBowLowerLimbMesh() : nullptr);
 	TestNotNull(TEXT("Player should own a first-person bow string mesh."), Player ? Player->GetBowStringMesh() : nullptr);
 	TestEqual(TEXT("Bow grip should not use collision."), Player && Player->GetBowGripMesh() ? Player->GetBowGripMesh()->GetCollisionEnabled() : ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::NoCollision);
+	const float BowGripY = Player && Player->GetBowGripMesh() ? static_cast<float>(Player->GetBowGripMesh()->GetRelativeLocation().Y) : 1.0f;
+	const float BowStringY = Player && Player->GetBowStringMesh() ? static_cast<float>(Player->GetBowStringMesh()->GetRelativeLocation().Y) : -100.0f;
+	TestLessThan(TEXT("Bow grip should sit on the left side of the first-person view."), BowGripY, 0.0f);
+	TestGreaterThan(TEXT("Bow string should sit closer to screen center than the grip."), BowStringY, BowGripY);
 
 	return true;
 }

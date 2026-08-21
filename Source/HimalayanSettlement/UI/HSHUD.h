@@ -100,6 +100,7 @@ private:
 	void ShowCompletionMessage(FText Message);
 	void DrawCenteredTextLine(const FString& Text, float Y, float Scale, const FLinearColor& Color);
 	void DrawStatusTextLine(const FString& Text, float Y, const FLinearColor& Color);
+	void DrawStatusPanel(const TArray<FString>& StatusLines, const TArray<FString>& ObjectiveLines);
 	void DrawPauseMenu(const class AHSPlayerCharacter* PlayerCharacter);
 	void DrawInventoryMenu(const class AHSPlayerCharacter* PlayerCharacter);
 	void DrawBuildMenu(const class AHSPlayerCharacter* PlayerCharacter);

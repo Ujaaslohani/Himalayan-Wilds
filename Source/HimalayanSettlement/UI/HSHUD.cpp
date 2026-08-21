@@ -53,12 +53,14 @@ void AHSHUD::DrawHUD()
 	const AHSPlayerCharacter* PlayerCharacter = Cast<AHSPlayerCharacter>(Pawn);
 
 	const TArray<FString> StatusLines = BuildStatusLines(GameState, Pawn);
+	const TArray<FString> ObjectiveLines = BuildObjectiveLines(GameState, Pawn);
+	DrawStatusPanel(StatusLines, ObjectiveLines);
+
 	for (int32 LineIndex = 0; LineIndex < StatusLines.Num(); ++LineIndex)
 	{
 		DrawStatusTextLine(StatusLines[LineIndex], StatusPanelY + (StatusLineHeight * LineIndex), FLinearColor(0.85f, 0.92f, 1.0f, 1.0f));
 	}
 
-	const TArray<FString> ObjectiveLines = BuildObjectiveLines(GameState, Pawn);
 	const float ObjectiveStartY = StatusPanelY + (StatusLineHeight * (StatusLines.Num() + 1));
 	for (int32 LineIndex = 0; LineIndex < ObjectiveLines.Num(); ++LineIndex)
 	{
@@ -576,12 +578,46 @@ void AHSHUD::DrawCenteredTextLine(const FString& Text, float Y, float Scale, con
 	GetTextSize(Text, TextWidth, TextHeight, GEngine->GetMediumFont(), Scale);
 
 	const float X = (Canvas->ClipX - TextWidth) * 0.5f;
+	DrawRect(FLinearColor(0.015f, 0.018f, 0.016f, 0.74f), X - 14.0f, Y - 6.0f, TextWidth + 28.0f, TextHeight + 12.0f);
+	DrawText(Text, FLinearColor(0.0f, 0.0f, 0.0f, 0.9f), X + 2.0f, Y + 2.0f, GEngine->GetMediumFont(), Scale, false);
 	DrawText(Text, Color, X, Y, GEngine->GetMediumFont(), Scale, false);
 }
 
 void AHSHUD::DrawStatusTextLine(const FString& Text, float Y, const FLinearColor& Color)
 {
+	DrawText(Text, FLinearColor(0.0f, 0.0f, 0.0f, 0.9f), StatusPanelX + 1.5f, Y + 1.5f, GEngine->GetSmallFont(), StatusScale, false);
 	DrawText(Text, Color, StatusPanelX, Y, GEngine->GetSmallFont(), StatusScale, false);
+}
+
+void AHSHUD::DrawStatusPanel(const TArray<FString>& StatusLines, const TArray<FString>& ObjectiveLines)
+{
+	if (!Canvas || (!StatusLines.Num() && !ObjectiveLines.Num()))
+	{
+		return;
+	}
+
+	float MaxTextWidth = 0.0f;
+	float TextHeight = 0.0f;
+	for (const FString& Line : StatusLines)
+	{
+		float LineWidth = 0.0f;
+		GetTextSize(Line, LineWidth, TextHeight, GEngine->GetSmallFont(), StatusScale);
+		MaxTextWidth = FMath::Max(MaxTextWidth, LineWidth);
+	}
+
+	for (const FString& Line : ObjectiveLines)
+	{
+		float LineWidth = 0.0f;
+		GetTextSize(Line, LineWidth, TextHeight, GEngine->GetSmallFont(), StatusScale);
+		MaxTextWidth = FMath::Max(MaxTextWidth, LineWidth);
+	}
+
+	const int32 GapLines = StatusLines.Num() > 0 && ObjectiveLines.Num() > 0 ? 1 : 0;
+	const int32 TotalLines = StatusLines.Num() + ObjectiveLines.Num() + GapLines;
+	const float PanelPadding = 12.0f;
+	const float PanelWidth = FMath::Min(Canvas->ClipX - (StatusPanelX * 2.0f), MaxTextWidth + (PanelPadding * 2.0f));
+	const float PanelHeight = (StatusLineHeight * TotalLines) + (PanelPadding * 2.0f);
+	DrawRect(FLinearColor(0.015f, 0.018f, 0.016f, 0.68f), StatusPanelX - PanelPadding, StatusPanelY - PanelPadding, PanelWidth, PanelHeight);
 }
 
 void AHSHUD::DrawPauseMenu(const AHSPlayerCharacter* PlayerCharacter)

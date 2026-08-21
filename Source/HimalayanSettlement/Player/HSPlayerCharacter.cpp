@@ -87,7 +87,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	BowGripMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BowGripMesh"));
 	BowGripMesh->SetupAttachment(FirstPersonCamera);
 	BowGripMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	BowGripMesh->SetRelativeLocation(FVector(48.0f, 26.0f, -24.0f));
+	BowGripMesh->SetRelativeLocation(FVector(48.0f, -26.0f, -24.0f));
 	BowGripMesh->SetRelativeRotation(FRotator(0.0f, 0.0f, 0.0f));
 	BowGripMesh->SetRelativeScale3D(FVector(0.035f, 0.035f, 0.34f));
 	BowGripMesh->SetHiddenInGame(true);
@@ -99,7 +99,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	BowUpperLimbMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BowUpperLimbMesh"));
 	BowUpperLimbMesh->SetupAttachment(FirstPersonCamera);
 	BowUpperLimbMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	BowUpperLimbMesh->SetRelativeLocation(FVector(50.0f, 27.0f, -4.0f));
+	BowUpperLimbMesh->SetRelativeLocation(FVector(50.0f, -27.0f, -4.0f));
 	BowUpperLimbMesh->SetRelativeRotation(FRotator(-23.0f, 0.0f, 0.0f));
 	BowUpperLimbMesh->SetRelativeScale3D(FVector(0.028f, 0.028f, 0.44f));
 	BowUpperLimbMesh->SetHiddenInGame(true);
@@ -111,7 +111,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	BowLowerLimbMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BowLowerLimbMesh"));
 	BowLowerLimbMesh->SetupAttachment(FirstPersonCamera);
 	BowLowerLimbMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	BowLowerLimbMesh->SetRelativeLocation(FVector(50.0f, 27.0f, -45.0f));
+	BowLowerLimbMesh->SetRelativeLocation(FVector(50.0f, -27.0f, -45.0f));
 	BowLowerLimbMesh->SetRelativeRotation(FRotator(23.0f, 0.0f, 0.0f));
 	BowLowerLimbMesh->SetRelativeScale3D(FVector(0.028f, 0.028f, 0.44f));
 	BowLowerLimbMesh->SetHiddenInGame(true);
@@ -123,7 +123,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	BowStringMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BowStringMesh"));
 	BowStringMesh->SetupAttachment(FirstPersonCamera);
 	BowStringMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	BowStringMesh->SetRelativeLocation(FVector(46.0f, 20.0f, -24.0f));
+	BowStringMesh->SetRelativeLocation(FVector(46.0f, -18.0f, -24.0f));
 	BowStringMesh->SetRelativeRotation(FRotator(0.0f, 0.0f, 0.0f));
 	BowStringMesh->SetRelativeScale3D(FVector(0.008f, 0.008f, 0.84f));
 	BowStringMesh->SetHiddenInGame(true);

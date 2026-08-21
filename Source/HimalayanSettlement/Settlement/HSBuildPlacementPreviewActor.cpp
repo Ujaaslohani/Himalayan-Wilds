@@ -13,6 +13,7 @@ AHSBuildPlacementPreviewActor::AHSBuildPlacementPreviewActor()
 	RootComponent = PreviewMesh;
 	PreviewMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	PreviewMesh->SetGenerateOverlapEvents(false);
+	PreviewMesh->SetRelativeLocation(FVector(0.0f, 0.0f, 37.5f));
 	PreviewMesh->SetRelativeScale3D(FVector(2.2f, 1.6f, 0.75f));
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));

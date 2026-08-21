@@ -15,7 +15,7 @@ UHSBuildPlacementComponent::UHSBuildPlacementComponent()
 	, PlacementDistance(550.0f)
 	, PlacementTraceDistance(1800.0f)
 	, RotationStepDegrees(15.0f)
-	, PlacementHeightOffset(45.0f)
+	, PlacementHeightOffset(0.0f)
 	, PlacementMode(EHSBuildPlacementMode::None)
 	, bPlacementActive(false)
 	, bCurrentPlacementValid(false)
@@ -149,7 +149,7 @@ bool UHSBuildPlacementComponent::ConfirmPlacement()
 
 		FActorSpawnParameters SpawnParameters;
 		SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		World->SpawnActor<AHSTemporaryShelterActor>(PreviewLocation, FRotator(0.0f, PreviewYawDegrees, 0.0f), SpawnParameters);
+		World->SpawnActor<AHSTemporaryShelterActor>(PreviewLocation + FVector(0.0f, 0.0f, 45.0f), FRotator(0.0f, PreviewYawDegrees, 0.0f), SpawnParameters);
 
 		const FText ConfirmedMessage = LOCTEXT("CampsitePlacementConfirmed", "Basic Campsite placed");
 		OnBuildPlacementActorConfirmed.Broadcast(ConfirmedMessage);
@@ -249,7 +249,7 @@ void UHSBuildPlacementComponent::UpdatePreview()
 	else
 	{
 		PreviewLocation = ViewLocation + ViewRotation.Vector() * PlacementDistance;
-		PreviewLocation.Z = GetOwner() ? GetOwner()->GetActorLocation().Z + PlacementHeightOffset : PreviewLocation.Z;
+		PreviewLocation.Z = GetOwner() ? GetOwner()->GetActorLocation().Z : PreviewLocation.Z;
 	}
 
 	if (PlacementMode == EHSBuildPlacementMode::TemporaryShelter)

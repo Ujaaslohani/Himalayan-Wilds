@@ -69,6 +69,14 @@ bool FHSCompletedBuildingVisualDefaultsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Roof mesh should not use collision yet."), CompletedBuilding && CompletedBuilding->GetRoofMesh() ? CompletedBuilding->GetRoofMesh()->GetCollisionEnabled() : ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::NoCollision);
 	TestEqual(TEXT("Door mesh should not use collision yet."), CompletedBuilding && CompletedBuilding->GetDoorMesh() ? CompletedBuilding->GetDoorMesh()->GetCollisionEnabled() : ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::NoCollision);
 	TestEqual(TEXT("Chimney mesh should not use collision yet."), CompletedBuilding && CompletedBuilding->GetChimneyMesh() ? CompletedBuilding->GetChimneyMesh()->GetCollisionEnabled() : ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::NoCollision);
+	const float WallBottomZ = CompletedBuilding && CompletedBuilding->GetWallMesh()
+		? static_cast<float>(CompletedBuilding->GetWallMesh()->GetRelativeLocation().Z - (CompletedBuilding->GetWallMesh()->GetRelativeScale3D().Z * 50.0))
+		: -1.0f;
+	const float DoorBottomZ = CompletedBuilding && CompletedBuilding->GetDoorMesh()
+		? static_cast<float>(CompletedBuilding->GetDoorMesh()->GetRelativeLocation().Z - (CompletedBuilding->GetDoorMesh()->GetRelativeScale3D().Z * 50.0))
+		: -1.0f;
+	TestEqual(TEXT("Wall bottom should sit on the actor root plane."), WallBottomZ, 0.0f);
+	TestEqual(TEXT("Door bottom should sit on the actor root plane."), DoorBottomZ, 0.0f);
 
 	CompletedBuilding->ConfigureCompletedBuilding(TAG_HS_Building_BasicHouse);
 	TestTrue(TEXT("Completed building should store configured tag."), CompletedBuilding->GetBuildingTag() == TAG_HS_Building_BasicHouse);
