@@ -104,6 +104,10 @@ The first-person bow visual is a native placeholder on `AHSPlayerCharacter`, bui
 
 `UHSPlayerProgressComponent` is the first lightweight milestone signal on the player. It records completed milestone tags once and broadcasts a completion delegate. The hunter quest handoff marks the quest tag complete when returned resources satisfy the handoff. It is not yet save/load, achievements, a quest journal, or broad progression logic.
 
+## Player Health
+
+`UHSPlayerHealthComponent` owns the first native player health state. It is no-tick, exposes explicit damage/heal/reset calls, broadcasts health/death events, and is shown in the compact HUD. Stamina, hunger, thirst, and carry limits are intentionally excluded from the current direction.
+
 ## Settlement Unlock State
 
 `UHSSettlementUnlockComponent` is the first lightweight settlement unlock state on the player. Quest reward unlock tags are granted once and can be queried by later building/placeable systems. It is not yet building placement, construction, resource spending, UI, settlement storage, or persistence.
@@ -132,6 +136,8 @@ NPC services are coordinated by `UHSNPCServiceComponent`, a no-tick native compo
 - Prefer events, timers, perception callbacks, scheduled updates, and state transitions.
 - Wildlife and NPCs must support simulation LOD before the prototype expands beyond nearby actors.
 - Distant wildlife should eventually become abstract regional state rather than full actors.
+
+`UHSWorldCleanupSubsystem` is the gameplay garbage collector for temporary world actors. Temporary arrows, wound clues, and dropped resources register with it using lifetimes so prototype clutter can be removed by a timer rather than each object managing frame work. Unreal's native memory GC still owns object memory; this subsystem owns gameplay cleanup policy.
 
 ## Blueprint Policy
 

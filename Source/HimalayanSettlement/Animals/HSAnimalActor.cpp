@@ -9,6 +9,7 @@
 #include "Hunting/HSWoundClueActor.h"
 #include "Resources/HSResourceCarryComponent.h"
 #include "UObject/ConstructorHelpers.h"
+#include "World/HSWorldCleanupSubsystem.h"
 
 #define LOCTEXT_NAMESPACE "HSAnimalActor"
 
@@ -199,6 +200,10 @@ void AHSAnimalActor::SpawnWoundClue(FVector ClueLocation)
 	if (WoundClue)
 	{
 		WoundClue->ConfigureWoundClue(this, WoundClueLifetimeSeconds);
+		if (UHSWorldCleanupSubsystem* CleanupSubsystem = World->GetSubsystem<UHSWorldCleanupSubsystem>())
+		{
+			CleanupSubsystem->RegisterTemporaryActor(WoundClue, WoundClueLifetimeSeconds, TEXT("WoundClue"));
+		}
 	}
 }
 

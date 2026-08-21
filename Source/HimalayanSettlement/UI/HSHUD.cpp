@@ -9,6 +9,7 @@
 #include "Hunting/HSHuntingComponent.h"
 #include "Interaction/HSInteractionSensorComponent.h"
 #include "Player/HSPlayerCharacter.h"
+#include "Player/HSPlayerHealthComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
 #include "Settlement/HSBuildPlacementComponent.h"
@@ -162,6 +163,12 @@ TArray<FString> AHSHUD::BuildStatusLines(const AHSGameState* GameState, const AP
 				Lines.Add(FString::Printf(TEXT("Carry: %s"), *FString::Join(ResourceParts, TEXT(", "))));
 			}
 		}
+	}
+
+	const UHSPlayerHealthComponent* HealthComponent = Pawn ? Pawn->FindComponentByClass<UHSPlayerHealthComponent>() : nullptr;
+	if (HealthComponent)
+	{
+		Lines.Add(FString::Printf(TEXT("Health: %.0f / %.0f"), HealthComponent->GetCurrentHealth(), HealthComponent->GetMaxHealth()));
 	}
 
 	const UHSAnimalIntelComponent* AnimalIntelComponent = Pawn ? Pawn->FindComponentByClass<UHSAnimalIntelComponent>() : nullptr;

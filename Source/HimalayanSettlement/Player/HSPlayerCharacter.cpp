@@ -25,6 +25,7 @@
 #include "NPC/HSNPCActor.h"
 #include "NPC/HSNPCServiceComponent.h"
 #include "Persistence/HSSettlementPersistenceComponent.h"
+#include "Player/HSPlayerHealthComponent.h"
 #include "Progression/HSPlayerProgressComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
 #include "Resources/HSResourcePickupActor.h"
@@ -34,6 +35,7 @@
 #include "Settlement/HSSettlementUnlockComponent.h"
 #include "UObject/ConstructorHelpers.h"
 #include "World/HSGameState.h"
+#include "World/HSWorldCleanupSubsystem.h"
 #include "World/HSWorldTimeComponent.h"
 
 AHSPlayerCharacter::AHSPlayerCharacter()
@@ -137,6 +139,7 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	HuntingComponent = CreateDefaultSubobject<UHSHuntingComponent>(TEXT("HuntingComponent"));
 	ConstructionComponent = CreateDefaultSubobject<UHSConstructionComponent>(TEXT("ConstructionComponent"));
 	SettlementPersistenceComponent = CreateDefaultSubobject<UHSSettlementPersistenceComponent>(TEXT("SettlementPersistenceComponent"));
+	PlayerHealthComponent = CreateDefaultSubobject<UHSPlayerHealthComponent>(TEXT("PlayerHealthComponent"));
 	PlayerProgressComponent = CreateDefaultSubobject<UHSPlayerProgressComponent>(TEXT("PlayerProgressComponent"));
 	ResourceCarryComponent = CreateDefaultSubobject<UHSResourceCarryComponent>(TEXT("ResourceCarryComponent"));
 	SettlementPlanComponent = CreateDefaultSubobject<UHSSettlementPlanComponent>(TEXT("SettlementPlanComponent"));
@@ -1441,6 +1444,10 @@ bool AHSPlayerCharacter::SpawnDroppedInventoryStack(const FHSItemStack& DroppedS
 	}
 
 	DroppedPickup->SetItemStack(DroppedStack);
+	if (UHSWorldCleanupSubsystem* CleanupSubsystem = World->GetSubsystem<UHSWorldCleanupSubsystem>())
+	{
+		CleanupSubsystem->RegisterTemporaryActor(DroppedPickup, 300.0f, TEXT("DroppedResource"));
+	}
 	return true;
 }
 

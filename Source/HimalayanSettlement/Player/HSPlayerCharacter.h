@@ -17,6 +17,7 @@ class UHSPlayerEquipmentComponent;
 class UHSHuntingComponent;
 class UHSInteractionSensorComponent;
 class UHSSettlementPersistenceComponent;
+class UHSPlayerHealthComponent;
 class UHSPlayerProgressComponent;
 class UHSResourceCarryComponent;
 class UHSSettlementPlanComponent;
@@ -54,6 +55,7 @@ public:
 	UHSHuntingComponent* GetHuntingComponent() const { return HuntingComponent; }
 	UHSConstructionComponent* GetConstructionComponent() const { return ConstructionComponent; }
 	UHSSettlementPersistenceComponent* GetSettlementPersistenceComponent() const { return SettlementPersistenceComponent; }
+	UHSPlayerHealthComponent* GetPlayerHealthComponent() const { return PlayerHealthComponent; }
 	UHSPlayerProgressComponent* GetPlayerProgressComponent() const { return PlayerProgressComponent; }
 	UHSResourceCarryComponent* GetResourceCarryComponent() const { return ResourceCarryComponent; }
 	UHSSettlementPlanComponent* GetSettlementPlanComponent() const { return SettlementPlanComponent; }
@@ -314,6 +316,9 @@ private:
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSSettlementPersistenceComponent> SettlementPersistenceComponent;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player")
+	TObjectPtr<UHSPlayerHealthComponent> PlayerHealthComponent;
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSPlayerProgressComponent> PlayerProgressComponent;

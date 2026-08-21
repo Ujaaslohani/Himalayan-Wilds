@@ -47,6 +47,7 @@ Unreal Engine 5.5.4.
 - Native world time state added with day/night phase and half-day advancement.
 - Native temporary shelter marker added; sleeping flips day/night and expires the shelter.
 - Native player movement supports jump, crouch, and prone traversal controls.
+- Native player health component added with explicit damage, healing, death, and reset state; no stamina, hunger, thirst, or carry-limit systems are planned per direction.
 - Concise One Morning Hunt playtest checklist added.
 - Hands-on One Morning Hunt playtest results sheet added for milestone closeout.
 - Full milestone roadmap added in `Docs/MILESTONES.md`.
@@ -112,6 +113,7 @@ Unreal Engine 5.5.4.
 - Native inventory screen added on `I` / `Tab`, showing carried item stacks from the resource carry component.
 - Native inventory selection added: `Q`/`R` changes the selected carried stack, and `[1]`, `[2]`, `[3]` inspect/drop the selected stack.
 - Native resource pickup actor added; dropped inventory stacks now spawn lightweight no-tick world pickups that can be collected again.
+- Native world cleanup subsystem added as the gameplay garbage collector for temporary actors such as wound clues, arrows, and dropped resources.
 - Native inventory use action added on `[4]`; the carried basic bow can be equipped from inventory, while unsupported resources report clear feedback.
 - Native build menu added on `B`; Basic House is selected with `[1]` before entering free placement.
 - Build menu now has a highlighted selected entry; `Q`/`R` moves between Basic House and Basic Campsite, and `[1]`/`E` starts the selected entry.
@@ -135,7 +137,7 @@ Unreal Engine 5.5.4.
 - Hands-on milestone pass reported complete by the project owner after the 40 FPS stable retest.
 - Milestone 3 settlement claim and house schema foundation compiles.
 - Content bootstrap succeeds with zero warnings and regenerates the basic house schema marker.
-- All 86 `HimalayanSettlement` automation tests pass.
+- All 89 `HimalayanSettlement` automation tests pass.
 
 ## In Progress
 

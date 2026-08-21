@@ -6,6 +6,7 @@
 #include "Core/HSLogCategories.h"
 #include "Engine/World.h"
 #include "UObject/ConstructorHelpers.h"
+#include "World/HSWorldCleanupSubsystem.h"
 
 #define LOCTEXT_NAMESPACE "HSArrowProjectileActor"
 
@@ -92,6 +93,13 @@ void AHSArrowProjectileActor::LaunchArrow(AActor* NewShooter, FVector StartLocat
 	SetActorRotation(FlightDirection.Rotation());
 	PreviousLocation = StartLocation;
 	SetActorTickEnabled(true);
+	if (UWorld* World = GetWorld())
+	{
+		if (UHSWorldCleanupSubsystem* CleanupSubsystem = World->GetSubsystem<UHSWorldCleanupSubsystem>())
+		{
+			CleanupSubsystem->RegisterTemporaryActor(this, 8.0f, TEXT("FlyingArrow"));
+		}
+	}
 
 	UE_LOG(LogHSAI, Verbose, TEXT("%s launched arrow from %s."), *GetNameSafe(NewShooter), *StartLocation.ToString());
 }
@@ -162,6 +170,13 @@ void AHSArrowProjectileActor::StopFlightAt(FVector ImpactLocation)
 	SetActorLocation(ImpactLocation);
 	PreviousLocation = ImpactLocation;
 	SetLifeSpan(4.0f);
+	if (UWorld* World = GetWorld())
+	{
+		if (UHSWorldCleanupSubsystem* CleanupSubsystem = World->GetSubsystem<UHSWorldCleanupSubsystem>())
+		{
+			CleanupSubsystem->RegisterTemporaryActor(this, 4.0f, TEXT("StoppedArrow"));
+		}
+	}
 }
 
 #undef LOCTEXT_NAMESPACE
