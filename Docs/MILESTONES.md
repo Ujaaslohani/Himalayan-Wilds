@@ -217,7 +217,7 @@ Complete when:
 
 ## Milestone 11: Vertical Slice Closeout
 
-Status: Implementation started; basic native HUD status overlay complete. Broader hands-on closeout, readable objective flow, and performance pass remain pending.
+Status: Implementation started; basic native HUD status and objective overlay complete. Broader hands-on closeout, flow tuning, and performance pass remain pending.
 
 Player experience: A new player can complete an early loop without developer instruction: wake, receive NPC intel, explore, hunt/gather, assign builder, sleep, and see the settlement progress.
 

@@ -11,7 +11,7 @@ Target split:
 
 ## Scope Boundary
 
-Current milestone: early vertical-slice foundations through One Morning Hunt, temporary sleep, settlement schema, builder construction, persistence, hunter intel, herbalist plant knowledge, exploration markers, and a basic native HUD status overlay.
+Current milestone: early vertical-slice foundations through One Morning Hunt, temporary sleep, settlement schema, builder construction, persistence, hunter intel, herbalist plant knowledge, exploration markers, and a basic native HUD status/objective overlay.
 
 The player starts in a primitive settlement, talks to one hunter NPC, receives a deer-hunting task, tracks and hunts a deer, harvests resources, returns to the NPC, unlocks early settlement progression, places a house schema, uses specialist NPC services, and advances time through sleep.
 
@@ -67,7 +67,7 @@ The first quest handoff is intentionally small: `UHSQuestHandoffComponent` refer
 
 ## HUD
 
-`AHSHUD` is the first native HUD layer. It draws a minimal interaction prompt from the player interaction sensor cache, short feedback messages for progress, settlement planning, construction, hunter intel, and plant effects, plus a compact vertical-slice status readout for time, carried resources, active animal lead, plant effect, and construction progress. It is intentionally not a broader inventory, dialogue, quest log, or survival HUD.
+`AHSHUD` is the first native HUD layer. It draws a minimal interaction prompt from the player interaction sensor cache, short feedback messages for progress, settlement planning, construction, hunter intel, and plant effects, plus a compact vertical-slice status/objective readout. Objective guidance is derived from existing native state such as quest completion, carried deer resources, settlement claim, pending schemas, construction jobs, and completed house state. It is intentionally not a broader inventory, dialogue, quest log, or survival HUD.
 
 ## Prototype Visual Markers
 

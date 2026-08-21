@@ -34,6 +34,7 @@ public:
 	bool HasActiveCompletionMessage() const;
 
 	TArray<FString> BuildStatusLines(const AHSGameState* GameState, const APawn* Pawn) const;
+	TArray<FString> BuildObjectiveLines(const AHSGameState* GameState, const APawn* Pawn) const;
 
 	UFUNCTION()
 	void HandleMilestoneCompleted(FGameplayTag MilestoneTag);

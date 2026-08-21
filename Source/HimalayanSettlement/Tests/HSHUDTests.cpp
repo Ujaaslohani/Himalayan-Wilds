@@ -4,8 +4,10 @@
 #include "Core/HSGameplayTags.h"
 #include "Hunting/HSAnimalIntelComponent.h"
 #include "Player/HSPlayerCharacter.h"
+#include "Progression/HSPlayerProgressComponent.h"
 #include "Resources/HSResourceCarryComponent.h"
 #include "Settlement/HSConstructionComponent.h"
+#include "Settlement/HSSettlementPlanComponent.h"
 #include "UI/HSHUD.h"
 #include "World/HSGameState.h"
 
@@ -77,6 +79,76 @@ bool FHSHUDStatusLinesTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("HUD should show active animal lead."), HasLineContaining(Lines, TEXT("Lead: Animal.Deer")));
 	TestTrue(TEXT("HUD should show active plant effect."), HasLineContaining(Lines, TEXT("Plant: Effect.Plant.Speed")));
 	TestTrue(TEXT("HUD should show active construction progress."), HasLineContaining(Lines, TEXT("Build: Building.BasicHouse 50%")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSHUDObjectiveLinesTest,
+	"HimalayanSettlement.UI.HUDObjectiveLinesGuideEarlyVerticalSlice",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSHUDObjectiveLinesTest::RunTest(const FString& Parameters)
+{
+	const AHSHUD* HUD = NewObject<AHSHUD>();
+	const AHSGameState* GameState = NewObject<AHSGameState>();
+	AHSPlayerCharacter* Player = NewObject<AHSPlayerCharacter>();
+
+	TestNotNull(TEXT("HUD should be constructible."), HUD);
+	TestNotNull(TEXT("Game state should be constructible."), GameState);
+	TestNotNull(TEXT("Player should be constructible."), Player);
+	if (!HUD || !GameState || !Player)
+	{
+		return false;
+	}
+
+	TestTrue(
+		TEXT("Default objective should start with Hunter guidance."),
+		HasLineContaining(HUD->BuildObjectiveLines(GameState, Player), TEXT("Talk to the Hunter")));
+
+	Player->GetResourceCarryComponent()->AddStack(FHSItemStack{ TAG_HS_Resource_Meat_Deer, 2 });
+	Player->GetResourceCarryComponent()->AddStack(FHSItemStack{ TAG_HS_Resource_Hide_Deer, 1 });
+	TestTrue(
+		TEXT("Carrying hunt resources should point back to the Hunter."),
+		HasLineContaining(HUD->BuildObjectiveLines(GameState, Player), TEXT("Return deer meat and hide")));
+
+	Player->GetPlayerProgressComponent()->MarkMilestoneCompleted(TAG_HS_Quest_OneMorningHunt);
+	TestTrue(
+		TEXT("Completed morning hunt should point to settlement claim."),
+		HasLineContaining(HUD->BuildObjectiveLines(GameState, Player), TEXT("Claim the settlement site")));
+
+	Player->GetSettlementPlanComponent()->RestoreSettlementPlan(true, FVector::ZeroVector, {});
+	TestTrue(
+		TEXT("Claimed settlement should point to house placement."),
+		HasLineContaining(HUD->BuildObjectiveLines(GameState, Player), TEXT("Press B to place")));
+
+	FHSPendingBuildingSchema PendingSchema;
+	PendingSchema.BuildingTag = TAG_HS_Building_BasicHouse;
+	PendingSchema.Location = FVector(120.0f, 120.0f, 0.0f);
+	Player->GetSettlementPlanComponent()->RestoreSettlementPlan(true, FVector::ZeroVector, { PendingSchema });
+	TestTrue(
+		TEXT("Pending schema should point to Builder."),
+		HasLineContaining(HUD->BuildObjectiveLines(GameState, Player), TEXT("Ask the Builder")));
+
+	FHSConstructionJob ActiveJob;
+	ActiveJob.BuildingTag = TAG_HS_Building_BasicHouse;
+	ActiveJob.RequiredDays = 1.0f;
+	ActiveJob.ProgressDays = 0.5f;
+	ActiveJob.State = EHSConstructionJobState::Active;
+	Player->GetConstructionComponent()->RestoreConstructionState({ ActiveJob }, FGameplayTagContainer());
+	TestTrue(
+		TEXT("Active construction should point to sleep/time advancement."),
+		HasLineContaining(HUD->BuildObjectiveLines(GameState, Player), TEXT("Sleep to advance")));
+
+	FHSConstructionJob CompletedJob = ActiveJob;
+	CompletedJob.ProgressDays = 1.0f;
+	CompletedJob.State = EHSConstructionJobState::Complete;
+	FGameplayTagContainer CompletedBuildings;
+	CompletedBuildings.AddTag(TAG_HS_Building_BasicHouse);
+	Player->GetConstructionComponent()->RestoreConstructionState({ CompletedJob }, CompletedBuildings);
+	TestTrue(
+		TEXT("Completed house should point to NPC services and exploration."),
+		HasLineContaining(HUD->BuildObjectiveLines(GameState, Player), TEXT("Basic house complete")));
 
 	return true;
 }

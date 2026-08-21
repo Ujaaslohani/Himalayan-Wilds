@@ -1,5 +1,6 @@
 #include "UI/HSHUD.h"
 
+#include "Core/HSGameplayTags.h"
 #include "Engine/Canvas.h"
 #include "GameFramework/PlayerController.h"
 #include "Herbalism/HSPlantEffectComponent.h"
@@ -48,6 +49,13 @@ void AHSHUD::DrawHUD()
 	for (int32 LineIndex = 0; LineIndex < StatusLines.Num(); ++LineIndex)
 	{
 		DrawStatusTextLine(StatusLines[LineIndex], StatusPanelY + (StatusLineHeight * LineIndex), FLinearColor(0.85f, 0.92f, 1.0f, 1.0f));
+	}
+
+	const TArray<FString> ObjectiveLines = BuildObjectiveLines(GameState, Pawn);
+	const float ObjectiveStartY = StatusPanelY + (StatusLineHeight * (StatusLines.Num() + 1));
+	for (int32 LineIndex = 0; LineIndex < ObjectiveLines.Num(); ++LineIndex)
+	{
+		DrawStatusTextLine(ObjectiveLines[LineIndex], ObjectiveStartY + (StatusLineHeight * LineIndex), FLinearColor(0.75f, 1.0f, 0.72f, 1.0f));
 	}
 
 	const UHSBuildPlacementComponent* BuildPlacementComponent = Pawn ? Pawn->FindComponentByClass<UHSBuildPlacementComponent>() : nullptr;
@@ -146,6 +154,70 @@ TArray<FString> AHSHUD::BuildStatusLines(const AHSGameState* GameState, const AP
 		}
 	}
 
+	return Lines;
+}
+
+TArray<FString> AHSHUD::BuildObjectiveLines(const AHSGameState* GameState, const APawn* Pawn) const
+{
+	(void)GameState;
+
+	TArray<FString> Lines;
+	Lines.Add(TEXT("Objective: Get ready for the settlement day"));
+
+	const UHSPlayerProgressComponent* ProgressComponent = Pawn ? Pawn->FindComponentByClass<UHSPlayerProgressComponent>() : nullptr;
+	const UHSResourceCarryComponent* ResourceCarryComponent = Pawn ? Pawn->FindComponentByClass<UHSResourceCarryComponent>() : nullptr;
+	const UHSAnimalIntelComponent* AnimalIntelComponent = Pawn ? Pawn->FindComponentByClass<UHSAnimalIntelComponent>() : nullptr;
+	const UHSSettlementPlanComponent* SettlementPlanComponent = Pawn ? Pawn->FindComponentByClass<UHSSettlementPlanComponent>() : nullptr;
+	const UHSConstructionComponent* ConstructionComponent = Pawn ? Pawn->FindComponentByClass<UHSConstructionComponent>() : nullptr;
+
+	const bool bCompletedMorningHunt = ProgressComponent && ProgressComponent->HasCompletedMilestone(TAG_HS_Quest_OneMorningHunt);
+	const int32 DeerMeat = ResourceCarryComponent ? ResourceCarryComponent->GetQuantityForTag(TAG_HS_Resource_Meat_Deer) : 0;
+	const int32 DeerHide = ResourceCarryComponent ? ResourceCarryComponent->GetQuantityForTag(TAG_HS_Resource_Hide_Deer) : 0;
+	const bool bHasTurnInResources = DeerMeat >= 2 && DeerHide >= 1;
+
+	if (!bCompletedMorningHunt)
+	{
+		if (bHasTurnInResources)
+		{
+			Lines.Add(TEXT("Return deer meat and hide to the Hunter"));
+		}
+		else if (AnimalIntelComponent && AnimalIntelComponent->HasActiveLead())
+		{
+			Lines.Add(TEXT("Follow the animal lead, hunt the deer, then harvest it"));
+		}
+		else
+		{
+			Lines.Add(TEXT("Talk to the Hunter, hunt one deer, and harvest it"));
+		}
+
+		return Lines;
+	}
+
+	if (!SettlementPlanComponent || !SettlementPlanComponent->HasSettlementClaim())
+	{
+		Lines.Add(TEXT("Claim the settlement site"));
+		return Lines;
+	}
+
+	if (ConstructionComponent && ConstructionComponent->HasCompletedBuilding(TAG_HS_Building_BasicHouse))
+	{
+		Lines.Add(TEXT("Basic house complete: use NPC services and explore the forest trail"));
+		return Lines;
+	}
+
+	if (ConstructionComponent && ConstructionComponent->HasActiveJob())
+	{
+		Lines.Add(TEXT("Sleep to advance the Builder's house construction"));
+		return Lines;
+	}
+
+	if (SettlementPlanComponent->HasAnyPendingSchema())
+	{
+		Lines.Add(TEXT("Ask the Builder to start the pending house schema"));
+		return Lines;
+	}
+
+	Lines.Add(TEXT("Press B to place a basic house schema near the claim"));
 	return Lines;
 }
 
