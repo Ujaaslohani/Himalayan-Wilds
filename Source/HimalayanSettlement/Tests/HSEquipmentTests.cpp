@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Components/StaticMeshComponent.h"
 #include "Core/HSGameplayTags.h"
 #include "Equipment/HSPlayerEquipmentComponent.h"
 #include "Player/HSPlayerCharacter.h"
@@ -53,6 +54,11 @@ bool FHSPlayerHasEquipmentComponentTest::RunTest(const FString& Parameters)
 
 	TestNotNull(TEXT("Player class should have a valid default object."), Player);
 	TestNotNull(TEXT("Player should own native equipment component."), Player ? Player->GetPlayerEquipmentComponent() : nullptr);
+	TestNotNull(TEXT("Player should own a first-person bow grip mesh."), Player ? Player->GetBowGripMesh() : nullptr);
+	TestNotNull(TEXT("Player should own a first-person upper bow limb mesh."), Player ? Player->GetBowUpperLimbMesh() : nullptr);
+	TestNotNull(TEXT("Player should own a first-person lower bow limb mesh."), Player ? Player->GetBowLowerLimbMesh() : nullptr);
+	TestNotNull(TEXT("Player should own a first-person bow string mesh."), Player ? Player->GetBowStringMesh() : nullptr);
+	TestEqual(TEXT("Bow grip should not use collision."), Player && Player->GetBowGripMesh() ? Player->GetBowGripMesh()->GetCollisionEnabled() : ECollisionEnabled::QueryAndPhysics, ECollisionEnabled::NoCollision);
 
 	return true;
 }

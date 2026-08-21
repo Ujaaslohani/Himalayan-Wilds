@@ -4,6 +4,8 @@
 #include "Components/ActorComponent.h"
 #include "HSPlayerEquipmentComponent.generated.h"
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FHSBowEquippedChangedSignature, bool, bBowEquipped);
+
 UCLASS(ClassGroup = (HimalayanSettlement), meta = (BlueprintSpawnableComponent))
 class HIMALAYANSETTLEMENT_API UHSPlayerEquipmentComponent : public UActorComponent
 {
@@ -32,6 +34,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Equipment")
 	bool ConsumeArrow();
+
+	UPROPERTY(BlueprintAssignable, Category = "Equipment")
+	FHSBowEquippedChangedSignature OnBowEquippedChanged;
 
 private:
 	class UHSResourceCarryComponent* ResolveResourceCarry() const;

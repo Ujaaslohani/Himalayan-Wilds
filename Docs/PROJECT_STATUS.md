@@ -2,7 +2,7 @@
 
 ## Current Milestone
 
-Milestone 11: Vertical Slice Closeout: implementation continues with basic native HUD status/objective overlay, sleep/time feedback, pause menu, manual save/load, autosave foundation, first inventory actions, build schema/campsite menu feedback, first options control, bow/ammo equipment rules, visible arrow projectiles, bow shot cooldown, animal reaction states, and clearer prototype visuals; hands-on closeout pending.
+Milestone 11: Vertical Slice Closeout: implementation continues with basic native HUD status/objective overlay, sleep/time feedback, pause menu, manual save/load, autosave foundation, first inventory actions, build schema/campsite menu feedback, first options control, bow/ammo equipment rules, first-person bow placeholder, visible arrow projectiles, bow shot cooldown, animal reaction states, and clearer prototype visuals; hands-on closeout pending.
 
 ## Engine Version
 
@@ -84,8 +84,9 @@ Unreal Engine 5.5.4.
 - Soldier NPC interaction now grants one basic bow and a basic arrow bundle if the player does not already have a bow.
 - Native player equipment component added for basic bow equip state and arrow consumption.
 - Soldier weapon service now auto-equips the first granted bow while still preventing duplicate weapon bundles.
+- First-person bow placeholder added as cheap native camera-attached meshes that appear only while the bow is equipped.
 - Hunting now requires an equipped bow and at least one arrow, consumes one arrow on valid animal shots, and reports hit/no-target/no-ammo feedback through the HUD.
-- Native visible arrow projectile actor added; hunting now looses an arrow that flies forward, traces while in flight, stops on impact, and applies hunting damage when it hits an animal.
+- Native visible arrow projectile actor added; hunting now looses a more readable multi-part arrow that flies forward, traces while in flight, stops on impact, and applies hunting damage when it hits an animal.
 - Bow firing now has a short native cooldown to prevent instant arrow spam and make shots easier to read.
 - Animal runtime state now distinguishes idle, alert, fleeing, and dead so wounded animals can support later tracking/AI behavior.
 - HUD status lines now show bow equip state, current arrow count, and whether the bow is ready or nocking.

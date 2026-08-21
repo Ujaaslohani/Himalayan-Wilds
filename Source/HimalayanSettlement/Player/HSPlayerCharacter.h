@@ -9,6 +9,7 @@
 #include "HSPlayerCharacter.generated.h"
 
 class UCameraComponent;
+class UStaticMeshComponent;
 class UHSAnimalIntelComponent;
 class UHSBuildPlacementComponent;
 class UHSPlayerEquipmentComponent;
@@ -56,6 +57,10 @@ public:
 	UHSSettlementPlanComponent* GetSettlementPlanComponent() const { return SettlementPlanComponent; }
 	UHSSettlementUnlockComponent* GetSettlementUnlockComponent() const { return SettlementUnlockComponent; }
 	UHSPlayerEquipmentComponent* GetPlayerEquipmentComponent() const { return PlayerEquipmentComponent; }
+	UStaticMeshComponent* GetBowGripMesh() const { return BowGripMesh; }
+	UStaticMeshComponent* GetBowUpperLimbMesh() const { return BowUpperLimbMesh; }
+	UStaticMeshComponent* GetBowLowerLimbMesh() const { return BowLowerLimbMesh; }
+	UStaticMeshComponent* GetBowStringMesh() const { return BowStringMesh; }
 
 	UFUNCTION(BlueprintPure, Category = "Player|Movement")
 	EHSPlayerStance GetPlayerStance() const { return PlayerStance; }
@@ -191,6 +196,7 @@ private:
 	void ExitGameFromPauseMenu() const;
 	void BindAutosaveSources();
 	void SetMenuFeedback(FText Feedback);
+	void RefreshBowVisuals();
 
 	UFUNCTION()
 	void HandleAutosaveMilestoneCompleted(FGameplayTag MilestoneTag);
@@ -204,8 +210,23 @@ private:
 	UFUNCTION()
 	void HandlePlantEffectMovementChanged(const struct FHSPlantEffectState& PlantEffect);
 
+	UFUNCTION()
+	void HandleBowEquippedChanged(bool bBowEquipped);
+
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UCameraComponent> FirstPersonCamera;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player|Equipment")
+	TObjectPtr<UStaticMeshComponent> BowGripMesh;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player|Equipment")
+	TObjectPtr<UStaticMeshComponent> BowUpperLimbMesh;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player|Equipment")
+	TObjectPtr<UStaticMeshComponent> BowLowerLimbMesh;
+
+	UPROPERTY(VisibleAnywhere, Category = "Player|Equipment")
+	TObjectPtr<UStaticMeshComponent> BowStringMesh;
 
 	UPROPERTY(VisibleAnywhere, Category = "Player")
 	TObjectPtr<UHSInteractionSensorComponent> InteractionSensor;

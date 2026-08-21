@@ -31,11 +31,22 @@ bool UHSPlayerEquipmentComponent::SetBowEquipped(bool bNewBowEquipped)
 {
 	if (bNewBowEquipped && !HasBow())
 	{
+		const bool bWasBowEquipped = bBowEquipped;
 		bBowEquipped = false;
+		if (bWasBowEquipped)
+		{
+			OnBowEquippedChanged.Broadcast(bBowEquipped);
+		}
 		return false;
 	}
 
+	if (bBowEquipped == bNewBowEquipped)
+	{
+		return true;
+	}
+
 	bBowEquipped = bNewBowEquipped;
+	OnBowEquippedChanged.Broadcast(bBowEquipped);
 	return true;
 }
 

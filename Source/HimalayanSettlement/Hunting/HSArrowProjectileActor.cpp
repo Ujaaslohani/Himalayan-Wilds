@@ -1,6 +1,7 @@
 #include "Hunting/HSArrowProjectileActor.h"
 
 #include "Animals/HSAnimalActor.h"
+#include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Core/HSLogCategories.h"
 #include "Engine/World.h"
@@ -20,16 +21,53 @@ AHSArrowProjectileActor::AHSArrowProjectileActor()
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
 
-	ArrowMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ArrowMesh"));
-	RootComponent = ArrowMesh;
-	ArrowMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	ArrowMesh->SetRelativeRotation(FRotator(0.0f, 90.0f, 0.0f));
-	ArrowMesh->SetRelativeScale3D(FVector(0.035f, 0.035f, 0.7f));
+	ArrowRoot = CreateDefaultSubobject<USceneComponent>(TEXT("ArrowRoot"));
+	RootComponent = ArrowRoot;
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeMesh(TEXT("/Engine/BasicShapes/Cone.Cone"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
+
+	ArrowShaftMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ArrowShaftMesh"));
+	ArrowShaftMesh->SetupAttachment(ArrowRoot);
+	ArrowShaftMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ArrowShaftMesh->SetRelativeLocation(FVector::ZeroVector);
+	ArrowShaftMesh->SetRelativeRotation(FRotator(90.0f, 0.0f, 0.0f));
+	ArrowShaftMesh->SetRelativeScale3D(FVector(0.018f, 0.018f, 0.78f));
 	if (CylinderMesh.Succeeded())
 	{
-		ArrowMesh->SetStaticMesh(CylinderMesh.Object);
+		ArrowShaftMesh->SetStaticMesh(CylinderMesh.Object);
+	}
+
+	ArrowHeadMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ArrowHeadMesh"));
+	ArrowHeadMesh->SetupAttachment(ArrowRoot);
+	ArrowHeadMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ArrowHeadMesh->SetRelativeLocation(FVector(44.0f, 0.0f, 0.0f));
+	ArrowHeadMesh->SetRelativeRotation(FRotator(90.0f, 0.0f, 0.0f));
+	ArrowHeadMesh->SetRelativeScale3D(FVector(0.06f, 0.06f, 0.14f));
+	if (ConeMesh.Succeeded())
+	{
+		ArrowHeadMesh->SetStaticMesh(ConeMesh.Object);
+	}
+
+	ArrowFletchingTopMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ArrowFletchingTopMesh"));
+	ArrowFletchingTopMesh->SetupAttachment(ArrowRoot);
+	ArrowFletchingTopMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ArrowFletchingTopMesh->SetRelativeLocation(FVector(-40.0f, 0.0f, 4.5f));
+	ArrowFletchingTopMesh->SetRelativeScale3D(FVector(0.12f, 0.012f, 0.035f));
+	if (CubeMesh.Succeeded())
+	{
+		ArrowFletchingTopMesh->SetStaticMesh(CubeMesh.Object);
+	}
+
+	ArrowFletchingSideMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ArrowFletchingSideMesh"));
+	ArrowFletchingSideMesh->SetupAttachment(ArrowRoot);
+	ArrowFletchingSideMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ArrowFletchingSideMesh->SetRelativeLocation(FVector(-40.0f, 4.5f, 0.0f));
+	ArrowFletchingSideMesh->SetRelativeScale3D(FVector(0.12f, 0.035f, 0.012f));
+	if (CubeMesh.Succeeded())
+	{
+		ArrowFletchingSideMesh->SetStaticMesh(CubeMesh.Object);
 	}
 
 	SetLifeSpan(8.0f);

@@ -5,6 +5,7 @@
 #include "HSArrowProjectileActor.generated.h"
 
 class AHSAnimalActor;
+class USceneComponent;
 class UStaticMeshComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FHSArrowFeedbackSignature, FText, Message);
@@ -39,7 +40,19 @@ private:
 	void StopFlightAt(FVector ImpactLocation);
 
 	UPROPERTY(VisibleAnywhere, Category = "Visual")
-	TObjectPtr<UStaticMeshComponent> ArrowMesh;
+	TObjectPtr<USceneComponent> ArrowRoot;
+
+	UPROPERTY(VisibleAnywhere, Category = "Visual")
+	TObjectPtr<UStaticMeshComponent> ArrowShaftMesh;
+
+	UPROPERTY(VisibleAnywhere, Category = "Visual")
+	TObjectPtr<UStaticMeshComponent> ArrowHeadMesh;
+
+	UPROPERTY(VisibleAnywhere, Category = "Visual")
+	TObjectPtr<UStaticMeshComponent> ArrowFletchingTopMesh;
+
+	UPROPERTY(VisibleAnywhere, Category = "Visual")
+	TObjectPtr<UStaticMeshComponent> ArrowFletchingSideMesh;
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<AActor> Shooter;

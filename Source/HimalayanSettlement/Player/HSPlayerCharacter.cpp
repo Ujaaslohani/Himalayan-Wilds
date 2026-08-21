@@ -2,6 +2,7 @@
 
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Core/HSGameplayTags.h"
 #include "Core/HSLogCategories.h"
 #include "Equipment/HSPlayerEquipmentComponent.h"
@@ -27,6 +28,7 @@
 #include "Settlement/HSConstructionComponent.h"
 #include "Settlement/HSSettlementPlanComponent.h"
 #include "Settlement/HSSettlementUnlockComponent.h"
+#include "UObject/ConstructorHelpers.h"
 #include "World/HSGameState.h"
 #include "World/HSWorldTimeComponent.h"
 
@@ -68,6 +70,56 @@ AHSPlayerCharacter::AHSPlayerCharacter()
 	FirstPersonCamera->SetupAttachment(GetCapsuleComponent());
 	FirstPersonCamera->SetRelativeLocation(FVector(0.0f, 0.0f, StandingCameraHeight));
 	FirstPersonCamera->bUsePawnControlRotation = true;
+
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+
+	BowGripMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BowGripMesh"));
+	BowGripMesh->SetupAttachment(FirstPersonCamera);
+	BowGripMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	BowGripMesh->SetRelativeLocation(FVector(48.0f, 26.0f, -24.0f));
+	BowGripMesh->SetRelativeRotation(FRotator(0.0f, 0.0f, 0.0f));
+	BowGripMesh->SetRelativeScale3D(FVector(0.035f, 0.035f, 0.34f));
+	BowGripMesh->SetHiddenInGame(true);
+	if (CylinderMesh.Succeeded())
+	{
+		BowGripMesh->SetStaticMesh(CylinderMesh.Object);
+	}
+
+	BowUpperLimbMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BowUpperLimbMesh"));
+	BowUpperLimbMesh->SetupAttachment(FirstPersonCamera);
+	BowUpperLimbMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	BowUpperLimbMesh->SetRelativeLocation(FVector(50.0f, 27.0f, -4.0f));
+	BowUpperLimbMesh->SetRelativeRotation(FRotator(-23.0f, 0.0f, 0.0f));
+	BowUpperLimbMesh->SetRelativeScale3D(FVector(0.028f, 0.028f, 0.44f));
+	BowUpperLimbMesh->SetHiddenInGame(true);
+	if (CylinderMesh.Succeeded())
+	{
+		BowUpperLimbMesh->SetStaticMesh(CylinderMesh.Object);
+	}
+
+	BowLowerLimbMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BowLowerLimbMesh"));
+	BowLowerLimbMesh->SetupAttachment(FirstPersonCamera);
+	BowLowerLimbMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	BowLowerLimbMesh->SetRelativeLocation(FVector(50.0f, 27.0f, -45.0f));
+	BowLowerLimbMesh->SetRelativeRotation(FRotator(23.0f, 0.0f, 0.0f));
+	BowLowerLimbMesh->SetRelativeScale3D(FVector(0.028f, 0.028f, 0.44f));
+	BowLowerLimbMesh->SetHiddenInGame(true);
+	if (CylinderMesh.Succeeded())
+	{
+		BowLowerLimbMesh->SetStaticMesh(CylinderMesh.Object);
+	}
+
+	BowStringMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BowStringMesh"));
+	BowStringMesh->SetupAttachment(FirstPersonCamera);
+	BowStringMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	BowStringMesh->SetRelativeLocation(FVector(46.0f, 20.0f, -24.0f));
+	BowStringMesh->SetRelativeRotation(FRotator(0.0f, 0.0f, 0.0f));
+	BowStringMesh->SetRelativeScale3D(FVector(0.008f, 0.008f, 0.84f));
+	BowStringMesh->SetHiddenInGame(true);
+	if (CylinderMesh.Succeeded())
+	{
+		BowStringMesh->SetStaticMesh(CylinderMesh.Object);
+	}
 
 	InteractionSensor = CreateDefaultSubobject<UHSInteractionSensorComponent>(TEXT("InteractionSensor"));
 	AnimalIntelComponent = CreateDefaultSubobject<UHSAnimalIntelComponent>(TEXT("AnimalIntelComponent"));
@@ -211,6 +263,12 @@ void AHSPlayerCharacter::BeginPlay()
 		PlantEffectComponent->OnPlantEffectExpired.AddUniqueDynamic(this, &AHSPlayerCharacter::HandlePlantEffectMovementChanged);
 	}
 
+	if (PlayerEquipmentComponent)
+	{
+		PlayerEquipmentComponent->OnBowEquippedChanged.AddUniqueDynamic(this, &AHSPlayerCharacter::HandleBowEquippedChanged);
+	}
+
+	RefreshBowVisuals();
 	BindAutosaveSources();
 }
 
@@ -932,6 +990,35 @@ void AHSPlayerCharacter::ApplyInputMappingContext()
 void AHSPlayerCharacter::HandlePlantEffectMovementChanged(const FHSPlantEffectState& PlantEffect)
 {
 	ApplyStanceMovementSettings();
+}
+
+void AHSPlayerCharacter::HandleBowEquippedChanged(bool bBowEquipped)
+{
+	RefreshBowVisuals();
+}
+
+void AHSPlayerCharacter::RefreshBowVisuals()
+{
+	const bool bShowBow = PlayerEquipmentComponent && PlayerEquipmentComponent->IsBowEquipped();
+	if (BowGripMesh)
+	{
+		BowGripMesh->SetHiddenInGame(!bShowBow);
+	}
+
+	if (BowUpperLimbMesh)
+	{
+		BowUpperLimbMesh->SetHiddenInGame(!bShowBow);
+	}
+
+	if (BowLowerLimbMesh)
+	{
+		BowLowerLimbMesh->SetHiddenInGame(!bShowBow);
+	}
+
+	if (BowStringMesh)
+	{
+		BowStringMesh->SetHiddenInGame(!bShowBow);
+	}
 }
 
 void AHSPlayerCharacter::SetPauseMenuOpen(bool bNewOpen)
