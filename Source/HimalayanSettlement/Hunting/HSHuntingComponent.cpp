@@ -6,6 +6,7 @@
 #include "Engine/World.h"
 #include "Equipment/HSPlayerEquipmentComponent.h"
 #include "GameFramework/Actor.h"
+#include "Hunting/HSArrowProjectileActor.h"
 
 #define LOCTEXT_NAMESPACE "HSHuntingComponent"
 
@@ -13,6 +14,9 @@ UHSHuntingComponent::UHSHuntingComponent()
 	: HuntDistance(1200.0f)
 	, HuntDamage(75.0f)
 	, TraceChannel(ECC_Visibility)
+	, ArrowProjectileClass(AHSArrowProjectileActor::StaticClass())
+	, ArrowSpeed(3200.0f)
+	, ArrowSpawnForwardOffset(45.0f)
 {
 	PrimaryComponentTick.bCanEverTick = false;
 }
@@ -28,8 +32,16 @@ bool UHSHuntingComponent::TryHunt()
 		return false;
 	}
 
+	FVector TraceStart = FVector::ZeroVector;
+	FVector TraceDirection = FVector::ForwardVector;
+	if (!ResolveTraceView(TraceStart, TraceDirection))
+	{
+		OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "NoAim", "No clear aim."));
+		return false;
+	}
+
 	FHitResult Hit;
-	AHSAnimalActor* Target = FindHuntTarget(Hit);
+	AHSAnimalActor* Target = FindHuntTargetFromView(TraceStart, TraceDirection, Hit);
 	if (!Target)
 	{
 		OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "NoTarget", "No animal target."));
@@ -44,7 +56,15 @@ bool UHSHuntingComponent::TryHunt()
 		return false;
 	}
 
-	return ApplyDamageToTarget(Target);
+	AHSArrowProjectileActor* Arrow = FireArrow(TraceStart, TraceDirection);
+	if (!Arrow)
+	{
+		OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "ArrowSpawnFailed", "Could not loose arrow."));
+		return false;
+	}
+
+	OnHuntingFeedback.Broadcast(NSLOCTEXT("HSHuntingComponent", "ArrowLoosed", "Arrow loosed."));
+	return true;
 }
 
 AHSAnimalActor* UHSHuntingComponent::FindHuntTarget(FHitResult& OutHit) const
@@ -62,7 +82,18 @@ AHSAnimalActor* UHSHuntingComponent::FindHuntTarget(FHitResult& OutHit) const
 		return nullptr;
 	}
 
-	const FVector TraceEnd = TraceStart + TraceDirection * HuntDistance;
+	return FindHuntTargetFromView(TraceStart, TraceDirection, OutHit);
+}
+
+AHSAnimalActor* UHSHuntingComponent::FindHuntTargetFromView(FVector TraceStart, FVector TraceDirection, FHitResult& OutHit) const
+{
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	const FVector TraceEnd = TraceStart + TraceDirection.GetSafeNormal() * HuntDistance;
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(HSHuntingTrace), false, GetOwner());
 	QueryParams.bReturnPhysicalMaterial = false;
 
@@ -73,6 +104,38 @@ AHSAnimalActor* UHSHuntingComponent::FindHuntTarget(FHitResult& OutHit) const
 
 	AHSAnimalActor* Animal = Cast<AHSAnimalActor>(OutHit.GetActor());
 	return Animal && !Animal->IsDead() ? Animal : nullptr;
+}
+
+AHSArrowProjectileActor* UHSHuntingComponent::FireArrow(FVector TraceStart, FVector TraceDirection)
+{
+	UWorld* World = GetWorld();
+	AActor* Owner = GetOwner();
+	if (!World || !Owner || !ArrowProjectileClass)
+	{
+		return nullptr;
+	}
+
+	const FVector LaunchDirection = TraceDirection.GetSafeNormal();
+	if (LaunchDirection.IsNearlyZero())
+	{
+		return nullptr;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Owner = Owner;
+	SpawnParameters.Instigator = Cast<APawn>(Owner);
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	const FVector SpawnLocation = TraceStart + (LaunchDirection * ArrowSpawnForwardOffset);
+	AHSArrowProjectileActor* Arrow = World->SpawnActor<AHSArrowProjectileActor>(ArrowProjectileClass, SpawnLocation, LaunchDirection.Rotation(), SpawnParameters);
+	if (!Arrow)
+	{
+		return nullptr;
+	}
+
+	Arrow->OnArrowFeedback.AddUniqueDynamic(this, &UHSHuntingComponent::HandleArrowFeedback);
+	Arrow->LaunchArrow(Owner, SpawnLocation, LaunchDirection, HuntDamage, HuntDistance, ArrowSpeed);
+	return Arrow;
 }
 
 bool UHSHuntingComponent::ApplyDamageToTarget(AHSAnimalActor* Target)
@@ -98,6 +161,11 @@ bool UHSHuntingComponent::ApplyDamageToTarget(AHSAnimalActor* Target)
 		AppliedDamage,
 		*GetNameSafe(Target));
 	return AppliedDamage > 0.0f;
+}
+
+void UHSHuntingComponent::HandleArrowFeedback(FText Message)
+{
+	OnHuntingFeedback.Broadcast(Message);
 }
 
 bool UHSHuntingComponent::ResolveTraceView(FVector& OutStart, FVector& OutDirection) const

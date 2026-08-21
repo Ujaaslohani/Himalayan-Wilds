@@ -4,7 +4,9 @@
 #include "Animals/HSAnimalActor.h"
 #include "Animals/HSAnimalDefinition.h"
 #include "Core/HSGameplayTags.h"
+#include "Engine/World.h"
 #include "Equipment/HSPlayerEquipmentComponent.h"
+#include "Hunting/HSArrowProjectileActor.h"
 #include "Hunting/HSHuntingComponent.h"
 #include "Player/HSPlayerCharacter.h"
 #include "Resources/HSResourceCarryComponent.h"
@@ -36,6 +38,8 @@ bool FHSHuntingComponentDefaultsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Prototype hunt distance should stay short."), Hunting->GetHuntDistance(), 1200.0f);
 	TestEqual(TEXT("Prototype hunt damage should kill the first deer definition."), Hunting->GetHuntDamage(), 75.0f);
 	TestEqual(TEXT("Hunting traces should use visibility by default."), Hunting->GetTraceChannel().GetValue(), static_cast<uint8>(ECC_Visibility));
+	TestNotNull(TEXT("Hunting component should spawn native arrow projectiles."), Hunting->GetArrowProjectileClass().Get());
+	TestEqual(TEXT("Prototype arrow speed should stay readable."), Hunting->GetArrowSpeed(), 3200.0f);
 
 	return true;
 }
@@ -72,6 +76,46 @@ bool FHSPlayerHasHuntingComponentTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Player should own the native resource carry component."), Player ? Player->GetResourceCarryComponent() : nullptr);
 	TestNotNull(TEXT("Player should own the native equipment component."), Player ? Player->GetPlayerEquipmentComponent() : nullptr);
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FHSArrowProjectileDamagesAnimalOnImpactTest,
+	"HimalayanSettlement.Hunting.ArrowProjectileDamagesAnimalOnImpact",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FHSArrowProjectileDamagesAnimalOnImpactTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Transient test world should be created."), World);
+	if (!World)
+	{
+		return false;
+	}
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	AHSAnimalActor* Deer = World->SpawnActor<AHSAnimalActor>(FVector(300.0f, 0.0f, 0.0f), FRotator::ZeroRotator, SpawnParameters);
+	AHSArrowProjectileActor* Arrow = World->SpawnActor<AHSArrowProjectileActor>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+
+	TestNotNull(TEXT("Deer should spawn."), Deer);
+	TestNotNull(TEXT("Arrow should spawn."), Arrow);
+	if (!Deer || !Arrow)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	Deer->SetAnimalDefinition(CreateHuntingTestDeer(Deer));
+	Arrow->LaunchArrow(nullptr, FVector::ZeroVector, FVector::ForwardVector, 75.0f, 1200.0f, 3200.0f);
+	TestTrue(TEXT("Arrow should fly after launch."), Arrow->IsFlying());
+
+	Arrow->Tick(0.1f);
+	TestTrue(TEXT("Arrow impact should kill the deer."), Deer->IsDead());
+	TestFalse(TEXT("Arrow should stop after impact."), Arrow->IsFlying());
+
+	World->DestroyWorld(false);
 	return true;
 }
 
