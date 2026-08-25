@@ -17,6 +17,7 @@
 #include "Exploration/HSPrototypeVisualActor.h"
 #include "Factories/WorldFactory.h"
 #include "GameFramework/PlayerStart.h"
+#include "GameFramework/WorldSettings.h"
 #include "GameplayTagsManager.h"
 #include "Herbalism/HSPlantActor.h"
 #include "Herbalism/HSPlantDefinition.h"
@@ -342,12 +343,38 @@ UStaticMesh* LoadNatureMesh(const TCHAR* MeshName)
 	return LoadObject<UStaticMesh>(nullptr, *ObjectPath);
 }
 
+FLinearColor GetNatureMeshTint(const TCHAR* MeshName)
+{
+	const FString Name(MeshName);
+	if (Name.Contains(TEXT("Rock")) || Name.Contains(TEXT("Stone")) || Name.Contains(TEXT("Mountain")) || Name.Contains(TEXT("Hills")))
+	{
+		return FLinearColor(0.36f, 0.38f, 0.34f, 1.0f);
+	}
+	if (Name.Contains(TEXT("Log")) || Name.Contains(TEXT("Fence")) || Name.Contains(TEXT("Dead")))
+	{
+		return FLinearColor(0.34f, 0.22f, 0.12f, 1.0f);
+	}
+	if (Name.Contains(TEXT("Tent_Blue")))
+	{
+		return FLinearColor(0.18f, 0.32f, 0.48f, 1.0f);
+	}
+	if (Name.Contains(TEXT("Tent_Red")))
+	{
+		return FLinearColor(0.48f, 0.18f, 0.14f, 1.0f);
+	}
+	if (Name.Contains(TEXT("Grass")) || Name.Contains(TEXT("Bush")) || Name.Contains(TEXT("Tree")) || Name.Contains(TEXT("Pine")))
+	{
+		return FLinearColor(0.14f, 0.38f, 0.16f, 1.0f);
+	}
+	return FLinearColor(0.24f, 0.42f, 0.20f, 1.0f);
+}
+
 AHSPrototypeVisualActor* SpawnNatureVisual(UWorld* World, const TCHAR* Name, const FVector& Location, const TCHAR* MeshName, FVector Scale, const FRotator& Rotation = FRotator::ZeroRotator)
 {
 	AHSPrototypeVisualActor* Visual = SpawnNamedActor<AHSPrototypeVisualActor>(World, Name, Location, Rotation);
 	if (UStaticMesh* NatureMesh = LoadNatureMesh(MeshName))
 	{
-		Visual->ConfigureStaticMesh(NatureMesh, Scale);
+		Visual->ConfigureStaticMesh(NatureMesh, Scale, GetNatureMeshTint(MeshName));
 	}
 	else
 	{
@@ -410,19 +437,19 @@ void CreateMap()
 	check(World);
 
 	ClearMapActors(World);
+	World->GetWorldSettings()->bForceNoPrecomputedLighting = true;
 
 	AStaticMeshActor* Ground = SpawnNamedActor<AStaticMeshActor>(World, TEXT("Prototype_Ground"), FVector::ZeroVector);
-	if (UStaticMesh* GrassTileMesh = LoadNatureMesh(TEXT("SM_Tile_Grass")))
-	{
-		Ground->GetStaticMeshComponent()->SetStaticMesh(GrassTileMesh);
-	}
-	else if (UStaticMesh* PlaneMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane")))
+	if (UStaticMesh* PlaneMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane")))
 	{
 		Ground->GetStaticMeshComponent()->SetStaticMesh(PlaneMesh);
 	}
-	Ground->GetStaticMeshComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Ground->GetStaticMeshComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Ground->GetStaticMeshComponent()->SetVisibility(false);
+	Ground->SetActorHiddenInGame(true);
 	Ground->SetActorScale3D(FVector(42.0f, 34.0f, 1.0f));
 
+	SpawnVisual(World, TEXT("Ground_Grass_Visual"), FVector(0.0f, 0.0f, -2.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.17f, 0.30f, 0.13f, 1.0f), FVector(42.0f, 34.0f, 0.02f));
 	SpawnVisual(World, TEXT("Region_Settlement_Dirt"), FVector(-360.0f, -220.0f, 2.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.42f, 0.34f, 0.23f, 1.0f), FVector(7.2f, 4.6f, 0.025f));
 	SpawnVisual(World, TEXT("Region_Village_Dirt"), FVector(-720.0f, -180.0f, 3.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.38f, 0.31f, 0.22f, 1.0f), FVector(5.0f, 3.2f, 0.025f));
 	SpawnVisual(World, TEXT("Region_Forest_Floor"), FVector(720.0f, -420.0f, 4.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.12f, 0.22f, 0.11f, 1.0f), FVector(10.5f, 5.8f, 0.025f));
@@ -434,6 +461,7 @@ void CreateMap()
 	{
 		SunComponent->SetMobility(EComponentMobility::Movable);
 		SunComponent->SetCastShadows(false);
+		SunComponent->SetIntensity(0.85f);
 	}
 
 	ASkyLight* SkyLight = SpawnNamedActor<ASkyLight>(World, TEXT("SkyLight_Morning"), FVector(0.0f, 0.0f, 250.0f));
@@ -441,6 +469,7 @@ void CreateMap()
 	{
 		SkyLightComponent->SetMobility(EComponentMobility::Movable);
 		SkyLightComponent->SetCastShadows(false);
+		SkyLightComponent->SetIntensity(0.25f);
 	}
 
 	AHSNPCActor* Hunter = SpawnNamedActor<AHSNPCActor>(World, TEXT("NPC_Hunter"), FVector(200.0f, 0.0f, 90.0f), FRotator(0.0f, 180.0f, 0.0f));

@@ -2,6 +2,7 @@
 
 #include "Components/StaticMeshComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 
 AHSPrototypeVisualActor::AHSPrototypeVisualActor()
@@ -12,6 +13,7 @@ AHSPrototypeVisualActor::AHSPrototypeVisualActor()
 
 	PrototypeMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PrototypeMesh"));
 	RootComponent = PrototypeMesh;
+	PrototypeMesh->SetMobility(EComponentMobility::Movable);
 	PrototypeMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	PrototypeMesh->SetGenerateOverlapEvents(false);
 	PrototypeMesh->SetCanEverAffectNavigation(false);
@@ -38,6 +40,12 @@ AHSPrototypeVisualActor::AHSPrototypeVisualActor()
 	if (SphereMeshFinder.Succeeded())
 	{
 		SphereMesh = SphereMeshFinder.Object;
+	}
+
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BasicColorMaterialFinder(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (BasicColorMaterialFinder.Succeeded())
+	{
+		BasicColorMaterial = BasicColorMaterialFinder.Object;
 	}
 
 	if (CubeMesh)
@@ -67,9 +75,10 @@ void AHSPrototypeVisualActor::ConfigureVisual(EHSPrototypeVisualShape NewShape, 
 	ApplyVisual();
 }
 
-void AHSPrototypeVisualActor::ConfigureStaticMesh(UStaticMesh* NewStaticMesh, FVector NewScale)
+void AHSPrototypeVisualActor::ConfigureStaticMesh(UStaticMesh* NewStaticMesh, FVector NewScale, FLinearColor NewColor)
 {
 	CustomStaticMesh = NewStaticMesh;
+	VisualColor = NewColor;
 	SetActorScale3D(NewScale);
 	ApplyVisual();
 }
@@ -109,6 +118,10 @@ void AHSPrototypeVisualActor::ApplyVisual()
 
 	if (!HasAnyFlags(RF_ClassDefaultObject) && GetWorld() && GetWorld()->IsGameWorld())
 	{
+		if (BasicColorMaterial)
+		{
+			PrototypeMesh->SetMaterial(0, BasicColorMaterial);
+		}
 		UMaterialInstanceDynamic* DynamicMaterial = PrototypeMesh->CreateAndSetMaterialInstanceDynamic(0);
 		if (DynamicMaterial)
 		{

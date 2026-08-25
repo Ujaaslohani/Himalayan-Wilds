@@ -6,6 +6,7 @@
 
 class UStaticMesh;
 class UStaticMeshComponent;
+class UMaterialInterface;
 
 UENUM(BlueprintType)
 enum class EHSPrototypeVisualShape : uint8
@@ -31,7 +32,7 @@ public:
 	void ConfigureVisual(EHSPrototypeVisualShape NewShape, FLinearColor NewColor, FVector NewScale);
 
 	UFUNCTION(BlueprintCallable, Category = "Prototype Visual")
-	void ConfigureStaticMesh(UStaticMesh* NewStaticMesh, FVector NewScale);
+	void ConfigureStaticMesh(UStaticMesh* NewStaticMesh, FVector NewScale, FLinearColor NewColor = FLinearColor(0.24f, 0.42f, 0.20f, 1.0f));
 
 	UFUNCTION(BlueprintPure, Category = "Prototype Visual")
 	UStaticMeshComponent* GetPrototypeMesh() const { return PrototypeMesh; }
@@ -56,6 +57,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMesh> SphereMesh;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> BasicColorMaterial;
 
 	UPROPERTY(EditAnywhere, Category = "Visual")
 	TObjectPtr<UStaticMesh> CustomStaticMesh;

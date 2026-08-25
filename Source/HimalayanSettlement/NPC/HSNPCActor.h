@@ -11,6 +11,7 @@ class UHSQuestDefinition;
 class UHSQuestHandoffComponent;
 class UHSNPCServiceComponent;
 class UStaticMeshComponent;
+class UStaticMesh;
 
 UCLASS()
 class HIMALAYANSETTLEMENT_API AHSNPCActor : public AActor, public IHSInteractable
@@ -19,6 +20,8 @@ class HIMALAYANSETTLEMENT_API AHSNPCActor : public AActor, public IHSInteractabl
 
 public:
 	AHSNPCActor();
+
+	virtual void BeginPlay() override;
 
 	UFUNCTION(BlueprintPure, Category = "Interaction")
 	class UBoxComponent* GetInteractionBounds() const { return InteractionBounds; }
@@ -63,11 +66,32 @@ public:
 	virtual void Interact_Implementation(AActor* Interactor) override;
 
 private:
+	void ApplyProfessionVisuals();
+	void ApplyMeshColor(UStaticMeshComponent* MeshComponent, FLinearColor Color);
+
 	UPROPERTY(VisibleAnywhere, Category = "Interaction")
 	TObjectPtr<class UBoxComponent> InteractionBounds;
 
 	UPROPERTY(VisibleAnywhere, Category = "Visual")
 	TObjectPtr<UStaticMeshComponent> PrototypeMesh;
+
+	UPROPERTY(VisibleAnywhere, Category = "Visual")
+	TObjectPtr<UStaticMeshComponent> HeadMesh;
+
+	UPROPERTY(VisibleAnywhere, Category = "Visual")
+	TObjectPtr<UStaticMeshComponent> LegMesh;
+
+	UPROPERTY(VisibleAnywhere, Category = "Visual")
+	TObjectPtr<UStaticMeshComponent> HatMesh;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> CubeMesh;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> SphereMesh;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> ConeMesh;
 
 	UPROPERTY(VisibleAnywhere, Category = "Quest")
 	TObjectPtr<UHSQuestHandoffComponent> QuestHandoffComponent;
