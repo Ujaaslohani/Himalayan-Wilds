@@ -62,6 +62,14 @@ void AHSPrototypeVisualActor::ConfigureVisual(EHSPrototypeVisualShape NewShape, 
 {
 	VisualShape = NewShape;
 	VisualColor = NewColor;
+	CustomStaticMesh = nullptr;
+	SetActorScale3D(NewScale);
+	ApplyVisual();
+}
+
+void AHSPrototypeVisualActor::ConfigureStaticMesh(UStaticMesh* NewStaticMesh, FVector NewScale)
+{
+	CustomStaticMesh = NewStaticMesh;
 	SetActorScale3D(NewScale);
 	ApplyVisual();
 }
@@ -73,22 +81,25 @@ void AHSPrototypeVisualActor::ApplyVisual()
 		return;
 	}
 
-	UStaticMesh* SelectedMesh = CubeMesh;
-	switch (VisualShape)
+	UStaticMesh* SelectedMesh = CustomStaticMesh ? CustomStaticMesh.Get() : CubeMesh.Get();
+	if (!CustomStaticMesh)
 	{
-	case EHSPrototypeVisualShape::Cylinder:
-		SelectedMesh = CylinderMesh ? CylinderMesh : CubeMesh;
-		break;
-	case EHSPrototypeVisualShape::Cone:
-		SelectedMesh = ConeMesh ? ConeMesh : CubeMesh;
-		break;
-	case EHSPrototypeVisualShape::Sphere:
-		SelectedMesh = SphereMesh ? SphereMesh : CubeMesh;
-		break;
-	case EHSPrototypeVisualShape::Cube:
-	default:
-		SelectedMesh = CubeMesh;
-		break;
+		switch (VisualShape)
+		{
+		case EHSPrototypeVisualShape::Cylinder:
+			SelectedMesh = CylinderMesh ? CylinderMesh.Get() : CubeMesh.Get();
+			break;
+		case EHSPrototypeVisualShape::Cone:
+			SelectedMesh = ConeMesh ? ConeMesh.Get() : CubeMesh.Get();
+			break;
+		case EHSPrototypeVisualShape::Sphere:
+			SelectedMesh = SphereMesh ? SphereMesh.Get() : CubeMesh.Get();
+			break;
+		case EHSPrototypeVisualShape::Cube:
+		default:
+			SelectedMesh = CubeMesh.Get();
+			break;
+		}
 	}
 
 	if (SelectedMesh)

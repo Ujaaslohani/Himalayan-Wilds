@@ -30,6 +30,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Prototype Visual")
 	void ConfigureVisual(EHSPrototypeVisualShape NewShape, FLinearColor NewColor, FVector NewScale);
 
+	UFUNCTION(BlueprintCallable, Category = "Prototype Visual")
+	void ConfigureStaticMesh(UStaticMesh* NewStaticMesh, FVector NewScale);
+
 	UFUNCTION(BlueprintPure, Category = "Prototype Visual")
 	UStaticMeshComponent* GetPrototypeMesh() const { return PrototypeMesh; }
 
@@ -53,6 +56,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMesh> SphereMesh;
+
+	UPROPERTY(EditAnywhere, Category = "Visual")
+	TObjectPtr<UStaticMesh> CustomStaticMesh;
 
 	UPROPERTY(EditAnywhere, Category = "Visual")
 	EHSPrototypeVisualShape VisualShape;

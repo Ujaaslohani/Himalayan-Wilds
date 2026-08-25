@@ -336,15 +336,35 @@ AHSPrototypeVisualActor* SpawnVisual(UWorld* World, const TCHAR* Name, const FVe
 	return Visual;
 }
 
+UStaticMesh* LoadNatureMesh(const TCHAR* MeshName)
+{
+	const FString ObjectPath = FString::Printf(TEXT("/Game/LowPolyNatureLite/Assets/Models/%s.%s"), MeshName, MeshName);
+	return LoadObject<UStaticMesh>(nullptr, *ObjectPath);
+}
+
+AHSPrototypeVisualActor* SpawnNatureVisual(UWorld* World, const TCHAR* Name, const FVector& Location, const TCHAR* MeshName, FVector Scale, const FRotator& Rotation = FRotator::ZeroRotator)
+{
+	AHSPrototypeVisualActor* Visual = SpawnNamedActor<AHSPrototypeVisualActor>(World, Name, Location, Rotation);
+	if (UStaticMesh* NatureMesh = LoadNatureMesh(MeshName))
+	{
+		Visual->ConfigureStaticMesh(NatureMesh, Scale);
+	}
+	else
+	{
+		Visual->ConfigureVisual(EHSPrototypeVisualShape::Cube, FLinearColor(0.30f, 0.45f, 0.24f, 1.0f), Scale);
+	}
+	return Visual;
+}
+
 void SpawnTreeCluster(UWorld* World, const TCHAR* NamePrefix, const TArray<FVector>& Locations)
 {
 	int32 Index = 0;
 	for (const FVector& Location : Locations)
 	{
-		const FString TrunkName = FString::Printf(TEXT("%s_Trunk_%02d"), NamePrefix, Index);
-		const FString CanopyName = FString::Printf(TEXT("%s_Canopy_%02d"), NamePrefix, Index);
-		SpawnVisual(World, *TrunkName, Location + FVector(0.0f, 0.0f, 70.0f), EHSPrototypeVisualShape::Cylinder, FLinearColor(0.30f, 0.18f, 0.10f, 1.0f), FVector(0.16f, 0.16f, 1.45f));
-		SpawnVisual(World, *CanopyName, Location + FVector(0.0f, 0.0f, 178.0f), EHSPrototypeVisualShape::Cone, FLinearColor(0.08f, 0.30f, 0.14f, 1.0f), FVector(0.95f, 0.95f, 1.25f));
+		const FString TreeName = FString::Printf(TEXT("%s_Tree_%02d"), NamePrefix, Index);
+		const TCHAR* MeshName = Index % 3 == 0 ? TEXT("SM_Tree04") : TEXT("SM_Pine01");
+		const float Scale = Index % 2 == 0 ? 1.15f : 0.92f;
+		SpawnNatureVisual(World, *TreeName, Location + FVector(0.0f, 0.0f, 8.0f), MeshName, FVector(Scale), FRotator(0.0f, 23.0f * Index, 0.0f));
 		++Index;
 	}
 }
@@ -362,7 +382,7 @@ void SpawnFenceRun(UWorld* World, const TCHAR* NamePrefix, const TArray<FVector>
 			const FVector Midpoint = (PreviousLocation + Location) * 0.5f + FVector(0.0f, 0.0f, 58.0f);
 			const float Length = FVector::Dist2D(PreviousLocation, Location) / 100.0f;
 			const FString RailName = FString::Printf(TEXT("%s_Rail_%02d"), NamePrefix, Index);
-			SpawnVisual(World, *RailName, Midpoint, EHSPrototypeVisualShape::Cube, FLinearColor(0.40f, 0.27f, 0.15f, 1.0f), bHorizontal ? FVector(Length, 0.06f, 0.06f) : FVector(0.06f, Length, 0.06f));
+			SpawnNatureVisual(World, *RailName, Midpoint, TEXT("SM_Fence"), bHorizontal ? FVector(Length * 0.62f, 0.22f, 0.28f) : FVector(0.22f, Length * 0.62f, 0.28f), bHorizontal ? FRotator::ZeroRotator : FRotator(0.0f, 90.0f, 0.0f));
 		}
 		++Index;
 	}
@@ -392,10 +412,15 @@ void CreateMap()
 	ClearMapActors(World);
 
 	AStaticMeshActor* Ground = SpawnNamedActor<AStaticMeshActor>(World, TEXT("Prototype_Ground"), FVector::ZeroVector);
-	if (UStaticMesh* PlaneMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane")))
+	if (UStaticMesh* GrassTileMesh = LoadNatureMesh(TEXT("SM_Tile_Grass")))
+	{
+		Ground->GetStaticMeshComponent()->SetStaticMesh(GrassTileMesh);
+	}
+	else if (UStaticMesh* PlaneMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane")))
 	{
 		Ground->GetStaticMeshComponent()->SetStaticMesh(PlaneMesh);
 	}
+	Ground->GetStaticMeshComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Ground->SetActorScale3D(FVector(42.0f, 34.0f, 1.0f));
 
 	SpawnVisual(World, TEXT("Region_Settlement_Dirt"), FVector(-360.0f, -220.0f, 2.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.42f, 0.34f, 0.23f, 1.0f), FVector(7.2f, 4.6f, 0.025f));
@@ -464,12 +489,14 @@ void CreateMap()
 	SpawnVisual(World, TEXT("Village_Hut_B"), FVector(-860.0f, -80.0f, 55.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.43f, 0.34f, 0.23f, 1.0f), FVector(1.35f, 0.9f, 1.1f), FRotator(0.0f, 18.0f, 0.0f));
 	SpawnVisual(World, TEXT("Village_Hut_B_Roof"), FVector(-860.0f, -80.0f, 130.0f), EHSPrototypeVisualShape::Cone, FLinearColor(0.17f, 0.19f, 0.14f, 1.0f), FVector(1.6f, 1.15f, 0.48f), FRotator(0.0f, 18.0f, 0.0f));
 	SpawnVisual(World, TEXT("Builder_Workbench"), FVector(-430.0f, -345.0f, 42.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.37f, 0.24f, 0.12f, 1.0f), FVector(1.25f, 0.45f, 0.25f), FRotator(0.0f, 8.0f, 0.0f));
-	SpawnVisual(World, TEXT("Builder_Log_Pile_A"), FVector(-520.0f, -360.0f, 30.0f), EHSPrototypeVisualShape::Cylinder, FLinearColor(0.34f, 0.21f, 0.11f, 1.0f), FVector(0.18f, 0.18f, 1.55f), FRotator(90.0f, 0.0f, 0.0f));
-	SpawnVisual(World, TEXT("Builder_Log_Pile_B"), FVector(-520.0f, -325.0f, 30.0f), EHSPrototypeVisualShape::Cylinder, FLinearColor(0.30f, 0.18f, 0.09f, 1.0f), FVector(0.18f, 0.18f, 1.55f), FRotator(90.0f, 0.0f, 0.0f));
+	SpawnNatureVisual(World, TEXT("Builder_Log_Pile_A"), FVector(-520.0f, -360.0f, 25.0f), TEXT("SM_Log"), FVector(0.9f), FRotator(0.0f, 15.0f, 0.0f));
+	SpawnNatureVisual(World, TEXT("Builder_Log_Pile_B"), FVector(-520.0f, -325.0f, 25.0f), TEXT("SM_Log"), FVector(0.8f), FRotator(0.0f, -18.0f, 0.0f));
+	SpawnNatureVisual(World, TEXT("Village_Tent_Blue"), FVector(-610.0f, -130.0f, 8.0f), TEXT("SM_Tent_Blue"), FVector(0.9f), FRotator(0.0f, 18.0f, 0.0f));
+	SpawnNatureVisual(World, TEXT("Village_Tent_Red"), FVector(-785.0f, 95.0f, 8.0f), TEXT("SM_Tent_Red"), FVector(0.78f), FRotator(0.0f, -12.0f, 0.0f));
 	SpawnVisual(World, TEXT("Trail_Road_Settlement"), FVector(-170.0f, -295.0f, 7.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.32f, 0.27f, 0.18f, 1.0f), FVector(8.8f, 0.35f, 0.02f), FRotator(0.0f, -8.0f, 0.0f));
 	SpawnVisual(World, TEXT("Trail_Road_Forest"), FVector(420.0f, -350.0f, 8.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.29f, 0.25f, 0.17f, 1.0f), FVector(8.2f, 0.28f, 0.02f), FRotator(0.0f, -6.0f, 0.0f));
 	SpawnVisual(World, TEXT("Stream_Performance_Test"), FVector(500.0f, 90.0f, 9.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.10f, 0.24f, 0.32f, 1.0f), FVector(6.5f, 0.22f, 0.018f), FRotator(0.0f, -16.0f, 0.0f));
-	SpawnVisual(World, TEXT("Landmark_StandingStone"), FVector(1010.0f, -145.0f, 90.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.34f, 0.35f, 0.32f, 1.0f), FVector(0.42f, 0.26f, 1.8f), FRotator(0.0f, 10.0f, 0.0f));
+	SpawnNatureVisual(World, TEXT("Landmark_StandingStone"), FVector(1010.0f, -145.0f, 18.0f), TEXT("SM_Stone02"), FVector(1.25f, 0.9f, 1.75f), FRotator(0.0f, 10.0f, 0.0f));
 
 	SpawnFenceRun(World, TEXT("Settlement_Fence_North"), { FVector(-650.0f, -430.0f, 0.0f), FVector(-480.0f, -430.0f, 0.0f), FVector(-310.0f, -430.0f, 0.0f), FVector(-140.0f, -430.0f, 0.0f) }, true);
 	SpawnFenceRun(World, TEXT("Settlement_Fence_West"), { FVector(-650.0f, -430.0f, 0.0f), FVector(-650.0f, -250.0f, 0.0f), FVector(-650.0f, -70.0f, 0.0f) }, false);
@@ -480,6 +507,13 @@ void CreateMap()
 	ScentHerb->SetPlantDefinition(GetOrCreateAsset<UHSPlantDefinition>(TEXT("/Game/Data/Plants/DA_Plant_ScentHerb"), TEXT("DA_Plant_ScentHerb")));
 	AHSPlantActor* SenseHerb = SpawnNamedActor<AHSPlantActor>(World, TEXT("Plant_SenseHerb"), FVector(300.0f, 340.0f, 45.0f), FRotator::ZeroRotator);
 	SenseHerb->SetPlantDefinition(GetOrCreateAsset<UHSPlantDefinition>(TEXT("/Game/Data/Plants/DA_Plant_SenseHerb"), TEXT("DA_Plant_SenseHerb")));
+
+	SpawnNatureVisual(World, TEXT("HerbGlade_Bush_A"), FVector(275.0f, 270.0f, 7.0f), TEXT("SM_Bush_Berries_blue"), FVector(0.95f), FRotator(0.0f, 15.0f, 0.0f));
+	SpawnNatureVisual(World, TEXT("HerbGlade_Bush_B"), FVector(480.0f, 365.0f, 7.0f), TEXT("SM_Bush_Berries_Red"), FVector(0.85f), FRotator(0.0f, -28.0f, 0.0f));
+	SpawnNatureVisual(World, TEXT("HerbGlade_Grass_A"), FVector(220.0f, 345.0f, 5.0f), TEXT("SM_Grass_Array01"), FVector(1.4f), FRotator(0.0f, 42.0f, 0.0f));
+	SpawnNatureVisual(World, TEXT("HerbGlade_Grass_B"), FVector(420.0f, 235.0f, 5.0f), TEXT("SM_Grass01"), FVector(1.2f), FRotator(0.0f, -12.0f, 0.0f));
+	SpawnNatureVisual(World, TEXT("Forest_Bush_A"), FVector(760.0f, -255.0f, 6.0f), TEXT("SM_Bush_Simple"), FVector(1.05f), FRotator(0.0f, 18.0f, 0.0f));
+	SpawnNatureVisual(World, TEXT("Forest_DeadTree_A"), FVector(1180.0f, -520.0f, 7.0f), TEXT("SM_Dead_Tree"), FVector(1.1f), FRotator(0.0f, -35.0f, 0.0f));
 
 	SpawnExplorationMarker(World, TEXT("Explore_Village_Core"), FVector(-640.0f, -230.0f, 100.0f), FText::FromString(TEXT("Village Core")), TEXT("Location.Village"));
 	SpawnExplorationMarker(World, TEXT("Explore_Forest_Edge"), FVector(900.0f, -360.0f, 100.0f), FText::FromString(TEXT("Forest Edge")), TEXT("Location.Forest"));
@@ -507,11 +541,12 @@ void CreateMap()
 		FVector(340.0f, 520.0f, 0.0f),
 		FVector(530.0f, 430.0f, 0.0f)
 	});
-	SpawnVisual(World, TEXT("Ridge_Rock_A"), FVector(650.0f, -500.0f, 35.0f), EHSPrototypeVisualShape::Sphere, FLinearColor(0.34f, 0.36f, 0.34f, 1.0f), FVector(1.0f, 0.65f, 0.45f));
-	SpawnVisual(World, TEXT("Ridge_Rock_B"), FVector(820.0f, -560.0f, 30.0f), EHSPrototypeVisualShape::Sphere, FLinearColor(0.28f, 0.30f, 0.29f, 1.0f), FVector(0.8f, 0.55f, 0.38f));
+	SpawnNatureVisual(World, TEXT("Ridge_Rock_A"), FVector(650.0f, -500.0f, 20.0f), TEXT("SM_Rock02"), FVector(1.1f, 0.8f, 0.7f), FRotator(0.0f, 22.0f, 0.0f));
+	SpawnNatureVisual(World, TEXT("Ridge_Rock_B"), FVector(820.0f, -560.0f, 18.0f), TEXT("SM_Stones02"), FVector(0.9f), FRotator(0.0f, -18.0f, 0.0f));
 	SpawnVisual(World, TEXT("Ridge_Outcrop"), FVector(910.0f, -420.0f, 45.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.30f, 0.31f, 0.29f, 1.0f), FVector(1.8f, 0.65f, 0.65f), FRotator(0.0f, -24.0f, 0.0f));
-	SpawnVisual(World, TEXT("Boundary_Ridge_North"), FVector(260.0f, -1260.0f, 120.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.22f, 0.27f, 0.22f, 1.0f), FVector(18.0f, 0.6f, 2.0f), FRotator(0.0f, 4.0f, 0.0f));
-	SpawnVisual(World, TEXT("Boundary_Ridge_East"), FVector(1480.0f, -260.0f, 130.0f), EHSPrototypeVisualShape::Cube, FLinearColor(0.20f, 0.25f, 0.20f, 1.0f), FVector(0.7f, 12.0f, 2.2f), FRotator(0.0f, -8.0f, 0.0f));
+	SpawnNatureVisual(World, TEXT("Boundary_Mountain_North_A"), FVector(120.0f, -1350.0f, 15.0f), TEXT("SM_Mountain01"), FVector(5.0f, 2.2f, 2.0f), FRotator(0.0f, 4.0f, 0.0f));
+	SpawnNatureVisual(World, TEXT("Boundary_Mountain_North_B"), FVector(660.0f, -1320.0f, 15.0f), TEXT("SM_Hills01"), FVector(4.2f, 2.0f, 1.8f), FRotator(0.0f, -12.0f, 0.0f));
+	SpawnNatureVisual(World, TEXT("Boundary_Mountain_East"), FVector(1500.0f, -260.0f, 15.0f), TEXT("SM_Hills02"), FVector(2.2f, 5.0f, 2.0f), FRotator(0.0f, -82.0f, 0.0f));
 
 	World->MarkPackageDirty();
 	SaveMapPackage(World);

@@ -112,6 +112,7 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	bool bFoundCheapPrototypeSun = false;
 	bool bFoundCheapPrototypeSkyLight = false;
 	int32 PrototypeVisualCount = 0;
+	int32 LowPolyNatureVisualCount = 0;
 	bool bPrototypeVisualsAreCheap = true;
 	if (World && World->PersistentLevel)
 	{
@@ -165,6 +166,9 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 				bPrototypeVisualsAreCheap &= !PrototypeVisual->PrimaryActorTick.bCanEverTick
 					&& PrototypeMesh
 					&& PrototypeMesh->GetCollisionEnabled() == ECollisionEnabled::NoCollision;
+				LowPolyNatureVisualCount += PrototypeMesh
+					&& PrototypeMesh->GetStaticMesh()
+					&& PrototypeMesh->GetStaticMesh()->GetPathName().StartsWith(TEXT("/Game/LowPolyNatureLite/")) ? 1 : 0;
 			}
 			bFoundInteractionTarget |= Actor && Actor->IsA<AHSInteractionTarget>();
 			bFoundRestPoint |= Actor && Actor->IsA<AHSRestPointActor>();
@@ -209,6 +213,7 @@ bool FHSOneMorningHuntMapLoadsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("One Morning Hunt map should contain a plant-patch exploration marker."), bFoundPlantPatchMarker);
 	TestTrue(TEXT("One Morning Hunt map should contain a readable trail route."), TrailMarkerCount >= 3);
 	TestTrue(TEXT("Expanded map should contain cheap native prototype visuals."), PrototypeVisualCount >= 30);
+	TestTrue(TEXT("Expanded map should use Low Poly Nature Lite meshes for real nature dressing."), LowPolyNatureVisualCount >= 18);
 	TestTrue(TEXT("Prototype visuals should stay no-tick and no-collision."), bPrototypeVisualsAreCheap);
 	TestTrue(TEXT("One Morning Hunt prototype sun should use the cheap no-shadow baseline."), bFoundCheapPrototypeSun);
 	TestTrue(TEXT("One Morning Hunt prototype skylight should use the cheap no-shadow baseline."), bFoundCheapPrototypeSkyLight);
