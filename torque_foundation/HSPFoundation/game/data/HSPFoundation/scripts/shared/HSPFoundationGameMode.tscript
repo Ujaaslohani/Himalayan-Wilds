@@ -11,14 +11,24 @@ function HSPFoundationGameMode::onMissionStart(%this)
    echo("HSPFoundationGameMode: mission start");
    HSP_logFoundationFeaturePolicy();
    HSP_runFoundationDiagnostics("server-mission-start");
+   HSP_spawnFoundationSpawnPoints();
+   HSP_prepareFoundationNavMesh();
+   HSP_spawnFoundationWorldZones();
+   HSP_spawnFoundationTracking();
+   HSP_spawnFoundationNPCs();
    %animal = HSP_spawnFoundationAnimal();
    if (%animal > 0)
+   {
       schedule(100, 0, HSPFoundationAnimalTick);
+      schedule(500, 0, HSP_moveFoundationAnimal, %animal);
+   }
 }
 
 function HSPFoundationGameMode::onClientEnterGame(%this, %client)
 {
-   commandToClient(%client, 'SyncClock', $Sim::Time - %this.StartTime);
+   commandToClient(%client, 'HSPFoundationNpcCount', $HSPFoundation::NpcCount);
+   commandToClient(%client, 'HSPFoundationAnimalState', HSP_getFoundationAnimalState());
+   commandToClient(%client, 'HSPFoundationInteractionFeedback', "Foundation ready: terrain, water, deer, NPC");
    %client.setPlayerName(%client.connectData);
    echo("HSPFoundationGameMode: client enter; standard Torque spawn pipeline will create validation player");
 }
@@ -34,12 +44,19 @@ function HSPFoundationGameMode::setSpawnObjectType(%this, %client)
 
 function HSPFoundationGameMode::setSpawnPoint(%this, %client)
 {
-   %spawnX = -120;
-   %spawnY = -110;
+   %spawn = HSP_getFoundationSpawnPoint("player");
+   if (%spawn $= "")
+      %spawn = "-120 -110";
+
+   %spawnX = getWord(%spawn, 0);
+   %spawnY = getWord(%spawn, 1);
    %height = HSP_getFoundationTerrainHeight(%spawnX, %spawnY);
    echo("HSPFoundationGameMode: player spawn height" SPC %height);
    %client.spawnLocation = %spawnX SPC %spawnY SPC (%height + 2.0);
-   %client.spawnRotation = "0 0 1 0.65";
+   %rotation = HSP_getFoundationSpawnRotation("player");
+   if (%rotation $= "")
+      %rotation = "0 0 1 0.65";
+   %client.spawnRotation = %rotation;
    %client.GetEventManager().postEvent("setSpawnPointComplete", %client);
 }
 
@@ -53,6 +70,8 @@ function HSPFoundationGameMode::onInitialControlSet(%this)
 
    HSP_bindFoundationPrototypeControls();
    echo("HSPFoundationGameMode: initial player control set");
+   schedule(100, 0, HSP_createFoundationHud);
+   HSP_setFoundationFeedback("Guide nearby. Deer route is ahead.");
    schedule(500, 0, HSP_runFoundationDiagnostics, "client-post-ghost");
 }
 
@@ -63,7 +82,17 @@ function HSPFoundationGameMode::onMissionEnded(%this)
 function HSP_bindFoundationPrototypeControls()
 {
    if (isObject(ExampleMoveMap))
+   {
       ExampleMoveMap.bindCmd(mouse, button0, "HSP_foundationPrototypeShoot();", "");
+      ExampleMoveMap.bindCmd(keyboard, e, "HSP_foundationPrototypeInteract();", "");
+      ExampleMoveMap.bindCmd(keyboard, lshift, "HSP_foundationSprint(1);", "HSP_foundationSprint(0);");
+      ExampleMoveMap.bindCmd(keyboard, rshift, "HSP_foundationSprint(1);", "HSP_foundationSprint(0);");
+      ExampleMoveMap.bindCmd(keyboard, F5, "HSP_foundationSave();", "");
+      ExampleMoveMap.bindCmd(keyboard, F9, "HSP_foundationLoad();", "");
+      ExampleMoveMap.bindCmd(keyboard, F6, "HSP_toggleFoundationHudDebug();", "");
+      ExampleMoveMap.bindCmd(keyboard, F7, "HSP_toggleFoundationNavDebug();", "");
+      ExampleMoveMap.bindCmd(keyboard, F8, "HSP_requestFoundationDiagnostics();", "");
+   }
 }
 
 function HSP_foundationPrototypeShoot()
@@ -71,16 +100,647 @@ function HSP_foundationPrototypeShoot()
    commandToServer('HSPFoundationShoot');
 }
 
+function HSP_foundationPrototypeInteract()
+{
+   commandToServer('HSPFoundationInteract');
+}
+
+function HSP_foundationSprint(%active)
+{
+   commandToServer('HSPFoundationSprint', %active);
+}
+
+function HSP_foundationSave()
+{
+   commandToServer('HSPFoundationSave');
+}
+
+function HSP_foundationLoad()
+{
+   commandToServer('HSPFoundationLoad');
+}
+
+function HSP_toggleFoundationNavDebug()
+{
+   commandToServer('HSPFoundationToggleNavDebug');
+}
+
+function HSP_requestFoundationDiagnostics()
+{
+   commandToServer('HSPFoundationDiagnostics');
+}
+
 function serverCmdHSPFoundationShoot(%client)
 {
    if (!isObject(%client) || !isObject(%client.player))
       return;
 
-   HSP_foundationHuntRay(%client.player.getId());
+   %hit = HSP_foundationHuntRay(%client.player.getId());
+   if (%hit)
+   {
+      $HSPFoundation::LastHuntOutcome = "hit";
+      commandToClient(%client, 'HSPFoundationInteractionFeedback', "Hit: placeholder deer down");
+      HSP_notifyFoundationAnimalState();
+   }
+   else
+   {
+      $HSPFoundation::LastHuntOutcome = "miss";
+      commandToClient(%client, 'HSPFoundationInteractionFeedback', "Miss: deer startled");
+      HSP_notifyFoundationAnimalState();
+   }
 }
 
 function HSPFoundationAnimalTick()
 {
    if (HSP_tickFoundationAnimal(0.1))
       schedule(100, 0, HSPFoundationAnimalTick);
+}
+
+function HSP_notifyFoundationAnimalState()
+{
+   %state = HSP_getFoundationAnimalState();
+   if (!isObject(ClientGroup))
+      return;
+
+   for (%i = 0; %i < ClientGroup.getCount(); %i++)
+      commandToClient(ClientGroup.getObject(%i), 'HSPFoundationAnimalState', %state);
+}
+
+function HSPFoundationClientStatusTick()
+{
+   if (isObject(ServerConnection))
+      commandToServer('HSPFoundationRequestStatus');
+
+   schedule(500, 0, HSPFoundationClientStatusTick);
+}
+
+function serverCmdHSPFoundationRequestStatus(%client)
+{
+   HSP_updateFoundationClientStatus(%client);
+}
+
+function HSP_updateFoundationClientStatus(%client)
+{
+   if (!isObject(%client) || !isObject(%client.player))
+      return;
+
+   %waterState = HSP_getFoundationWaterState(%client.player.getId());
+   %zone = HSP_getFoundationWorldZone(%client.player.getId());
+   %prompt = HSP_getFoundationInteractionPrompt(%client.player);
+   %client.hspWaterState = %waterState;
+   HSP_applyFoundationPlayerMovementState(%client);
+   HSP_updateFoundationDeerAwareness(%client);
+
+   commandToClient(%client, 'HSPFoundationWaterState', %waterState);
+   commandToClient(%client, 'HSPFoundationWorldZone', %zone);
+   commandToClient(%client, 'HSPFoundationInteractionPrompt', %prompt);
+   commandToClient(%client, 'HSPFoundationAnimalState', HSP_getFoundationAnimalState());
+   commandToClient(%client, 'HSPFoundationDebugStatus', %client.player.getPosition(), HSP_getFoundationAnimalPosition(), $HSPFoundationSave::Version);
+}
+
+function HSP_applyFoundationPlayerMovementState(%client)
+{
+   if (!isObject(%client) || !isObject(%client.player))
+      return;
+
+   %bias = 1.0;
+   if (%client.hspWaterState $= "swimming")
+      %bias = 0.72;
+   else if (%client.hspWaterState $= "exiting")
+      %bias = 0.9;
+
+   if (%client.hspSprinting)
+      %bias *= 1.75;
+
+   %client.player.setMovementSpeedBias(%bias);
+   %moveState = "walking";
+   if (%client.hspSprinting)
+      %moveState = "running";
+   commandToClient(%client, 'HSPFoundationMoveState', %moveState, %bias);
+}
+
+function serverCmdHSPFoundationSprint(%client, %active)
+{
+   if (!isObject(%client))
+      return;
+
+   %client.hspSprinting = %active ? 1 : 0;
+   HSP_applyFoundationPlayerMovementState(%client);
+   if (%client.hspSprinting)
+      commandToClient(%client, 'HSPFoundationInteractionFeedback', "Running");
+   else
+      commandToClient(%client, 'HSPFoundationInteractionFeedback', "Walking");
+}
+
+function HSP_getFoundationInteractionPrompt(%player)
+{
+   if (!HSP_isFoundationFeatureEnabled("FoundationInteractionPrototype") || !isObject(%player))
+      return "";
+
+   %target = HSP_getFoundationInteractionTarget(%player);
+   if (%target $= "guide")
+      return "Talk [E]";
+
+   if (%target !$= "")
+      return "Interact [E]";
+
+   return "";
+}
+
+function HSP_distanceFoundation2D(%a, %b)
+{
+   %dx = getWord(%a, 0) - getWord(%b, 0);
+   %dy = getWord(%a, 1) - getWord(%b, 1);
+   return mSqrt((%dx * %dx) + (%dy * %dy));
+}
+
+function HSP_getFoundationInteractionTarget(%player)
+{
+   if (!isObject(%player))
+      return "";
+
+   %playerPos = %player.getPosition();
+   if (isObject(HSPFoundationGuideNPC) && HSP_distanceFoundation2D(%playerPos, HSPFoundationGuideNPC.getPosition()) < 22)
+      return "guide";
+
+   if (isObject(HSPFoundationGuideNPCMarker) && HSP_distanceFoundation2D(%playerPos, HSPFoundationGuideNPCMarker.getPosition()) < 22)
+      return "guide";
+
+   if (isObject(HSPFoundationDeer) && HSP_distanceFoundation2D(%playerPos, HSPFoundationDeer.getPosition()) < 7)
+      return "deer";
+
+   if (isObject(HSPFoundationTrackingMarkers))
+   {
+      for (%i = 0; %i < HSPFoundationTrackingMarkers.getCount(); %i++)
+      {
+         %track = HSPFoundationTrackingMarkers.getObject(%i);
+         if (HSP_distanceFoundation2D(%playerPos, %track.getPosition()) < 1.5)
+            return "track";
+      }
+   }
+
+   %waterState = HSP_getFoundationWaterState(%player.getId());
+   if (%waterState $= "swimming")
+      return "stream";
+
+   return "";
+}
+
+function serverCmdHSPFoundationInteract(%client)
+{
+   if (!isObject(%client) || !isObject(%client.player))
+      return;
+
+   %player = %client.player;
+   %playerPos = %player.getPosition();
+   %target = HSP_getFoundationInteractionTarget(%player);
+
+   if (%target $= "guide")
+   {
+      %line = HSP_getFoundationGuideDialogue(%client);
+      commandToClient(%client, 'HSPFoundationInteractionFeedback', "Talk: " @ %line);
+      echo("HSPFoundationInteraction: player talked to guide NPC");
+      return;
+   }
+
+   if (%target $= "deer")
+   {
+      commandToClient(%client, 'HSPFoundationInteractionFeedback', "Interact: deer track checked.");
+      echo("HSPFoundationInteraction: player interacted with deer placeholder");
+      return;
+   }
+
+   if (%target $= "track" && isObject(HSPFoundationTrackingMarkers))
+   {
+      for (%i = 0; %i < HSPFoundationTrackingMarkers.getCount(); %i++)
+      {
+         %track = HSPFoundationTrackingMarkers.getObject(%i);
+         if (HSP_distanceFoundation2D(%playerPos, %track.getPosition()) < 1.5)
+         {
+            commandToClient(%client, 'HSPFoundationInteractionFeedback', "Interact: fresh deer tracks.");
+            echo("HSPFoundationInteraction: player checked deer track" SPC %track.getName());
+            return;
+         }
+      }
+   }
+
+   if (%target $= "stream")
+   {
+      commandToClient(%client, 'HSPFoundationInteractionFeedback', "Interact: cold stream, buoyancy active.");
+      echo("HSPFoundationInteraction: player interacted with stream");
+      return;
+   }
+
+   commandToClient(%client, 'HSPFoundationInteractionFeedback', "Nothing nearby to interact with.");
+}
+
+function serverCmdHSPFoundationSave(%client)
+{
+   HSP_saveFoundationGame(%client);
+}
+
+function serverCmdHSPFoundationLoad(%client)
+{
+   HSP_loadFoundationGame(%client);
+}
+
+function serverCmdHSPFoundationToggleNavDebug(%client)
+{
+   if (!HSP_isFoundationFeatureEnabled("FoundationDebugToggles"))
+      return;
+
+   if (isObject(HSPFoundationNavMesh))
+   {
+      $HSPFoundation::NavDebug = !$HSPFoundation::NavDebug;
+      HSPFoundationNavMesh.alwaysRender = $HSPFoundation::NavDebug;
+      commandToClient(%client, 'HSPFoundationNavDebug', $HSPFoundation::NavDebug);
+      %state = "off";
+      if ($HSPFoundation::NavDebug)
+         %state = "on";
+      commandToClient(%client, 'HSPFoundationInteractionFeedback', "Debug: navmesh render " @ %state);
+      echo("HSPFoundationDebug: navmesh render" SPC %state);
+   }
+}
+
+function serverCmdHSPFoundationDiagnostics(%client)
+{
+   if (!HSP_isFoundationFeatureEnabled("FoundationDebugToggles"))
+      return;
+
+   HSP_runFoundationDiagnostics("manual-debug");
+   HSP_updateFoundationClientStatus(%client);
+   commandToClient(%client, 'HSPFoundationInteractionFeedback', "Debug: diagnostics written to console.log");
+}
+
+function HSP_saveFoundationGame(%client)
+{
+   if (!HSP_isFoundationFeatureEnabled("FoundationSavePrototype") || !isObject(%client) || !isObject(%client.player))
+      return false;
+
+   $HSPFoundationSave::Version = 1;
+   $HSPFoundationSave::PlayerPosition = %client.player.getPosition();
+   $HSPFoundationSave::PlayerWaterState = HSP_getFoundationWaterState(%client.player.getId());
+   $HSPFoundationSave::WorldZone = HSP_getFoundationWorldZone(%client.player.getId());
+   $HSPFoundationSave::AnimalState = HSP_getFoundationAnimalState();
+   if (isObject(HSPFoundationDeer))
+      $HSPFoundationSave::AnimalPosition = HSPFoundationDeer.getPosition();
+   else
+      $HSPFoundationSave::AnimalPosition = "";
+
+   export("$HSPFoundationSave::*", "data/HSPFoundation/generated/HSPFoundationSave.tscript", false);
+   commandToClient(%client, 'HSPFoundationInteractionFeedback', "Saved: player/world foundation state");
+   echo("HSPFoundationSave: saved data/HSPFoundation/generated/HSPFoundationSave.tscript");
+   return true;
+}
+
+function HSP_loadFoundationGame(%client)
+{
+   if (!HSP_isFoundationFeatureEnabled("FoundationSavePrototype") || !isObject(%client) || !isObject(%client.player))
+      return false;
+
+   %file = "data/HSPFoundation/generated/HSPFoundationSave.tscript";
+   if (!isFile(%file))
+   {
+      commandToClient(%client, 'HSPFoundationInteractionFeedback', "Load failed: no foundation save yet");
+      return false;
+   }
+
+   exec(%file);
+   if ($HSPFoundationSave::Version !$= "1")
+   {
+      commandToClient(%client, 'HSPFoundationInteractionFeedback', "Load failed: save version mismatch");
+      echo("HSPFoundationSave: version mismatch" SPC $HSPFoundationSave::Version);
+      return false;
+   }
+
+   if ($HSPFoundationSave::PlayerPosition !$= "")
+   {
+      %client.player.setPosition($HSPFoundationSave::PlayerPosition);
+      HSP_snapObjectToFoundationTerrain(%client.player.getId(), 2.0);
+   }
+
+   if ($HSPFoundationSave::AnimalState !$= "")
+      HSP_setFoundationAnimalState($HSPFoundationSave::AnimalState);
+
+   if (isObject(HSPFoundationDeer) && $HSPFoundationSave::AnimalPosition !$= "" && $HSPFoundationSave::AnimalState !$= "down")
+   {
+      HSPFoundationDeer.setHidden(false);
+      HSPFoundationDeer.setPosition($HSPFoundationSave::AnimalPosition);
+      HSP_snapObjectToFoundationTerrain(HSPFoundationDeer.getId(), 1.0);
+      HSP_syncFoundationAnimalVisuals();
+      schedule(500, 0, HSP_moveFoundationAnimal, HSPFoundationDeer.getId());
+   }
+
+   HSP_updateFoundationClientStatus(%client);
+   commandToClient(%client, 'HSPFoundationInteractionFeedback', "Loaded: foundation state restored");
+   echo("HSPFoundationSave: loaded" SPC %file);
+   return true;
+}
+
+function HSP_prepareFoundationNavMesh()
+{
+   if (!isObject(HSPFoundationNavMesh))
+   {
+      echo("HSPFoundationNav: missing HSPFoundationNavMesh");
+      return false;
+   }
+
+   %buildOk = HSPFoundationNavMesh.build(false, false);
+   echo("HSPFoundationNav: build result" SPC %buildOk);
+   if (%buildOk)
+   {
+      HSPFoundationNavMesh.save();
+      echo("HSPFoundationNav: saved" SPC HSPFoundationNavMesh.fileName);
+   }
+
+   return %buildOk;
+}
+
+function HSP_spawnFoundationSpawnPoints()
+{
+   if (isObject(HSPFoundationSpawnPoints))
+      HSPFoundationSpawnPoints.delete();
+
+   new SimSet(HSPFoundationSpawnPoints);
+   MissionCleanup.add(HSPFoundationSpawnPoints);
+
+   HSP_addFoundationSpawnPoint("player", "-120 -110", "0 0 1 0.65");
+   HSP_addFoundationSpawnPoint("guide", "-116 -101", "0 0 1 0");
+   HSP_addFoundationSpawnPoint("deerStart", "-108 -96", "0 0 1 0");
+   echo("HSPFoundationSpawns: registered" SPC HSPFoundationSpawnPoints.getCount() SPC "spawn points");
+}
+
+function HSP_addFoundationSpawnPoint(%key, %position, %rotation)
+{
+   %point = new ScriptObject()
+   {
+      class = "HSPFoundationSpawnPoint";
+      spawnKey = %key;
+      position = %position;
+      rotation = %rotation;
+   };
+   HSPFoundationSpawnPoints.add(%point);
+}
+
+function HSP_getFoundationSpawnPoint(%key)
+{
+   if (!isObject(HSPFoundationSpawnPoints))
+      return "";
+
+   for (%i = 0; %i < HSPFoundationSpawnPoints.getCount(); %i++)
+   {
+      %point = HSPFoundationSpawnPoints.getObject(%i);
+      if (%point.spawnKey $= %key)
+         return %point.position;
+   }
+
+   return "";
+}
+
+function HSP_getFoundationSpawnRotation(%key)
+{
+   if (!isObject(HSPFoundationSpawnPoints))
+      return "";
+
+   for (%i = 0; %i < HSPFoundationSpawnPoints.getCount(); %i++)
+   {
+      %point = HSPFoundationSpawnPoints.getObject(%i);
+      if (%point.spawnKey $= %key)
+         return %point.rotation;
+   }
+
+   return "";
+}
+
+function HSP_spawnFoundationWorldZones()
+{
+   if (isObject(HSPFoundationWorldZones))
+      HSPFoundationWorldZones.delete();
+
+   new SimSet(HSPFoundationWorldZones);
+   MissionCleanup.add(HSPFoundationWorldZones);
+
+   HSP_addFoundationWorldZone("spawn clearing", "-120 -110", "28");
+   HSP_addFoundationWorldZone("river valley", "-112 -104", "90");
+   HSP_addFoundationWorldZone("slope test", "58 42", "80");
+   HSP_addFoundationWorldZone("forest edge", "-165 -70", "140");
+   HSP_addFoundationWorldZone("animal route", "-52 -64", "120");
+
+   echo("HSPFoundationWorld: registered" SPC HSPFoundationWorldZones.getCount() SPC "prototype world zones");
+}
+
+function HSP_spawnFoundationTracking()
+{
+   if (!HSP_isFoundationFeatureEnabled("FoundationTrackingPrototype"))
+      return 0;
+
+   if (isObject(HSPFoundationTrackingMarkers))
+      HSPFoundationTrackingMarkers.delete();
+
+   new SimSet(HSPFoundationTrackingMarkers);
+   MissionCleanup.add(HSPFoundationTrackingMarkers);
+
+   HSP_addFoundationTrack("HSPFoundationTrack0", -114, -100, 0.2);
+   HSP_addFoundationTrack("HSPFoundationTrack1", -102, -94, 0.45);
+   HSP_addFoundationTrack("HSPFoundationTrack2", -88, -84, 0.7);
+   HSP_addFoundationTrack("HSPFoundationTrack3", -72, -72, 0.95);
+   HSP_addFoundationTrack("HSPFoundationTrack4", -54, -64, 1.2);
+
+   echo("HSPFoundationTracking: spawned" SPC HSPFoundationTrackingMarkers.getCount() SPC "prototype track markers");
+   return HSPFoundationTrackingMarkers.getCount();
+}
+
+function HSP_addFoundationTrack(%name, %x, %y, %yaw)
+{
+   %z = HSP_getFoundationTerrainHeight(%x, %y) + 0.12;
+   %track = new TSStatic(%name)
+   {
+      shapeAsset = "Prototyping:CubePrimitive_shape";
+      position = %x SPC %y SPC %z;
+      rotation = "0 0 1" SPC %yaw;
+      scale = "0.32 0.9 0.04";
+      collisionType = "None";
+   };
+   getScene(0).add(%track);
+   MissionCleanup.add(%track);
+   HSPFoundationTrackingMarkers.add(%track);
+}
+
+function HSP_addFoundationWorldZone(%name, %center, %radius)
+{
+   %zone = new ScriptObject()
+   {
+      class = "HSPFoundationWorldZone";
+      zoneName = %name;
+      center = %center;
+      radius = %radius;
+   };
+   HSPFoundationWorldZones.add(%zone);
+}
+
+function HSP_spawnFoundationNPCs()
+{
+   if (!HSP_isFoundationFeatureEnabled("FoundationNPCPrototype"))
+   {
+      $HSPFoundation::NpcCount = 0;
+      return 0;
+   }
+
+   if (isObject(HSPFoundationGuideNPC))
+      HSPFoundationGuideNPC.delete();
+   if (isObject(HSPFoundationGuideNPCMarker))
+      HSPFoundationGuideNPCMarker.delete();
+
+   %x = -116;
+   %y = -101;
+   %z = HSP_getFoundationTerrainHeight(%x, %y) + 1.0;
+   %npc = new AIPlayer(HSPFoundationGuideNPC)
+   {
+      dataBlock = "HSPFoundationNPCData";
+      position = %x SPC %y SPC %z;
+      scale = "1 1 1";
+      hspRole = "guide";
+      hspDisplayName = "Guide";
+   };
+   getScene(0).add(%npc);
+   MissionCleanup.add(%npc);
+   %npc.setMoveSpeed(0);
+
+   %marker = new TSStatic(HSPFoundationGuideNPCMarker)
+   {
+      shapeAsset = "Prototyping:CylinderPrimitive_shape";
+      position = %x SPC %y SPC (%z + 2.2);
+      scale = "0.55 0.55 1.4";
+      collisionType = "None";
+   };
+   getScene(0).add(%marker);
+   MissionCleanup.add(%marker);
+
+   $HSPFoundation::NpcCount = 1;
+   echo("HSPFoundationNPC: spawned guide placeholder at" SPC %x SPC %y SPC %z);
+   return 1;
+}
+
+function HSP_getFoundationGuideDialogue(%client)
+{
+   if (!isObject(%client))
+      return "Stay near the clearing and watch the deer route.";
+
+   %index = %client.hspGuideDialogueIndex;
+   %client.hspGuideDialogueIndex = (%index + 1) % 3;
+
+   if (%index == 1)
+      return "The stream marks the valley; tracks start just beyond it.";
+   if (%index == 2)
+      return "Walk quietly near deer. Running will startle it sooner.";
+
+   return "Stay near the clearing and watch the deer route.";
+}
+
+function HSP_updateFoundationDeerAwareness(%client)
+{
+   if (!HSP_isFoundationFeatureEnabled("FoundationAnimalPrototype"))
+      return;
+
+   if (!isObject(%client) || !isObject(%client.player) || !isObject(HSPFoundationDeer))
+      return;
+
+   %state = HSP_getFoundationAnimalState();
+   if (%state $= "down" || %state $= "fleeing")
+      return;
+
+   %distance = VectorDist(%client.player.getPosition(), HSPFoundationDeer.getPosition());
+   %alertRange = 19;
+   if (%client.hspSprinting)
+      %alertRange = 38;
+
+   if (%distance > %alertRange)
+      return;
+
+   if (($Sim::Time - $HSPFoundation::LastDeerAlertTime) < 3.0)
+      return;
+
+   $HSPFoundation::LastDeerAlertTime = $Sim::Time;
+   HSP_setFoundationAnimalState("alert");
+   %fleeing = HSP_alertFoundationAnimalFrom(%client.player.getId());
+   if (%fleeing)
+      HSP_setFoundationAnimalState("fleeing");
+
+   HSP_notifyFoundationAnimalState();
+   commandToClient(%client, 'HSPFoundationInteractionFeedback', "Deer startled");
+   echo("HSPFoundationAnimal: awareness startled deer at distance" SPC %distance SPC "sprinting" SPC %client.hspSprinting);
+}
+
+function HSP_startFoundationNavValidation()
+{
+   echo("HSPFoundationNav: validation start");
+   $HSPFoundationNavAgentTickCount = 0;
+   HSP_prepareFoundationNavMesh();
+
+   if (isObject(HSPFoundationNavAgentMarker))
+      HSPFoundationNavAgentMarker.delete();
+   if (isObject(HSPFoundationNavAgent))
+      HSPFoundationNavAgent.delete();
+   if (isObject(HSPFoundationNavController))
+      HSPFoundationNavController.delete();
+
+   %spawnX = -104;
+   %spawnY = -90;
+   %spawnZ = HSP_getFoundationTerrainHeight(%spawnX, %spawnY) + 1.0;
+   %agent = new AIPlayer(HSPFoundationNavAgent)
+   {
+      dataBlock = "HSPFoundationNavAgentData";
+      position = %spawnX SPC %spawnY SPC %spawnZ;
+      scale = "0.9 0.9 0.9";
+   };
+   getScene(0).add(%agent);
+   MissionCleanup.add(%agent);
+   %agent.setNavSize("Regular");
+   %agent.setMoveSpeed(0.55);
+
+   %marker = new TSStatic(HSPFoundationNavAgentMarker)
+   {
+      shapeAsset = "Prototyping:SpherePrimitive_shape";
+      position = %spawnX SPC %spawnY SPC (%spawnZ + 3.0);
+      scale = "1.1 1.1 1.1";
+   };
+   getScene(0).add(%marker);
+   MissionCleanup.add(%marker);
+
+   %controller = new AIController(HSPFoundationNavController)
+   {
+      ControllerData = "HSPFoundationAIControllerData";
+   };
+   MissionCleanup.add(%controller);
+   %agent.aiController = %controller;
+   %agent.setAIController(%controller);
+
+   %navId = %controller.findNavMesh();
+   echo("HSPFoundationNav: controller navmesh id" SPC %navId);
+
+   %goalX = -36;
+   %goalY = -48;
+   %goalZ = HSP_getFoundationTerrainHeight(%goalX, %goalY) + 1.0;
+   %agentPathOk = %agent.setPathDestination(%goalX SPC %goalY SPC %goalZ);
+   echo("HSPFoundationNav: AIPlayer path result" SPC %agentPathOk SPC "navmesh" SPC %agent.getNavMesh() SPC "goal" SPC %goalX SPC %goalY SPC %goalZ);
+
+   %controllerPathOk = %controller.setPathDestination(%goalX SPC %goalY SPC %goalZ);
+   echo("HSPFoundationNav: controller path result" SPC %controllerPathOk SPC "navmesh" SPC %controller.getNavMesh());
+
+   schedule(100, 0, HSPFoundationNavAgentTick);
+}
+
+function HSPFoundationNavAgentTick()
+{
+   if (!isObject(HSPFoundationNavAgent) || !isObject(HSPFoundationNavAgentMarker))
+      return;
+
+   %pos = HSPFoundationNavAgent.getPosition();
+   HSPFoundationNavAgentMarker.setPosition(getWord(%pos, 0) SPC getWord(%pos, 1) SPC (getWord(%pos, 2) + 3.0));
+
+   $HSPFoundationNavAgentTickCount++;
+   if (($HSPFoundationNavAgentTickCount % 10) == 0)
+      echo("HSPFoundationNav: agent position" SPC %pos);
+
+   schedule(100, 0, HSPFoundationNavAgentTick);
 }

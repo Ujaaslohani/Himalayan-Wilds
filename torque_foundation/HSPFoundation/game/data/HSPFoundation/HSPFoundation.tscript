@@ -21,6 +21,25 @@ if (!isObject(HSPFoundationTerrainGrassRenderMaterial))
    };
 }
 
+if (!isObject(HSPFoundationPrototypeBlueMaterial))
+{
+   new Material(HSPFoundationPrototypeBlueMaterial)
+   {
+      mapTo = "blue";
+      diffuseColor[0] = "0 0.48 0.95 1";
+      emissive[0] = "1";
+   };
+}
+
+if (!isObject(HSPFoundationPrototypeDefaultMaterial))
+{
+   new Material(HSPFoundationPrototypeDefaultMaterial)
+   {
+      mapTo = "DefaultMaterial";
+      diffuseColor[0] = "0.7 0.7 0.7 1";
+   };
+}
+
 function HSPFoundation::onCreate(%this)
 {
    echo("HSPFoundation module created");
@@ -49,6 +68,7 @@ function HSPFoundation::onServerScriptExec(%this)
 function HSPFoundation::initClient(%this)
 {
    HSP_prepareFoundationTerrainAsset();
+   %this.queueExec("./scripts/client/HSPFoundationHud");
    %this.queueExec("./scripts/shared/HSPFoundationGameMode");
    schedule(250, 0, HSPFoundationAutoStart);
 }

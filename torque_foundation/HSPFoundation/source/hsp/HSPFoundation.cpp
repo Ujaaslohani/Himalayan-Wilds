@@ -34,12 +34,20 @@ namespace
    constexpr const char* AnimalName = "HSPFoundationDeer";
    constexpr const char* AnimalDataName = "HSPFoundationDeerData";
    constexpr const char* AnimalBodyName = "HSPFoundationDeerBody";
-   constexpr const char* AnimalMarkerName = "HSPFoundationDeerMarker";
+   constexpr const char* AnimalHeadName = "HSPFoundationDeerHead";
+   constexpr const char* AnimalNeckName = "HSPFoundationDeerNeck";
+   constexpr const char* AnimalLegFrontLeftName = "HSPFoundationDeerLegFrontLeft";
+   constexpr const char* AnimalLegFrontRightName = "HSPFoundationDeerLegFrontRight";
+   constexpr const char* AnimalLegBackLeftName = "HSPFoundationDeerLegBackLeft";
+   constexpr const char* AnimalLegBackRightName = "HSPFoundationDeerLegBackRight";
+   constexpr const char* AnimalAntlerLeftName = "HSPFoundationDeerAntlerLeft";
+   constexpr const char* AnimalAntlerRightName = "HSPFoundationDeerAntlerRight";
    constexpr const char* VisualMarkerPrefix = "HSPFoundationVisualMarker";
-   constexpr U32 TerrainResolution = 256;
+   constexpr const char* AnimalStateVariable = "$HSPFoundation::AnimalState";
+   constexpr U32 TerrainResolution = 512;
    constexpr F32 TerrainSquareSize = 4.0f;
-   constexpr F32 TerrainWorldOriginX = -512.0f;
-   constexpr F32 TerrainWorldOriginY = -512.0f;
+   constexpr F32 TerrainWorldOriginX = -1024.0f;
+   constexpr F32 TerrainWorldOriginY = -1024.0f;
 
    struct StreamNode
    {
@@ -80,6 +88,13 @@ namespace
       { "FoundationAIPlayer", false, "Disabled for this gate; AI resumes after player/camera/terrain validation." },
       { "FoundationAnimalPrototype", true, "One removable placeholder animal using Torque AIPlayer movement." },
       { "FoundationHuntingPrototype", true, "One-click C++ hunt ray for validating interaction only; no inventory or weapon system." },
+      { "FoundationInteractionPrototype", true, "Talk/interact prompts and small test interactions." },
+      { "FoundationNPCPrototype", true, "One stationary placeholder NPC for validating player/NPC presence and collision only." },
+      { "FoundationHUDPrototype", true, "Small HUD overlay with status, interaction feedback, and performance numbers." },
+      { "FoundationWaterStatePrototype", true, "Basic walking/swimming/exiting state feedback around the stream." },
+      { "FoundationTrackingPrototype", true, "Small removable deer track markers for interaction/testing only." },
+      { "FoundationSavePrototype", true, "Minimal save/load of prototype player and world state only." },
+      { "FoundationDebugToggles", true, "Temporary debug toggles for nav, collision/status, and HUD diagnostics." },
       { "FoundationVisualMarkers", false, "Optional landmarks; disabled while terrain/camera validation is in progress." },
       { "BuilderTimedConstruction", true, "Future building intent is completed by builder time, not player material hauling." },
       { "MaterialGatheringEconomy", false, "Disabled for now: no mandatory wood, stone, or iron collection loop." },
@@ -125,6 +140,17 @@ namespace
       return feature->EnabledByDefault;
    }
 
+   void setFoundationAnimalState(const char* state)
+   {
+      Con::setVariable(AnimalStateVariable, state && state[0] ? state : "idle");
+   }
+
+   const char* getFoundationAnimalState()
+   {
+      const char* state = Con::getVariable(AnimalStateVariable);
+      return state && state[0] ? state : "idle";
+   }
+
    F32 hspHeightAtGrid(U32 x, U32 y)
    {
       const F32 cx = (F32)x - (TerrainResolution * 0.5f);
@@ -162,11 +188,11 @@ namespace
          streamDistance = getMin(streamDistance, std::sqrt((dx * dx) + (dy * dy)));
       }
 
-      if (streamDistance < 42.0f)
+      if (streamDistance < 32.0f)
       {
-         const F32 channel = 1.0f - mClampF(streamDistance / 42.0f, 0.0f, 1.0f);
+         const F32 channel = 1.0f - mClampF(streamDistance / 32.0f, 0.0f, 1.0f);
          const F32 bankBlend = channel * channel * (3.0f - (2.0f * channel));
-         height -= bankBlend * 18.0f;
+         height -= bankBlend * 10.0f;
       }
 
       return mClampF(height, 2.0f, 155.0f);
@@ -203,6 +229,57 @@ namespace
       return height + terrainPos.z;
    }
 
+   F32 distanceToFoundationStream2D(const Point3F& position)
+   {
+      F32 streamDistance = 100000.0f;
+      for (U32 i = 1; i < (sizeof(FoundationStreamPath) / sizeof(FoundationStreamPath[0])); ++i)
+      {
+         const StreamNode& a = FoundationStreamPath[i - 1];
+         const StreamNode& b = FoundationStreamPath[i];
+         const F32 vx = b.X - a.X;
+         const F32 vy = b.Y - a.Y;
+         const F32 wx = position.x - a.X;
+         const F32 wy = position.y - a.Y;
+         const F32 lenSq = (vx * vx) + (vy * vy);
+         const F32 t = lenSq > 0.001f ? mClampF(((wx * vx) + (wy * vy)) / lenSq, 0.0f, 1.0f) : 0.0f;
+         const F32 dx = position.x - (a.X + (vx * t));
+         const F32 dy = position.y - (a.Y + (vy * t));
+         streamDistance = getMin(streamDistance, std::sqrt((dx * dx) + (dy * dy)));
+      }
+
+      return streamDistance;
+   }
+
+   const char* foundationWaterStateForPosition(const Point3F& position)
+   {
+      const F32 streamDistance = distanceToFoundationStream2D(position);
+      if (streamDistance < 4.2f)
+         return "swimming";
+      if (streamDistance < 7.5f)
+         return "exiting";
+      return "walking";
+   }
+
+   const char* foundationWorldZoneForPosition(const Point3F& position)
+   {
+      if (distanceToFoundationStream2D(position) < 10.0f)
+         return "river valley";
+
+      if (position.x < -150.0f || position.y < -150.0f)
+         return "forest edge";
+
+      if (position.x > -40.0f && position.y > -70.0f)
+         return "animal route";
+
+      if (sampleFoundationHeight(position.x, position.y) > 100.0f)
+         return "high slope";
+
+      if (position.x < -90.0f && position.y < -85.0f)
+         return "spawn clearing";
+
+      return "open hillside";
+   }
+
    void addToMissionCleanup(SimObject* object)
    {
       SimGroup* cleanup = nullptr;
@@ -224,12 +301,39 @@ namespace
          marker->setHidden(true);
    }
 
-   void spawnVisualMarker(const char* name, const char* shapeAsset, const Point3F& position, const Point3F& scale)
+   void deleteFoundationAnimalVisuals()
+   {
+      deleteVisualMarker(AnimalBodyName);
+      deleteVisualMarker(AnimalHeadName);
+      deleteVisualMarker(AnimalNeckName);
+      deleteVisualMarker(AnimalLegFrontLeftName);
+      deleteVisualMarker(AnimalLegFrontRightName);
+      deleteVisualMarker(AnimalLegBackLeftName);
+      deleteVisualMarker(AnimalLegBackRightName);
+      deleteVisualMarker(AnimalAntlerLeftName);
+      deleteVisualMarker(AnimalAntlerRightName);
+   }
+
+   void hideFoundationAnimalVisuals()
+   {
+      hideVisualMarker(AnimalBodyName);
+      hideVisualMarker(AnimalHeadName);
+      hideVisualMarker(AnimalNeckName);
+      hideVisualMarker(AnimalLegFrontLeftName);
+      hideVisualMarker(AnimalLegFrontRightName);
+      hideVisualMarker(AnimalLegBackLeftName);
+      hideVisualMarker(AnimalLegBackRightName);
+      hideVisualMarker(AnimalAntlerLeftName);
+      hideVisualMarker(AnimalAntlerRightName);
+   }
+
+   void spawnVisualMarker(const char* name, const char* shapeAsset, const Point3F& position, const Point3F& scale, F32 yaw = 0.0f)
    {
       const String props = String::ToString(
-         "shapeAsset = \"%s\"; position = \"%0.3f %0.3f %0.3f\"; scale = \"%0.3f %0.3f %0.3f\";",
+         "shapeAsset = \"%s\"; position = \"%0.3f %0.3f %0.3f\"; rotation = \"0 0 1 %0.3f\"; scale = \"%0.3f %0.3f %0.3f\"; collisionType = \"None\"; allowPlayerStep = \"0\";",
          shapeAsset,
          position.x, position.y, position.z,
+         yaw,
          scale.x, scale.y, scale.z);
 
       SimObject* spawned = Sim::spawnObject("TSStatic", String::EmptyString, name, props, String::EmptyString);
@@ -240,22 +344,26 @@ namespace
          return;
       }
 
+      marker->disableCollision();
       if (Scene* scene = Scene::getRootScene())
          scene->addObject(marker);
       addToMissionCleanup(marker);
    }
 
-   void syncOrSpawnVisualMarker(const char* name, const char* shapeAsset, const Point3F& position, const Point3F& scale)
+   void syncOrSpawnVisualMarker(const char* name, const char* shapeAsset, const Point3F& position, const Point3F& scale, F32 yaw = 0.0f)
    {
       SceneObject* marker = nullptr;
       if (Sim::findObject(name, marker))
       {
-         marker->setPosition(position);
+         MatrixF transform(EulerF(0.0f, 0.0f, yaw));
+         transform.setPosition(position);
+         marker->setTransform(transform);
          marker->setHidden(false);
+         marker->disableCollision();
          return;
       }
 
-      spawnVisualMarker(name, shapeAsset, position, scale);
+      spawnVisualMarker(name, shapeAsset, position, scale, yaw);
    }
 
    struct AnimalWaypoint
@@ -287,6 +395,26 @@ namespace
       return targetIndex;
    }
 
+   U32& animalTickCount()
+   {
+      static U32 tickCount = 0;
+      return tickCount;
+   }
+
+   U32& animalRouteStep()
+   {
+      static U32 routeStep = 0;
+      return routeStep;
+   }
+
+   Point3F& lastAnimalVisualPosition()
+   {
+      static Point3F position(-108.0f, -96.0f, 0.0f);
+      return position;
+   }
+
+   AIPlayer* findFoundationAnimal();
+
    U32 findNearestAnimalWaypointIndex(const Point3F& position)
    {
       U32 nearestIndex = 0;
@@ -307,6 +435,26 @@ namespace
       return nearestIndex;
    }
 
+   bool sendFoundationAnimalToWaypoint(AIPlayer* animal, U32 waypointIndex, F32 speed, const char* reason)
+   {
+      if (!animal)
+         return false;
+
+      const U32 count = sizeof(AnimalWaypoints) / sizeof(AnimalWaypoints[0]);
+      const U32 targetIndex = waypointIndex % count;
+      const Point3F destination = animalWaypointPosition(targetIndex);
+
+      animalTargetIndex() = targetIndex;
+      animal->setNavSize(AIPlayer::Regular);
+      animal->setMoveSpeed(speed);
+      setFoundationAnimalState(reason && dStrstr(reason, "flee") ? "fleeing" : "wandering");
+      const bool pathFound = animal->setPathDestination(destination);
+      Con::printf("HSPFoundation: animal '%s' %s path to waypoint %u %s at %0.2f %0.2f %0.2f speed %0.2f",
+         animal->getName(), reason ? reason : "native", targetIndex, pathFound ? "found" : "failed",
+         destination.x, destination.y, destination.z, speed);
+      return pathFound;
+   }
+
    bool moveFoundationAnimal(AIPlayer* animal)
    {
       if (!animal)
@@ -314,14 +462,60 @@ namespace
 
       const U32 count = sizeof(AnimalWaypoints) / sizeof(AnimalWaypoints[0]);
       const U32 currentIndex = findNearestAnimalWaypointIndex(animal->getPosition());
-      const U32 nextIndex = (currentIndex + 1) % count;
-      const Point3F destination = animalWaypointPosition(nextIndex);
+      U32 step = (++animalRouteStep() % 3) + 1;
+      U32 nextIndex = (currentIndex + step) % count;
+      if (nextIndex == currentIndex)
+         nextIndex = (currentIndex + 1) % count;
 
-      animalTargetIndex() = nextIndex;
-      animal->setMoveSpeed(0.0f);
-      Con::printf("HSPFoundation: animal '%s' moving to waypoint %u at %0.2f %0.2f %0.2f",
-         animal->getName(), nextIndex, destination.x, destination.y, destination.z);
-      return true;
+      const F32 speed = 0.30f + ((animalRouteStep() % 3) * 0.08f);
+      for (U32 attempt = 0; attempt < count; ++attempt)
+      {
+         const U32 candidateIndex = (nextIndex + attempt) % count;
+         if (candidateIndex == currentIndex)
+            continue;
+
+         if (sendFoundationAnimalToWaypoint(animal, candidateIndex, speed, "wander"))
+            return true;
+      }
+
+      Con::warnf("HSPFoundation: animal '%s' could not find any wander waypoint", animal->getName());
+      return false;
+   }
+
+   bool fleeFoundationAnimalFrom(const Point3F& threatPosition)
+   {
+      AIPlayer* animal = findFoundationAnimal();
+      if (!animal || animal->isHidden())
+         return false;
+
+      U32 bestIndex = 0;
+      F32 bestDistSq = -1.0f;
+      const U32 count = sizeof(AnimalWaypoints) / sizeof(AnimalWaypoints[0]);
+      for (U32 i = 0; i < count; ++i)
+      {
+         const Point3F waypoint = animalWaypointPosition(i);
+         const F32 distSq = (waypoint - threatPosition).lenSquared();
+         if (distSq > bestDistSq)
+         {
+            bestIndex = i;
+            bestDistSq = distSq;
+         }
+      }
+
+      if (sendFoundationAnimalToWaypoint(animal, bestIndex, 2.7f, "flee"))
+         return true;
+
+      for (U32 attempt = 0; attempt < count; ++attempt)
+      {
+         if (attempt == bestIndex)
+            continue;
+
+         if (sendFoundationAnimalToWaypoint(animal, attempt, 2.7f, "flee-fallback"))
+            return true;
+      }
+
+      Con::warnf("HSPFoundation: animal '%s' could not find a flee waypoint", animal->getName());
+      return false;
    }
 
    AIPlayer* findFoundationAnimal()
@@ -336,56 +530,69 @@ namespace
       AIPlayer* animal = findFoundationAnimal();
       if (!animal || animal->isHidden())
       {
-         hideVisualMarker(AnimalBodyName);
-         hideVisualMarker(AnimalMarkerName);
+         hideFoundationAnimalVisuals();
          return false;
       }
 
       const Point3F animalPos = animal->getPosition();
+      Point3F& lastPos = lastAnimalVisualPosition();
+      VectorF heading = animalPos - lastPos;
+      heading.z = 0.0f;
+      F32 yaw = 0.0f;
+      if (heading.lenSquared() > 0.0001f)
+      {
+         heading.normalizeSafe();
+         yaw = std::atan2(heading.x, heading.y);
+         lastPos = animalPos;
+      }
+
+      MatrixF yawTransform(EulerF(0.0f, 0.0f, yaw));
+      auto offsetFromAnimal = [&](const Point3F& localOffset)
+      {
+         Point3F rotated = localOffset;
+         yawTransform.mulV(rotated);
+         return Point3F(animalPos.x + rotated.x, animalPos.y + rotated.y, animalPos.z + rotated.z);
+      };
+
       syncOrSpawnVisualMarker(AnimalBodyName, "Prototyping:CubePrimitive_shape",
-         Point3F(animalPos.x, animalPos.y, animalPos.z + 0.85f), Point3F(1.2f, 1.8f, 0.65f));
-      syncOrSpawnVisualMarker(AnimalMarkerName, "Prototyping:ArrowPrimitive",
-         Point3F(animalPos.x, animalPos.y, animalPos.z + 3.0f), Point3F(1.6f, 1.6f, 1.6f));
+         offsetFromAnimal(Point3F(0.0f, 0.0f, 1.0f)), Point3F(0.85f, 1.75f, 0.55f), yaw);
+      syncOrSpawnVisualMarker(AnimalNeckName, "Prototyping:CylinderPrimitive_shape",
+         offsetFromAnimal(Point3F(0.0f, 1.05f, 1.45f)), Point3F(0.24f, 0.24f, 0.75f), yaw);
+      syncOrSpawnVisualMarker(AnimalHeadName, "Prototyping:SpherePrimitive_shape",
+         offsetFromAnimal(Point3F(0.0f, 1.42f, 1.75f)), Point3F(0.45f, 0.55f, 0.36f), yaw);
+      syncOrSpawnVisualMarker(AnimalLegFrontLeftName, "Prototyping:CylinderPrimitive_shape",
+         offsetFromAnimal(Point3F(-0.34f, 0.72f, 0.35f)), Point3F(0.16f, 0.16f, 0.75f), yaw);
+      syncOrSpawnVisualMarker(AnimalLegFrontRightName, "Prototyping:CylinderPrimitive_shape",
+         offsetFromAnimal(Point3F(0.34f, 0.72f, 0.35f)), Point3F(0.16f, 0.16f, 0.75f), yaw);
+      syncOrSpawnVisualMarker(AnimalLegBackLeftName, "Prototyping:CylinderPrimitive_shape",
+         offsetFromAnimal(Point3F(-0.34f, -0.72f, 0.35f)), Point3F(0.16f, 0.16f, 0.75f), yaw);
+      syncOrSpawnVisualMarker(AnimalLegBackRightName, "Prototyping:CylinderPrimitive_shape",
+         offsetFromAnimal(Point3F(0.34f, -0.72f, 0.35f)), Point3F(0.16f, 0.16f, 0.75f), yaw);
+      syncOrSpawnVisualMarker(AnimalAntlerLeftName, "Prototyping:ConePrimitive_shape",
+         offsetFromAnimal(Point3F(-0.24f, 1.63f, 2.18f)), Point3F(0.16f, 0.16f, 0.55f), yaw);
+      syncOrSpawnVisualMarker(AnimalAntlerRightName, "Prototyping:ConePrimitive_shape",
+         offsetFromAnimal(Point3F(0.24f, 1.63f, 2.18f)), Point3F(0.16f, 0.16f, 0.55f), yaw);
       return true;
    }
 
    bool tickFoundationAnimal(F32 seconds)
    {
+      (void)seconds;
+
       AIPlayer* animal = findFoundationAnimal();
       if (!animal || animal->isHidden())
       {
-         hideVisualMarker(AnimalBodyName);
-         hideVisualMarker(AnimalMarkerName);
+         hideFoundationAnimalVisuals();
          return false;
       }
 
-      const U32 count = sizeof(AnimalWaypoints) / sizeof(AnimalWaypoints[0]);
-      Point3F pos = animal->getPosition();
-      Point3F target = animalWaypointPosition(animalTargetIndex());
-
-      F32 dx = target.x - pos.x;
-      F32 dy = target.y - pos.y;
-      F32 horizontalDistance = std::sqrt((dx * dx) + (dy * dy));
-      if (horizontalDistance < 1.25f)
-      {
-         animalTargetIndex() = (animalTargetIndex() + 1) % count;
-         target = animalWaypointPosition(animalTargetIndex());
-         dx = target.x - pos.x;
-         dy = target.y - pos.y;
-         horizontalDistance = std::sqrt((dx * dx) + (dy * dy));
-      }
-
-      if (horizontalDistance > 0.001f)
-      {
-         const F32 speed = 5.5f;
-         const F32 step = getMin(speed * mClampF(seconds, 0.016f, 0.25f), horizontalDistance);
-         pos.x += (dx / horizontalDistance) * step;
-         pos.y += (dy / horizontalDistance) * step;
-         pos.z = sampleFoundationHeight(pos.x, pos.y) + 1.0f;
-         static_cast<SceneObject*>(animal)->setPosition(pos);
-      }
-
       syncFoundationAnimalVisuals();
+      ++animalTickCount();
+      if ((animalTickCount() % 20) == 0)
+      {
+         const Point3F pos = animal->getPosition();
+         Con::printf("HSPFoundation: animal position %0.2f %0.2f %0.2f", pos.x, pos.y, pos.z);
+      }
       return true;
    }
 
@@ -421,26 +628,40 @@ namespace
       const Point3F target = animal->getBoxCenter();
       VectorF toTarget = target - start;
       const F32 distance = toTarget.len();
-      if (distance < 0.001f || distance > 220.0f)
+      if (distance < 0.001f || distance > 180.0f)
       {
          Con::printf("HSPFoundation: hunt ray missed; animal distance %0.2f", distance);
          return false;
       }
 
-      toTarget /= distance;
-      const F32 aimDot = mDot(forward, toTarget);
-      if (aimDot < 0.965f)
+      const F32 alongAim = mDot(forward, toTarget);
+      if (alongAim <= 0.0f)
       {
-         Con::printf("HSPFoundation: hunt ray missed; animal outside aim cone (dot %0.3f)", aimDot);
+         Con::printf("HSPFoundation: hunt ray missed; animal is behind the player");
+         return false;
+      }
+
+      const Point3F closestPoint = start + (forward * alongAim);
+      const F32 missDistance = (target - closestPoint).len();
+      const F32 hitRadius = 4.5f;
+      if (missDistance > hitRadius)
+      {
+         Con::printf("HSPFoundation: hunt ray missed; aim offset %0.2f, allowed %0.2f", missDistance, hitRadius);
+         if (distance < 110.0f && missDistance < 18.0f)
+         {
+            fleeFoundationAnimalFrom(start);
+            Con::printf("HSPFoundation: near miss startled placeholder animal");
+         }
          return false;
       }
 
       animal->setMoveSpeed(0.0f);
       animal->setHidden(true);
       animal->disableCollision();
-      hideVisualMarker(AnimalBodyName);
-      hideVisualMarker(AnimalMarkerName);
-      Con::printf("HSPFoundation: hunt ray hit placeholder animal; animal hidden/stopped");
+      hideFoundationAnimalVisuals();
+      setFoundationAnimalState("down");
+      Con::printf("HSPFoundation: hunt ray hit placeholder animal at distance %0.2f with aim offset %0.2f; animal hidden/stopped",
+         distance, missDistance);
       return true;
    }
 
@@ -676,8 +897,7 @@ DefineEngineFunction(HSP_spawnFoundationAnimal, S32, (), ,
 
    if (AIPlayer* existing = findFoundationAnimal())
       existing->deleteObject();
-   deleteVisualMarker(AnimalBodyName);
-   deleteVisualMarker(AnimalMarkerName);
+   deleteFoundationAnimalVisuals();
 
    const Point3F spawn = animalWaypointPosition(0);
    const String props = String::ToString(
@@ -693,7 +913,12 @@ DefineEngineFunction(HSP_spawnFoundationAnimal, S32, (), ,
 
    addToMissionCleanup(animal);
    animalTargetIndex() = 1;
-   animal->setMoveSpeed(0.0f);
+   animalTickCount() = 0;
+   animalRouteStep() = 0;
+   setFoundationAnimalState("idle");
+   lastAnimalVisualPosition() = spawn;
+   animal->setNavSize(AIPlayer::Regular);
+   animal->setMoveSpeed(0.45f);
    syncFoundationAnimalVisuals();
    Con::printf("HSPFoundation: spawned placeholder animal '%s' at %0.2f %0.2f %0.2f",
       AnimalName, spawn.x, spawn.y, spawn.z);
@@ -729,6 +954,61 @@ DefineEngineFunction(HSP_tickFoundationAnimal, bool, (F32 seconds), (0.1f),
       return false;
 
    return tickFoundationAnimal(seconds);
+}
+
+DefineEngineFunction(HSP_setFoundationAnimalState, void, (const char* state), ,
+   "Sets the current foundation animal state label for prototype HUD/debugging.")
+{
+   setFoundationAnimalState(state);
+}
+
+DefineEngineFunction(HSP_getFoundationAnimalState, const char*, (), ,
+   "Returns the current foundation animal state label.")
+{
+   return getFoundationAnimalState();
+}
+
+DefineEngineFunction(HSP_getFoundationAnimalPosition, const char*, (), ,
+   "Returns the current placeholder animal position for script-side status/debug.")
+{
+   AIPlayer* animal = findFoundationAnimal();
+   if (!animal)
+      return "";
+
+   static char positionBuffer[128];
+   const Point3F pos = animal->getPosition();
+   dSprintf(positionBuffer, sizeof(positionBuffer), "%0.2f %0.2f %0.2f", pos.x, pos.y, pos.z);
+   return positionBuffer;
+}
+
+DefineEngineFunction(HSP_alertFoundationAnimalFrom, bool, (SimObjectId threatId), ,
+   "Alerts the placeholder animal and sends it away from the supplied threat object.")
+{
+   SceneObject* threat = nullptr;
+   if (!Sim::findObject(threatId, threat) || !threat)
+      return false;
+
+   return fleeFoundationAnimalFrom(threat->getPosition());
+}
+
+DefineEngineFunction(HSP_getFoundationWaterState, const char*, (SimObjectId objectId), ,
+   "Returns walking, exiting, or swimming for the object's current foundation stream position.")
+{
+   SceneObject* object = nullptr;
+   if (!Sim::findObject(objectId, object))
+      return "unknown";
+
+   return foundationWaterStateForPosition(object->getPosition());
+}
+
+DefineEngineFunction(HSP_getFoundationWorldZone, const char*, (SimObjectId objectId), ,
+   "Returns the named foundation world test zone for the object's current position.")
+{
+   SceneObject* object = nullptr;
+   if (!Sim::findObject(objectId, object))
+      return "unknown";
+
+   return foundationWorldZoneForPosition(object->getPosition());
 }
 
 DefineEngineFunction(HSP_foundationHuntRay, bool, (SimObjectId shooterId), ,

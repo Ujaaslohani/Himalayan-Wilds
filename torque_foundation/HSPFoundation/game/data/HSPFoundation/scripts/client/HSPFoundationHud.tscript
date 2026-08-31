@@ -1,0 +1,277 @@
+function HSP_createFoundationHud()
+{
+   if (!HSP_isFoundationFeatureEnabled("FoundationHUDPrototype"))
+      return;
+
+   HSP_createFoundationHudProfiles();
+
+   if (!isObject(PlayGui))
+   {
+      schedule(250, 0, HSP_createFoundationHud);
+      return;
+   }
+
+   if (isObject(HSPFoundationHudPanel))
+      HSPFoundationHudPanel.delete();
+
+   %panel = new GuiControl(HSPFoundationHudPanel)
+   {
+      profile = "HSPFoundationHudPanelProfile";
+      position = "14 14";
+      extent = "500 164";
+      horizSizing = "right";
+      vertSizing = "bottom";
+      visible = "1";
+      active = "0";
+      isContainer = "1";
+   };
+   PlayGui.add(%panel);
+
+   %status = new GuiTextCtrl(HSPFoundationHudStatus)
+   {
+      profile = "HSPFoundationHudTextProfile";
+      position = "0 0";
+      extent = "500 20";
+      text = "Health 100 | Foundation";
+      visible = "1";
+      active = "0";
+   };
+   %panel.add(%status);
+
+   %world = new GuiTextCtrl(HSPFoundationHudWorld)
+   {
+      profile = "HSPFoundationHudTextProfile";
+      position = "0 22";
+      extent = "500 20";
+      text = "Terrain ready | Stream ready";
+      visible = "1";
+      active = "0";
+   };
+   %panel.add(%world);
+
+   %perf = new GuiTextCtrl(HSPFoundationHudPerf)
+   {
+      profile = "HSPFoundationHudTextProfile";
+      position = "0 44";
+      extent = "500 20";
+      text = "FPS -- | MSPF --";
+      visible = "1";
+      active = "0";
+   };
+   %panel.add(%perf);
+
+   %feedback = new GuiTextCtrl(HSPFoundationHudFeedback)
+   {
+      profile = "HSPFoundationHudTextProfile";
+      position = "0 66";
+      extent = "500 20";
+      text = "Find the deer";
+      visible = "1";
+      active = "0";
+   };
+   %panel.add(%feedback);
+
+   %prompt = new GuiTextCtrl(HSPFoundationHudPrompt)
+   {
+      profile = "HSPFoundationHudTextProfile";
+      position = "0 88";
+      extent = "500 20";
+      text = "";
+      visible = "1";
+      active = "0";
+   };
+   %panel.add(%prompt);
+
+   %debug = new GuiTextCtrl(HSPFoundationHudDebug)
+   {
+      profile = "HSPFoundationHudTextProfile";
+      position = "0 110";
+      extent = "500 42";
+      text = "";
+      visible = "0";
+      active = "0";
+   };
+   %panel.add(%debug);
+
+   if (isObject(AmmoAmount))
+      AmmoAmount.setVisible(false);
+
+   HSP_updateFoundationHud();
+   HSP_startFoundationHudStatusPolling();
+}
+
+function HSP_createFoundationHudProfiles()
+{
+   if (!isObject(HSPFoundationHudPanelProfile))
+   {
+      new GuiControlProfile(HSPFoundationHudPanelProfile : GuiDefaultProfile)
+      {
+         opaque = "1";
+         fillColor = "0 0 0 125";
+         border = "1";
+         borderColor = "45 70 55 210";
+      };
+   }
+
+   if (!isObject(HSPFoundationHudTextProfile))
+   {
+      new GuiControlProfile(HSPFoundationHudTextProfile : GuiTextProfile)
+      {
+         fontColor = "230 245 230 255";
+         fontColorHL = "255 255 255 255";
+         fontSize = "14";
+      };
+   }
+}
+
+function HSP_updateFoundationHud()
+{
+   if (!isObject(HSPFoundationHudPanel))
+      return;
+
+   %fps = $fps::real;
+   if (%fps $= "")
+      %fps = "--";
+
+   %mspf = $fps::frameTimeMs;
+   if (%mspf $= "")
+      %mspf = "--";
+
+   %animalState = $HSPFoundation::AnimalState;
+   if (%animalState $= "")
+      %animalState = "wandering";
+
+   %npcCount = $HSPFoundation::NpcCount;
+   if (%npcCount $= "")
+      %npcCount = "0";
+
+   %waterState = $HSPFoundation::WaterState;
+   if (%waterState $= "")
+      %waterState = "walking";
+
+   %zone = $HSPFoundation::WorldZone;
+   if (%zone $= "")
+      %zone = "spawn clearing";
+
+   %moveState = $HSPFoundation::MoveState;
+   if (%moveState $= "")
+      %moveState = "walking";
+
+   %prompt = $HSPFoundation::Prompt;
+   if (%prompt $= "")
+      %prompt = "No interaction";
+
+   HSPFoundationHudStatus.setText("Health 100 | Deer " @ %animalState @ " | NPCs " @ %npcCount);
+   HSPFoundationHudWorld.setText("Zone: " @ %zone @ " | Water: " @ %waterState @ " | Move: " @ %moveState);
+   HSPFoundationHudPerf.setText("FPS " @ %fps @ " | MSPF " @ %mspf);
+   HSPFoundationHudPrompt.setText(%prompt);
+
+   if (isObject(HSPFoundationHudDebug))
+   {
+      HSPFoundationHudDebug.setVisible($HSPFoundation::HudDebug);
+      %navState = "off";
+      if ($HSPFoundation::NavDebug)
+         %navState = "on";
+      %debug = "Debug: F7 nav " @ %navState @ " | F8 diagnostics | F5/F9 save/load";
+      if ($HSPFoundation::PlayerDebug !$= "")
+         %debug = %debug @ "\nP " @ $HSPFoundation::PlayerDebug @ " | D " @ $HSPFoundation::AnimalDebug @ " | Save v" @ $HSPFoundation::SaveVersion;
+      HSPFoundationHudDebug.setText(%debug);
+   }
+
+   schedule(500, 0, HSP_updateFoundationHud);
+}
+
+function HSP_startFoundationHudStatusPolling()
+{
+   if ($HSPFoundation::HudPolling)
+      return;
+
+   $HSPFoundation::HudPolling = true;
+   HSP_foundationHudStatusPoll();
+}
+
+function HSP_foundationHudStatusPoll()
+{
+   if (isObject(ServerConnection))
+      commandToServer('HSPFoundationRequestStatus');
+
+   schedule(500, 0, HSP_foundationHudStatusPoll);
+}
+
+function HSP_toggleFoundationHudDebug()
+{
+   $HSPFoundation::HudDebug = !$HSPFoundation::HudDebug;
+   %state = "off";
+   if ($HSPFoundation::HudDebug)
+      %state = "on";
+   HSP_setFoundationFeedback("Debug HUD " @ %state);
+}
+
+function HSP_setFoundationFeedback(%message)
+{
+   $HSPFoundation::LastFeedback = %message;
+   if (isObject(HSPFoundationHudFeedback))
+      HSPFoundationHudFeedback.setText(%message);
+}
+
+function clientCmdHSPFoundationInteractionFeedback(%message)
+{
+   HSP_setFoundationFeedback(%message);
+}
+
+function clientCmdHSPFoundationAnimalState(%state)
+{
+   $HSPFoundation::AnimalState = %state;
+}
+
+function clientCmdHSPFoundationNpcCount(%count)
+{
+   $HSPFoundation::NpcCount = %count;
+}
+
+function clientCmdHSPFoundationWaterState(%state)
+{
+   if ($HSPFoundation::WaterState !$= "" && $HSPFoundation::WaterState !$= %state)
+   {
+      if (%state $= "swimming")
+         HSP_setFoundationFeedback("Water: swimming");
+      else if (%state $= "exiting")
+         HSP_setFoundationFeedback("Water: leaving stream");
+      else if (%state $= "walking")
+         HSP_setFoundationFeedback("Water: back on land");
+   }
+
+   $HSPFoundation::WaterState = %state;
+}
+
+function clientCmdHSPFoundationWorldZone(%zone)
+{
+   $HSPFoundation::WorldZone = %zone;
+}
+
+function clientCmdHSPFoundationInteractionPrompt(%prompt)
+{
+   $HSPFoundation::Prompt = %prompt;
+}
+
+function clientCmdHSPFoundationMoveState(%state, %bias)
+{
+   %previous = $HSPFoundation::MoveStateRaw;
+   if (%previous !$= "" && %previous !$= %state)
+      HSP_setFoundationFeedback(%state);
+
+   $HSPFoundation::MoveStateRaw = %state;
+   $HSPFoundation::MoveState = %state @ " x" @ %bias;
+}
+
+function clientCmdHSPFoundationNavDebug(%enabled)
+{
+   $HSPFoundation::NavDebug = %enabled;
+}
+
+function clientCmdHSPFoundationDebugStatus(%playerPosition, %animalPosition, %saveVersion)
+{
+   $HSPFoundation::PlayerDebug = %playerPosition;
+   $HSPFoundation::AnimalDebug = %animalPosition;
+   $HSPFoundation::SaveVersion = %saveVersion;
+}
