@@ -1,0 +1,57 @@
+if (!isObject(HSPFoundationGameMode))
+{
+   new GameMode(HSPFoundationGameMode)
+   {
+      alwaysActive = "1";
+   };
+}
+
+function HSPFoundationGameMode::onMissionStart(%this)
+{
+   echo("HSPFoundationGameMode: mission start");
+   HSP_logFoundationFeaturePolicy();
+   HSP_runFoundationDiagnostics("server-mission-start");
+}
+
+function HSPFoundationGameMode::onClientEnterGame(%this, %client)
+{
+   commandToClient(%client, 'SyncClock', $Sim::Time - %this.StartTime);
+   %client.setPlayerName(%client.connectData);
+   echo("HSPFoundationGameMode: client enter; standard Torque spawn pipeline will create validation player");
+}
+
+function HSPFoundationGameMode::setSpawnObjectType(%this, %client)
+{
+   echo("HSPFoundationGameMode: assigning Player datablock");
+   %client.spawnClass = "HSPValidationPlayer";
+   %client.spawnDBType = "PlayerData";
+   %client.spawnDataBlock = "HSPValidationPlayerData";
+   %client.GetEventManager().postEvent("setSpawnObjectTypeComplete", %client);
+}
+
+function HSPFoundationGameMode::setSpawnPoint(%this, %client)
+{
+   %spawnX = -120;
+   %spawnY = -110;
+   %height = HSP_getFoundationTerrainHeight(%spawnX, %spawnY);
+   echo("HSPFoundationGameMode: player spawn height" SPC %height);
+   %client.spawnLocation = %spawnX SPC %spawnY SPC (%height + 2.0);
+   %client.spawnRotation = "0 0 1 0.65";
+   %client.GetEventManager().postEvent("setSpawnPointComplete", %client);
+}
+
+function HSPFoundationGameMode::onInitialControlSet(%this)
+{
+   if (isObject(ServerConnection))
+   {
+      ServerConnection.clearCameraObject();
+      ServerConnection.setFirstPerson(true);
+   }
+
+   echo("HSPFoundationGameMode: initial player control set");
+   schedule(500, 0, HSP_runFoundationDiagnostics, "client-post-ghost");
+}
+
+function HSPFoundationGameMode::onMissionEnded(%this)
+{
+}

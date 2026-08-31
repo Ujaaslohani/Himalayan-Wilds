@@ -1,0 +1,95 @@
+//--- OBJECT WRITE BEGIN ---
+new Scene(HSPFoundationLevel) {
+   gameModes = "HSPFoundationGameMode";
+   enabled = "1";
+
+   new LevelInfo(theLevelInfo) {
+      canvasClearColor = "0 0 0 255";
+      FogColor = "0.55 0.62 0.65 1";
+      fogDensityOffset = "900";
+      ambientLightBlendCurve = "0 0";
+      soundAmbience = "AudioAmbienceDefault";
+      enabled = "1";
+   };
+
+   new SkyBox(theSky) {
+      MaterialAsset = "Core_Rendering:BlankSkyMat";
+      dirtyGameObject = "0";
+   };
+
+   new Sun(theSun) {
+      azimuth = "230";
+      elevation = "45";
+      color = "0.96 0.91 0.84 1";
+      ambient = "0.42 0.48 0.52 1";
+      shadowDistance = "160";
+      texSize = "1024";
+      enabled = "1";
+   };
+
+   new TerrainBlock(HSPFoundationTerrain) {
+      terrainAsset = "HSPFoundation:HSPFoundationTerrain";
+      position = "-512 -512 0";
+      rotation = "1 0 0 0";
+      scale = "1 1 1";
+      squareSize = "4";
+      castShadows = "0";
+      enabled = "1";
+   };
+
+   new Forest(HSPFoundationForest) {
+      dataFile = "data/HSPFoundation/generated/HSPFoundationForest.forest";
+      lodReflectScalar = "2";
+      enabled = "1";
+   };
+
+   new River(HSPFoundationStream) {
+      SegmentLength = "8";
+      SubdivideLength = "4";
+      FlowMagnitude = "0";
+      LowLODDistance = "350";
+      density = "1";
+      viscosity = "5";
+      liquidType = "Water";
+      baseColor = "18 126 255 230";
+      underwaterColor = "20 92 180 255";
+      emissive = "1";
+      fullReflect = "0";
+      reflectivity = "0";
+      reflectMaxRateMs = "250";
+      reflectTexSize = "128";
+      overallWaveMagnitude = "0.015";
+      overallRippleMagnitude = "0.035";
+      clarity = "0.82";
+      depthGradientMax = "8";
+      waterFogDensity = "0.05";
+      waterFogDensityOffset = "0.1";
+      enabled = "1";
+
+      Node = "-205 -150 29.20 5.5 0.6 0 0 1";
+      Node = "-160 -128 56.10 5.0 0.6 0 0 1";
+      Node = "-112 -104 83.30 4.5 0.55 0 0 1";
+      Node = "-65 -82 85.30 4.5 0.55 0 0 1";
+      Node = "-20 -58 54.50 5.0 0.6 0 0 1";
+      Node = "40 -36 42.55 5.5 0.6 0 0 1";
+      Node = "95 -12 59.75 5.0 0.55 0 0 1";
+   };
+
+   new DecalRoad(HSPFoundationStreamVisual) {
+      materialAsset = "Prototyping:WaterBlue";
+      textureLength = "18";
+      breakAngle = "5";
+      renderPriority = "20";
+      enabled = "1";
+
+      Node = "-205 -150 29.35 11";
+      Node = "-160 -128 56.25 10";
+      Node = "-112 -104 83.45 9";
+      Node = "-65 -82 85.45 9";
+      Node = "-20 -58 54.65 10";
+      Node = "40 -36 42.70 11";
+      Node = "95 -12 59.90 10";
+   };
+
+};
+//--- OBJECT WRITE END ---

@@ -1,0 +1,31 @@
+datablock CameraData(HSPFoundationObserver)
+{
+};
+
+datablock PlayerData(HSPValidationPlayerData)
+{
+   shapeAsset = "Core_GameObjects:unit_capsule";
+   renderFirstPerson = "0";
+   firstPersonOnly = "1";
+   useEyePoint = "1";
+   cameraMaxDist = "0";
+   cameraDefaultFov = "75";
+
+   maxStepHeight = "1.2";
+   runSurfaceAngle = "65";
+   jumpSurfaceAngle = "65";
+   runForce = "360";
+   maxForwardSpeed = "9";
+   maxBackwardSpeed = "6";
+   maxSideSpeed = "7";
+   jumpForce = "60";
+   jumpDelay = "20";
+};
+
+datablock TSForestItemData(HSPFoundationTreeItemData)
+{
+   shapeAsset = "Core_GameObjects:simplecone";
+   collidable = "1";
+   radius = "3.5";
+   windScale = "0";
+};

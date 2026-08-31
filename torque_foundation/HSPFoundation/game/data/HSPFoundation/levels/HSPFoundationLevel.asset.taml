@@ -1,0 +1,9 @@
+<LevelAsset
+    AssetName="HSPFoundationLevel"
+    AssetDescription="Minimal C++ foundation validation level."
+    LevelFile="@assetFile=HSPFoundationLevel.mis"
+    LevelName="HSP Foundation"
+    PostFXPresetFile="@assetFile=HSPFoundationLevel.postfxpreset.tscript"
+    gameModesNames="HSPFoundationGameMode"
+    terrainAssetDependency0="@asset=HSPFoundation:HSPFoundationTerrain"
+    VersionId="1"/>

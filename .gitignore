@@ -26,3 +26,16 @@ Builds/
 !Config/
 !Docs/
 !Source/
+
+# Local engine validation/download artifacts
+cmake-portable2/
+*.zip
+torque3d-release-*.json
+torque3d_prototype_screenshot.png
+tmp-rc-test/
+torque3d-403-bin/
+TemplateBase/
+Tools/
+research_candidates/
+
+# Active project is stored as a clean overlay in torque_foundation/.

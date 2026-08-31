@@ -1,0 +1,11 @@
+<ModuleDefinition
+    ModuleId="HSPFoundation"
+    VersionId="1"
+    Group="Game"
+    ScriptFile="HSPFoundation"
+    CreateFunction="onCreate"
+    DestroyFunction="onDestroy">
+    <DeclaredAssets
+        Extension="asset.taml"
+        Recurse="true"/>
+</ModuleDefinition>
