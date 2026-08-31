@@ -13,6 +13,10 @@
 #include "materials/materialDefinition.h"
 #include "T3D/Scene.h"
 #include "T3D/aiPlayer.h"
+#include "T3D/objectTypes.h"
+#include "T3D/shapeBase.h"
+#include "collision/collision.h"
+#include "scene/sceneContainer.h"
 #include "terrain/terrData.h"
 #include "terrain/terrFile.h"
 #include "terrain/terrMaterial.h"
@@ -27,7 +31,10 @@ namespace
    constexpr const char* ForestItemDataName = "HSPFoundationTreeItemData";
    constexpr const char* ForestDataFileName = "data/HSPFoundation/generated/HSPFoundationForest.forest";
    constexpr const char* AiName = "HSPFoundationAIPlayer";
-   constexpr const char* PlayerDataName = "HSPFoundationPlayerData";
+   constexpr const char* AnimalName = "HSPFoundationDeer";
+   constexpr const char* AnimalDataName = "HSPFoundationDeerData";
+   constexpr const char* AnimalBodyName = "HSPFoundationDeerBody";
+   constexpr const char* AnimalMarkerName = "HSPFoundationDeerMarker";
    constexpr const char* VisualMarkerPrefix = "HSPFoundationVisualMarker";
    constexpr U32 TerrainResolution = 256;
    constexpr F32 TerrainSquareSize = 4.0f;
@@ -71,6 +78,8 @@ namespace
       { "FoundationForestVegetation", true, "Level-owned Torque Forest using generated placement data and removable item datablocks." },
       { "FoundationWaterStream", true, "Level-owned Torque River object for stream validation; no custom water renderer." },
       { "FoundationAIPlayer", false, "Disabled for this gate; AI resumes after player/camera/terrain validation." },
+      { "FoundationAnimalPrototype", true, "One removable placeholder animal using Torque AIPlayer movement." },
+      { "FoundationHuntingPrototype", true, "One-click C++ hunt ray for validating interaction only; no inventory or weapon system." },
       { "FoundationVisualMarkers", false, "Optional landmarks; disabled while terrain/camera validation is in progress." },
       { "BuilderTimedConstruction", true, "Future building intent is completed by builder time, not player material hauling." },
       { "MaterialGatheringEconomy", false, "Disabled for now: no mandatory wood, stone, or iron collection loop." },
@@ -208,6 +217,13 @@ namespace
          marker->deleteObject();
    }
 
+   void hideVisualMarker(const char* name)
+   {
+      SceneObject* marker = nullptr;
+      if (Sim::findObject(name, marker))
+         marker->setHidden(true);
+   }
+
    void spawnVisualMarker(const char* name, const char* shapeAsset, const Point3F& position, const Point3F& scale)
    {
       const String props = String::ToString(
@@ -227,6 +243,205 @@ namespace
       if (Scene* scene = Scene::getRootScene())
          scene->addObject(marker);
       addToMissionCleanup(marker);
+   }
+
+   void syncOrSpawnVisualMarker(const char* name, const char* shapeAsset, const Point3F& position, const Point3F& scale)
+   {
+      SceneObject* marker = nullptr;
+      if (Sim::findObject(name, marker))
+      {
+         marker->setPosition(position);
+         marker->setHidden(false);
+         return;
+      }
+
+      spawnVisualMarker(name, shapeAsset, position, scale);
+   }
+
+   struct AnimalWaypoint
+   {
+      F32 X;
+      F32 Y;
+   };
+
+   constexpr AnimalWaypoint AnimalWaypoints[] =
+   {
+      { -108.0f, -96.0f },
+      { -96.0f, -92.0f },
+      { -76.0f, -74.0f },
+      { -52.0f, -64.0f },
+      { -24.0f, -44.0f },
+      { 16.0f, -34.0f },
+   };
+
+   Point3F animalWaypointPosition(U32 index)
+   {
+      const U32 count = sizeof(AnimalWaypoints) / sizeof(AnimalWaypoints[0]);
+      const AnimalWaypoint& waypoint = AnimalWaypoints[index % count];
+      return Point3F(waypoint.X, waypoint.Y, sampleFoundationHeight(waypoint.X, waypoint.Y) + 1.0f);
+   }
+
+   U32& animalTargetIndex()
+   {
+      static U32 targetIndex = 1;
+      return targetIndex;
+   }
+
+   U32 findNearestAnimalWaypointIndex(const Point3F& position)
+   {
+      U32 nearestIndex = 0;
+      F32 nearestDistSq = F32_MAX;
+      const U32 count = sizeof(AnimalWaypoints) / sizeof(AnimalWaypoints[0]);
+
+      for (U32 i = 0; i < count; ++i)
+      {
+         const Point3F waypoint = animalWaypointPosition(i);
+         const F32 distSq = (waypoint - position).lenSquared();
+         if (distSq < nearestDistSq)
+         {
+            nearestIndex = i;
+            nearestDistSq = distSq;
+         }
+      }
+
+      return nearestIndex;
+   }
+
+   bool moveFoundationAnimal(AIPlayer* animal)
+   {
+      if (!animal)
+         return false;
+
+      const U32 count = sizeof(AnimalWaypoints) / sizeof(AnimalWaypoints[0]);
+      const U32 currentIndex = findNearestAnimalWaypointIndex(animal->getPosition());
+      const U32 nextIndex = (currentIndex + 1) % count;
+      const Point3F destination = animalWaypointPosition(nextIndex);
+
+      animalTargetIndex() = nextIndex;
+      animal->setMoveSpeed(0.0f);
+      Con::printf("HSPFoundation: animal '%s' moving to waypoint %u at %0.2f %0.2f %0.2f",
+         animal->getName(), nextIndex, destination.x, destination.y, destination.z);
+      return true;
+   }
+
+   AIPlayer* findFoundationAnimal()
+   {
+      AIPlayer* animal = nullptr;
+      Sim::findObject(AnimalName, animal);
+      return animal;
+   }
+
+   bool syncFoundationAnimalVisuals()
+   {
+      AIPlayer* animal = findFoundationAnimal();
+      if (!animal || animal->isHidden())
+      {
+         hideVisualMarker(AnimalBodyName);
+         hideVisualMarker(AnimalMarkerName);
+         return false;
+      }
+
+      const Point3F animalPos = animal->getPosition();
+      syncOrSpawnVisualMarker(AnimalBodyName, "Prototyping:CubePrimitive_shape",
+         Point3F(animalPos.x, animalPos.y, animalPos.z + 0.85f), Point3F(1.2f, 1.8f, 0.65f));
+      syncOrSpawnVisualMarker(AnimalMarkerName, "Prototyping:ArrowPrimitive",
+         Point3F(animalPos.x, animalPos.y, animalPos.z + 3.0f), Point3F(1.6f, 1.6f, 1.6f));
+      return true;
+   }
+
+   bool tickFoundationAnimal(F32 seconds)
+   {
+      AIPlayer* animal = findFoundationAnimal();
+      if (!animal || animal->isHidden())
+      {
+         hideVisualMarker(AnimalBodyName);
+         hideVisualMarker(AnimalMarkerName);
+         return false;
+      }
+
+      const U32 count = sizeof(AnimalWaypoints) / sizeof(AnimalWaypoints[0]);
+      Point3F pos = animal->getPosition();
+      Point3F target = animalWaypointPosition(animalTargetIndex());
+
+      F32 dx = target.x - pos.x;
+      F32 dy = target.y - pos.y;
+      F32 horizontalDistance = std::sqrt((dx * dx) + (dy * dy));
+      if (horizontalDistance < 1.25f)
+      {
+         animalTargetIndex() = (animalTargetIndex() + 1) % count;
+         target = animalWaypointPosition(animalTargetIndex());
+         dx = target.x - pos.x;
+         dy = target.y - pos.y;
+         horizontalDistance = std::sqrt((dx * dx) + (dy * dy));
+      }
+
+      if (horizontalDistance > 0.001f)
+      {
+         const F32 speed = 5.5f;
+         const F32 step = getMin(speed * mClampF(seconds, 0.016f, 0.25f), horizontalDistance);
+         pos.x += (dx / horizontalDistance) * step;
+         pos.y += (dy / horizontalDistance) * step;
+         pos.z = sampleFoundationHeight(pos.x, pos.y) + 1.0f;
+         static_cast<SceneObject*>(animal)->setPosition(pos);
+      }
+
+      syncFoundationAnimalVisuals();
+      return true;
+   }
+
+   bool foundationHuntRay(ShapeBase* shooter)
+   {
+      if (!shooter)
+      {
+         Con::warnf("HSPFoundation: hunt ray ignored; shooter is missing");
+         return false;
+      }
+
+      if (!isFoundationFeatureEnabled("FoundationHuntingPrototype"))
+      {
+         Con::warnf("HSPFoundation: FoundationHuntingPrototype feature is disabled");
+         return false;
+      }
+
+      AIPlayer* animal = findFoundationAnimal();
+      if (!animal)
+      {
+         Con::warnf("HSPFoundation: hunt ray missed; animal is not spawned");
+         return false;
+      }
+
+      MatrixF eyeTransform;
+      shooter->getEyeTransform(&eyeTransform);
+      Point3F start;
+      VectorF forward;
+      eyeTransform.getColumn(3, &start);
+      eyeTransform.getColumn(1, &forward);
+      forward.normalizeSafe();
+
+      const Point3F target = animal->getBoxCenter();
+      VectorF toTarget = target - start;
+      const F32 distance = toTarget.len();
+      if (distance < 0.001f || distance > 220.0f)
+      {
+         Con::printf("HSPFoundation: hunt ray missed; animal distance %0.2f", distance);
+         return false;
+      }
+
+      toTarget /= distance;
+      const F32 aimDot = mDot(forward, toTarget);
+      if (aimDot < 0.965f)
+      {
+         Con::printf("HSPFoundation: hunt ray missed; animal outside aim cone (dot %0.3f)", aimDot);
+         return false;
+      }
+
+      animal->setMoveSpeed(0.0f);
+      animal->setHidden(true);
+      animal->disableCollision();
+      hideVisualMarker(AnimalBodyName);
+      hideVisualMarker(AnimalMarkerName);
+      Con::printf("HSPFoundation: hunt ray hit placeholder animal; animal hidden/stopped");
+      return true;
    }
 
    bool prepareFoundationTerrainAsset()
@@ -435,11 +650,11 @@ DefineEngineFunction(HSP_spawnFoundationAI, S32, (), ,
 
    const Point3F spawn(72.0f, 44.0f, sampleFoundationHeight(72.0f, 44.0f) + 1.0f);
    const String props = String::ToString("position = \"%0.3f %0.3f %0.3f\";", spawn.x, spawn.y, spawn.z);
-   SimObject* spawned = Sim::spawnObject("AIPlayer", PlayerDataName, AiName, props, String::EmptyString);
+   SimObject* spawned = Sim::spawnObject("AIPlayer", AnimalDataName, AiName, props, String::EmptyString);
    AIPlayer* ai = dynamic_cast<AIPlayer*>(spawned);
    if (!ai)
    {
-      Con::errorf("HSPFoundation: failed to spawn AIPlayer with datablock '%s'", PlayerDataName);
+      Con::errorf("HSPFoundation: failed to spawn AIPlayer with datablock '%s'", AnimalDataName);
       return 0;
    }
 
@@ -448,6 +663,82 @@ DefineEngineFunction(HSP_spawnFoundationAI, S32, (), ,
    ai->setMoveDestination(Point3F(82.0f, 48.0f, sampleFoundationHeight(82.0f, 48.0f) + 1.0f), true);
    Con::printf("HSPFoundation: spawned AIPlayer '%s' and assigned a movement target", AiName);
    return ai->getId();
+}
+
+DefineEngineFunction(HSP_spawnFoundationAnimal, S32, (), ,
+   "Spawns one placeholder animal for foundation validation.")
+{
+   if (!isFoundationFeatureEnabled("FoundationAnimalPrototype"))
+   {
+      Con::warnf("HSPFoundation: FoundationAnimalPrototype feature is disabled");
+      return 0;
+   }
+
+   if (AIPlayer* existing = findFoundationAnimal())
+      existing->deleteObject();
+   deleteVisualMarker(AnimalBodyName);
+   deleteVisualMarker(AnimalMarkerName);
+
+   const Point3F spawn = animalWaypointPosition(0);
+   const String props = String::ToString(
+      "position = \"%0.3f %0.3f %0.3f\"; scale = \"1.15 1.55 0.9\";",
+      spawn.x, spawn.y, spawn.z);
+   SimObject* spawned = Sim::spawnObject("AIPlayer", AnimalDataName, AnimalName, props, String::EmptyString);
+   AIPlayer* animal = dynamic_cast<AIPlayer*>(spawned);
+   if (!animal)
+   {
+      Con::errorf("HSPFoundation: failed to spawn placeholder animal with datablock '%s'", AnimalDataName);
+      return 0;
+   }
+
+   addToMissionCleanup(animal);
+   animalTargetIndex() = 1;
+   animal->setMoveSpeed(0.0f);
+   syncFoundationAnimalVisuals();
+   Con::printf("HSPFoundation: spawned placeholder animal '%s' at %0.2f %0.2f %0.2f",
+      AnimalName, spawn.x, spawn.y, spawn.z);
+   return animal->getId();
+}
+
+DefineEngineFunction(HSP_moveFoundationAnimal, bool, (SimObjectId animalId), ,
+   "Moves a placeholder animal to the next foundation waypoint.")
+{
+   if (!isFoundationFeatureEnabled("FoundationAnimalPrototype"))
+      return false;
+
+   AIPlayer* animal = nullptr;
+   if (!Sim::findObject(animalId, animal))
+      animal = findFoundationAnimal();
+
+   return moveFoundationAnimal(animal);
+}
+
+DefineEngineFunction(HSP_syncFoundationAnimalVisuals, bool, (), ,
+   "Keeps visible placeholder animal geometry aligned to the AIPlayer.")
+{
+   if (!isFoundationFeatureEnabled("FoundationAnimalPrototype"))
+      return false;
+
+   return syncFoundationAnimalVisuals();
+}
+
+DefineEngineFunction(HSP_tickFoundationAnimal, bool, (F32 seconds), (0.1f),
+   "Advances the placeholder animal along a small terrain-following waypoint loop.")
+{
+   if (!isFoundationFeatureEnabled("FoundationAnimalPrototype"))
+      return false;
+
+   return tickFoundationAnimal(seconds);
+}
+
+DefineEngineFunction(HSP_foundationHuntRay, bool, (SimObjectId shooterId), ,
+   "Runs a simple C++ aim-cone hunting validation ray against the placeholder animal.")
+{
+   ShapeBase* shooter = nullptr;
+   if (!Sim::findObject(shooterId, shooter))
+      return foundationHuntRay(nullptr);
+
+   return foundationHuntRay(shooter);
 }
 
 DefineEngineFunction(HSP_isFoundationFeatureEnabled, bool, (const char* featureName), ,
@@ -565,6 +856,23 @@ DefineEngineFunction(HSP_runFoundationDiagnostics, bool, (const char* label), ("
    else
    {
       Con::warnf("HSPFoundation: diagnostics[%s] stream object is missing", label ? label : "unspecified");
+   }
+
+   if (AIPlayer* animal = findFoundationAnimal())
+   {
+      const Point3F pos = animal->getPosition();
+      Con::printf("HSPFoundation: diagnostics[%s] animalId=%u isServer=%u isClient=%u position='%0.2f %0.2f %0.2f'",
+         label ? label : "unspecified",
+         animal->getId(),
+         animal->isServerObject() ? 1 : 0,
+         animal->isClientObject() ? 1 : 0,
+         pos.x,
+         pos.y,
+         pos.z);
+   }
+   else
+   {
+      Con::warnf("HSPFoundation: diagnostics[%s] placeholder animal is missing", label ? label : "unspecified");
    }
 
    return true;

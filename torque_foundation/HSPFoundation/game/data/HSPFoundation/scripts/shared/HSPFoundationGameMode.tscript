@@ -11,6 +11,9 @@ function HSPFoundationGameMode::onMissionStart(%this)
    echo("HSPFoundationGameMode: mission start");
    HSP_logFoundationFeaturePolicy();
    HSP_runFoundationDiagnostics("server-mission-start");
+   %animal = HSP_spawnFoundationAnimal();
+   if (%animal > 0)
+      schedule(100, 0, HSPFoundationAnimalTick);
 }
 
 function HSPFoundationGameMode::onClientEnterGame(%this, %client)
@@ -48,10 +51,36 @@ function HSPFoundationGameMode::onInitialControlSet(%this)
       ServerConnection.setFirstPerson(true);
    }
 
+   HSP_bindFoundationPrototypeControls();
    echo("HSPFoundationGameMode: initial player control set");
    schedule(500, 0, HSP_runFoundationDiagnostics, "client-post-ghost");
 }
 
 function HSPFoundationGameMode::onMissionEnded(%this)
 {
+}
+
+function HSP_bindFoundationPrototypeControls()
+{
+   if (isObject(ExampleMoveMap))
+      ExampleMoveMap.bindCmd(mouse, button0, "HSP_foundationPrototypeShoot();", "");
+}
+
+function HSP_foundationPrototypeShoot()
+{
+   commandToServer('HSPFoundationShoot');
+}
+
+function serverCmdHSPFoundationShoot(%client)
+{
+   if (!isObject(%client) || !isObject(%client.player))
+      return;
+
+   HSP_foundationHuntRay(%client.player.getId());
+}
+
+function HSPFoundationAnimalTick()
+{
+   if (HSP_tickFoundationAnimal(0.1))
+      schedule(100, 0, HSPFoundationAnimalTick);
 }

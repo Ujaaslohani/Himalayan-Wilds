@@ -29,3 +29,30 @@ datablock TSForestItemData(HSPFoundationTreeItemData)
    radius = "3.5";
    windScale = "0";
 };
+
+datablock PlayerData(HSPFoundationDeerData : HSPValidationPlayerData)
+{
+   shapeAsset = "Core_GameObjects:unit_capsule";
+   renderFirstPerson = "0";
+   firstPersonOnly = "0";
+   cameraMaxDist = "4";
+
+   maxStepHeight = "1.5";
+   runSurfaceAngle = "60";
+   jumpSurfaceAngle = "60";
+   runForce = "140";
+   maxForwardSpeed = "3.5";
+   maxBackwardSpeed = "1.5";
+   maxSideSpeed = "2";
+   jumpForce = "0";
+};
+
+function HSPFoundationDeerData::onReachDestination(%this, %obj)
+{
+}
+
+function HSPFoundationDeerData::onMoveStuck(%this, %obj)
+{
+   if (isObject(%obj))
+      HSP_snapObjectToFoundationTerrain(%obj.getId(), 1.0);
+}
