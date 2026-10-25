@@ -1,3 +1,6 @@
+#include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <functional>
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
@@ -36,6 +39,8 @@ struct CpuAsset {
 struct CpuTex {
   TexLevels levels;
   bool ready = false;
+  std::vector<uint8_t> alpha;
+  int aw = 0, ah = 0;
 };
 
 std::map<std::string, std::unique_ptr<Asset>> g_assets;
@@ -192,6 +197,15 @@ struct Loader {
     int maxS = std::max(64, g_settings.textureSize);
     while (w > maxS || h > maxS) resizeHalf(img, w, h);
     auto job = texJobs.at(key);
+    if (cutout) {
+      int aw = w, ah = h;
+      std::vector<uint8_t> a(img);
+      while (aw > 256 || ah > 256) resizeHalf(a, aw, ah);
+      job->alpha.resize((size_t)aw * ah);
+      for (size_t i = 0; i < job->alpha.size(); i++) job->alpha[i] = a[i * 4 + 3];
+      job->aw = aw;
+      job->ah = ah;
+    }
     job->levels = prepareTexture(img.data(), w, h, true, true, cutout);
     job->ready = true;
   }
@@ -204,6 +218,233 @@ namespace {
 uint32_t lodHash(uint32_t x) {
   x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16;
   return x;
+}
+
+
+double g_trimA = 0, g_trimQ = 0;
+float halfToF(uint16_t h) {
+  uint32_t s = (h >> 15) & 1, e = (h >> 10) & 31, m = h & 1023, f;
+  if (e == 0) { if (m == 0) f = s << 31; else { e = 1; while (!(m & 1024)) { m <<= 1; e--; } m &= 1023; f = (s << 31) | ((e + 112) << 23) | (m << 13); } }
+  else if (e == 31) f = (s << 31) | 0x7f800000 | (m << 13);
+  else f = (s << 31) | ((e + 112) << 23) | (m << 13);
+  float r; std::memcpy(&r, &f, 4); return r;
+}
+
+struct P2 { float x, y; };
+float cross2(P2 o, P2 a, P2 b) { return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x); }
+
+std::vector<P2> hull2(std::vector<P2> p) {
+  std::sort(p.begin(), p.end(), [](P2 a, P2 b) { return a.x < b.x || (a.x == b.x && a.y < b.y); });
+  if (p.size() < 3) return p;
+  std::vector<P2> h(2 * p.size());
+  size_t k = 0;
+  for (size_t i = 0; i < p.size(); i++) { while (k >= 2 && cross2(h[k - 2], h[k - 1], p[i]) <= 0) k--; h[k++] = p[i]; }
+  for (size_t i = p.size() - 1, t = k + 1; i > 0; i--) { while (k >= t && cross2(h[k - 2], h[k - 1], p[i - 1]) <= 0) k--; h[k++] = p[i - 1]; }
+  h.resize(k - 1);
+  return h;
+}
+
+float polyArea(const std::vector<P2>& p) {
+  float a = 0;
+  for (size_t i = 0; i < p.size(); i++) { const P2& u = p[i]; const P2& v = p[(i + 1) % p.size()]; a += u.x * v.y - v.x * u.y; }
+  return std::fabs(a) * 0.5f;
+}
+
+bool lineHit(P2 a, P2 b, P2 c, P2 d, P2& o) {
+  float rx = b.x - a.x, ry = b.y - a.y, sx = d.x - c.x, sy = d.y - c.y;
+  float den = rx * sy - ry * sx;
+  if (std::fabs(den) < 1e-12f) return false;
+  float qx = c.x - a.x, qy = c.y - a.y;
+  float t = (qx * sy - qy * sx) / den, u = (qx * ry - qy * rx) / den;
+  if (t < 1.0f || u < 1.0f) return false;
+  o = {a.x + rx * t, a.y + ry * t};
+  return true;
+}
+
+std::vector<P2> reduceTo(std::vector<P2> h, size_t maxN) {
+  while (h.size() > maxN) {
+    size_t n = h.size(), best = n;
+    float bestAdd = 1e30f;
+    P2 bestP{};
+    for (size_t i = 0; i < n; i++) {
+      P2 a = h[(i + n - 1) % n], b = h[i], c = h[(i + 1) % n], d = h[(i + 2) % n], o;
+      if (!lineHit(a, b, d, c, o)) continue;
+      float add = std::fabs(cross2(b, o, c)) * 0.5f;
+      if (add < bestAdd) { bestAdd = add; best = i; bestP = o; }
+    }
+    if (best == n) break;
+    h[best] = bestP;
+    h.erase(h.begin() + (long)((best + 1) % n));
+  }
+  return h;
+}
+
+std::vector<P2> clipConvex(const std::vector<P2>& poly, const std::vector<P2>& clip) {
+  std::vector<P2> out = poly;
+  float sgn = 0;
+  for (size_t i = 0; i < clip.size(); i++) sgn += cross2(clip[i], clip[(i + 1) % clip.size()], clip[(i + 2) % clip.size()]);
+  for (size_t i = 0; i < clip.size() && !out.empty(); i++) {
+    P2 a = clip[i], b = clip[(i + 1) % clip.size()];
+    std::vector<P2> in = out;
+    out.clear();
+    auto inside = [&](P2 p) { return cross2(a, b, p) * sgn >= -1e-7f; };
+    for (size_t j = 0; j < in.size(); j++) {
+      P2 c = in[j], d = in[(j + 1) % in.size()];
+      bool ci = inside(c), di = inside(d);
+      if (ci) out.push_back(c);
+      if (ci != di) {
+        float t = cross2(a, b, c) / (cross2(a, b, c) - cross2(a, b, d));
+        out.push_back({c.x + (d.x - c.x) * t, c.y + (d.y - c.y) * t});
+      }
+    }
+  }
+  return out;
+}
+
+int trimCards(MeshData& d, const std::vector<uint8_t>& alpha, int aw, int ah, int& removedPx) {
+  if (d.fmt != VFmt::GLB || d.idx.empty() || alpha.empty()) return 0;
+  const VtxGlb* v = (const VtxGlb*)d.verts.data();
+  size_t nv = d.vertexCount, nt = d.idx.size() / 3;
+  std::vector<uint32_t> parent(nv);
+  for (size_t i = 0; i < nv; i++) parent[i] = (uint32_t)i;
+  auto find = [&](uint32_t x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  for (size_t t = 0; t < nt; t++) {
+    uint32_t a = find(d.idx[t * 3]);
+    parent[find(d.idx[t * 3 + 1])] = a;
+    parent[find(d.idx[t * 3 + 2])] = find(a);
+  }
+  std::unordered_map<uint32_t, std::vector<size_t>> comps;
+  for (size_t t = 0; t < nt; t++) comps[find(d.idx[t * 3])].push_back(t);
+  std::vector<VtxGlb> ov(v, v + nv);
+  std::vector<uint32_t> oi;
+  int trimmed = 0;
+  for (auto& kv : comps) {
+    auto& tris = kv.second;
+    bool done = false;
+    if (tris.size() == 2) {
+      std::vector<uint32_t> ids;
+      for (size_t t : tris) for (int k = 0; k < 3; k++) { uint32_t q = d.idx[t * 3 + k]; if (std::find(ids.begin(), ids.end(), q) == ids.end()) ids.push_back(q); }
+      if (ids.size() == 4) {
+        P2 uv[4];
+        Vec3 ps[4];
+        for (int i = 0; i < 4; i++) { uv[i] = {halfToF(v[ids[i]].uv[0]), halfToF(v[ids[i]].uv[1])}; ps[i] = Vec3(v[ids[i]].p[0], v[ids[i]].p[1], v[ids[i]].p[2]); }
+        float m00 = uv[1].x - uv[0].x, m01 = uv[2].x - uv[0].x, m10 = uv[1].y - uv[0].y, m11 = uv[2].y - uv[0].y;
+        float det = m00 * m11 - m01 * m10;
+        bool inRange = true;
+        for (auto& q : uv) if (q.x < -0.001f || q.x > 1.001f || q.y < -0.001f || q.y > 1.001f) inRange = false;
+        if (std::fabs(det) > 1e-8f && inRange) {
+          auto toPos = [&](P2 q) {
+            float du = q.x - uv[0].x, dv = q.y - uv[0].y;
+            float a = (m11 * du - m01 * dv) / det, b = (-m10 * du + m00 * dv) / det;
+            return ps[0] + (ps[1] - ps[0]) * a + (ps[2] - ps[0]) * b;
+          };
+          Vec3 p3 = toPos(uv[3]);
+          float size = (ps[1] - ps[0]).length() + (ps[2] - ps[0]).length();
+          if ((p3 - ps[3]).length() < size * 0.02f) {
+            std::vector<P2> quad = hull2({uv[0], uv[1], uv[2], uv[3]});
+            float x0 = 1, y0 = 1, x1 = 0, y1 = 0;
+            for (auto& q : quad) { x0 = std::min(x0, q.x); y0 = std::min(y0, q.y); x1 = std::max(x1, q.x); y1 = std::max(y1, q.y); }
+            std::vector<P2> pts;
+            float tx = 1.0f / aw, ty = 1.0f / ah;
+            int ix0 = std::max(0, (int)std::floor(x0 * aw)), ix1 = std::min(aw - 1, (int)std::ceil(x1 * aw));
+            int iy0 = std::max(0, (int)std::floor(y0 * ah)), iy1 = std::min(ah - 1, (int)std::ceil(y1 * ah));
+            const float pad = 1.5f;
+            for (int y = iy0; y <= iy1; y++) {
+              int lo = -1, hi = -1;
+              for (int x = ix0; x <= ix1; x++)
+                if (alpha[(size_t)y * aw + x] >= 90) { if (lo < 0) lo = x; hi = x; }
+              if (lo < 0) continue;
+              float cy = (y + 0.5f) * ty;
+              for (int x : {lo, hi}) {
+                float cx = (x + 0.5f) * tx;
+                pts.push_back({cx - tx * pad, cy - ty * pad});
+                pts.push_back({cx + tx * pad, cy - ty * pad});
+                pts.push_back({cx - tx * pad, cy + ty * pad});
+                pts.push_back({cx + tx * pad, cy + ty * pad});
+              }
+            }
+            float qa = polyArea(quad);
+            if (pts.empty()) { done = true; trimmed++; removedPx += 1; }
+            else {
+              static std::unordered_map<uint64_t, std::vector<P2>> hullCache;
+              uint64_t hk = ((uint64_t)(ix0 & 0xffff) << 48) ^ ((uint64_t)(iy0 & 0xffff) << 32) ^ ((uint64_t)(ix1 & 0xffff) << 16) ^ (uint64_t)(iy1 & 0xffff) ^ ((uint64_t)alpha.size() << 20) ^ (uint64_t)(uintptr_t)alpha.data();
+              auto hc = hullCache.find(hk);
+              std::vector<P2> h0 = hc != hullCache.end() ? hc->second : reduceTo(hull2(pts), 8);
+              if (hc == hullCache.end()) hullCache[hk] = h0;
+              std::vector<P2> h = h0.size() <= 8 ? clipConvex(h0, quad) : std::vector<P2>();
+              if (h.size() >= 3 && h.size() <= 10 && polyArea(h) < qa * 0.9f) {
+                g_trimA += polyArea(h); g_trimQ += qa;
+                VtxGlb base = v[ids[0]];
+                uint32_t start = (uint32_t)ov.size();
+                for (auto& q : h) {
+                  VtxGlb o = base;
+                  Vec3 pp = toPos(q);
+                  o.p[0] = pp.x; o.p[1] = pp.y; o.p[2] = pp.z;
+                  o.uv[0] = floatToHalf(q.x);
+                  o.uv[1] = floatToHalf(q.y);
+                  ov.push_back(o);
+                }
+                bool flip = cross2(uv[0], uv[1], uv[2]) * cross2(h[0], h[1], h[2]) < 0;
+                for (size_t i = 1; i + 1 < h.size(); i++) {
+                  oi.push_back(start);
+                  oi.push_back(start + (uint32_t)(flip ? i + 1 : i));
+                  oi.push_back(start + (uint32_t)(flip ? i : i + 1));
+                }
+                done = true;
+                trimmed++;
+              }
+            }
+          }
+        }
+      }
+    }
+    if (!done) for (size_t t : tris) for (int k = 0; k < 3; k++) oi.push_back(d.idx[t * 3 + k]);
+  }
+  if (!trimmed) return 0;
+  d.verts.assign((const uint8_t*)ov.data(), (const uint8_t*)(ov.data() + ov.size()));
+  d.vertexCount = (int)ov.size();
+  d.idx = oi;
+  return trimmed;
+}
+
+
+// Thin a leaf canopy: drop most cards hidden deep inside the crown, and thin + enlarge outer cards.
+void thinCanopy(MeshData& d, float innerKeep, float outerKeep, float grow) {
+  if (d.fmt != VFmt::GLB || d.idx.empty()) return;
+  VtxGlb* v = (VtxGlb*)d.verts.data();
+  size_t nv = d.vertexCount, nt = d.idx.size() / 3;
+  std::vector<uint32_t> parent(nv);
+  for (size_t i = 0; i < nv; i++) parent[i] = (uint32_t)i;
+  auto find = [&](uint32_t x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  for (size_t t = 0; t < nt; t++) {
+    uint32_t a = find(d.idx[t * 3]), b = find(d.idx[t * 3 + 1]), c = find(d.idx[t * 3 + 2]);
+    parent[b] = a; parent[find(c)] = find(a);
+  }
+  std::unordered_map<uint32_t, std::vector<size_t>> comps;
+  for (size_t t = 0; t < nt; t++) comps[find(d.idx[t * 3])].push_back(t);
+  if (comps.size() < 24) return;
+  Vec3 mn = d.bmin, mx = d.bmax;
+  Vec3 ctr = (mn + mx) * 0.5f;
+  Vec3 he{std::max(1e-3f, (mx.x - mn.x) * 0.5f), std::max(1e-3f, (mx.y - mn.y) * 0.5f), std::max(1e-3f, (mx.z - mn.z) * 0.5f)};
+  std::vector<uint32_t> oi;
+  oi.reserve(d.idx.size());
+  std::vector<char> scaled(nv, 0);
+  for (auto& kv : comps) {
+    Vec3 c{0, 0, 0}; int n = 0;
+    for (size_t t : kv.second) for (int k = 0; k < 3; k++) { const VtxGlb& q = v[d.idx[t * 3 + k]]; c = c + Vec3(q.p[0], q.p[1], q.p[2]); n++; }
+    c = c * (1.0f / std::max(1, n));
+    Vec3 r{(c.x - ctr.x) / he.x, (c.y - ctr.y) / he.y, (c.z - ctr.z) / he.z};
+    float rad = std::sqrt(r.x * r.x + r.y * r.y + r.z * r.z);
+    float keep = rad < 0.6f ? innerKeep : outerKeep;
+    if ((lodHash(kv.first * 2246822519u + 101) & 1023) >= keep * 1024) continue;
+    for (size_t t : kv.second)
+      for (int k = 0; k < 3; k++) {
+        uint32_t src = d.idx[t * 3 + k];
+        if (!scaled[src]) { scaled[src] = 1; for (int j = 0; j < 3; j++) v[src].p[j] = (&c.x)[j] + (v[src].p[j] - (&c.x)[j]) * grow; }
+        oi.push_back(src);
+      }
+  }
+  d.idx.swap(oi);
 }
 
 MeshData makeLod(const MeshData& d, bool cutout, bool under) {
@@ -341,10 +582,20 @@ void loadAll(const std::vector<AssetRequest>& reqs) {
     a->file = c.req.file;
     for (auto& p : c.parts) {
       AssetPart ap;
-      ap.mesh = uploadMesh(p.data);
       const CpuMat& lm = c.mats[p.matIndex];
+      MeshData lodSrc = p.data;
+      if (lm.cutout && (c.req.layer == "tree" || c.req.layer == "under")) {
+        auto tj = L.texJobs.find(lm.texKey);
+        if (tj != L.texJobs.end() && !tj->second->alpha.empty()) {
+          int dropped = 0;
+          int n = trimCards(p.data, tj->second->alpha, tj->second->aw, tj->second->ah, dropped);
+          if (n && std::getenv("HW_TRIM")) std::printf("trim %s: %d cards trimmed (%d empty) area %.0f%%\n", c.req.file.c_str(), n, dropped, 100.0 * g_trimA / std::max(1e-9, g_trimQ));
+        }
+      }
+      if (lm.cutout && c.req.layer == "tree" && !std::getenv("HW_NOTHIN")) thinCanopy(p.data, 0.3f, 0.7f, 1.18f);
+      ap.mesh = uploadMesh(p.data);
       if (c.req.layer == "tree" || c.req.layer == "rock" || c.req.layer == "under") {
-        MeshData ld = makeLod(p.data, lm.cutout, c.req.layer == "under");
+        MeshData ld = makeLod(lodSrc, lm.cutout, c.req.layer == "under");
         if (!ld.idx.empty()) ap.lod = uploadMesh(ld);
       }
       ap.local = p.local;

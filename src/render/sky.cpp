@@ -391,6 +391,7 @@ void update(float dt) {
 
 Vec3 lightDir() { return g_lightDir; }
 Mat4 shadowMatrix() { return g_shadowMat; }
+Vec3 sunDir() { return g_sunDir; }
 bool shadowNeedsUpdate() { return g_shadowUpdate; }
 bool shadowStaticDirty() { return g_staticDirty; }
 void clearStaticShadow() { g_staticDirty = false; }

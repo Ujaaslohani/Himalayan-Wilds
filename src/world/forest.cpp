@@ -1,3 +1,4 @@
+#include "../game/engine.h"
 #include "../render/sky.h"
 #include <cstdio>
 #include <cstdlib>
@@ -341,7 +342,7 @@ void gardenSpots(std::vector<std::array<float, 6>>& out) {
 }
 
 std::atomic<bool> g_impReady{false};
-const float IMP_BAND = 14;
+const float IMP_BAND = 16;
 const float MID_BAND = 5, CANOPY_BAND = 30;
 std::atomic<float> g_budgetScale{1.0f};
 float effScale() { return std::min(g_settings.detailScale, g_budgetScale.load()); }
@@ -614,6 +615,12 @@ bool gatherVisible(const std::vector<InstLite>& items, const std::vector<FileSlo
       float dx = it.x - cp.x, dz = it.z - cp.z, d2 = dx * dx + dz * dz;
       if (d2 >= lo2 && d2 <= hi2) out.push_back(it);
     }
+  if (minD <= 0 && out.size() > 1 && out.size() < 20000) {
+    std::sort(out.begin(), out.end(), [&](const InstLite& a, const InstLite& b) {
+      float da = (a.x - cp.x) * (a.x - cp.x) + (a.z - cp.z) * (a.z - cp.z), db = (b.x - cp.x) * (b.x - cp.x) + (b.z - cp.z) * (b.z - cp.z);
+      return da < db;
+    });
+  }
   return true;
 }
 
@@ -723,7 +730,7 @@ void main(){
   v_uv1 = vec2((v1 + a_pos.x + 0.5) / 16.0, vv);
   v_rot = vec2(cy, sy);
   v_wpos = p;
-  v_fade = vec2(1.0 - smoothstep(u_range.x, u_range.y, d), 1.0 - smoothstep(u_range.z, u_range.w, d));
+  v_fade = vec2(1.0 - smoothstep(u_range.x, mix(u_range.x, u_range.y, 0.5), d), 1.0 - smoothstep(mix(u_range.z, u_range.w, 0.5), u_range.w, d));
   vec4 vp = u_view * vec4(p, 1.0);
   v_depth = -vp.z;
   gl_Position = u_proj * vp;
@@ -740,20 +747,27 @@ in float v_depth;
 in vec2 v_fade;
 uniform sampler2D u_atlas;
 uniform sampler2D u_nrm;
+uniform int u_dbg;
 out vec4 fragColor;
 void main(){
   vec4 t0 = texture(u_atlas, v_uv0), t1 = texture(u_atlas, v_uv1);
-  float dh = fract(sin(dot(floor(gl_FragCoord.xy), vec2(12.9898, 78.233))) * 43758.5453);
+  float dh = FADE_NOISE_STATIC();
   vec4 t = mix(t0, t1, v_blend);
-  if (t.a < 0.5) discard;
+  if (t.a < 0.5) {
+    // fill pinholes inside the crown from a blurrier mip so sky doesn't speckle through
+    vec4 c = mix(texture(u_atlas, v_uv0, 2.0), texture(u_atlas, v_uv1, 2.0), v_blend);
+    if (c.a < 0.62) discard;
+    t = vec4((c.rgb - vec3(0.42, 0.38, 0.26) * (1.0 - c.a)) / c.a, 1.0);
+  }
   if (dh < v_fade.x || dh >= v_fade.y) discard;
+  if (u_dbg == 1) { fragColor = vec4(1.0, 0.0, 1.0, 1.0); return; }
   vec3 nl = mix(texture(u_nrm, v_uv0).xyz, texture(u_nrm, v_uv1).xyz, v_blend) * 2.0 - 1.0;
   vec3 n = normalize(vec3(v_rot.x * nl.x + v_rot.y * nl.z, nl.y, -v_rot.y * nl.x + v_rot.x * nl.z));
-  n = normalize(mix(n, vec3(0.0, 1.0, 0.0), 0.5));
+  n = normalize(mix(n, vec3(0.0, 1.0, 0.0), 0.75));
   vec3 alb = t.rgb * t.rgb;
-  float sh = shadowAt(v_wpos, n);
-  vec3 c = outColor(lambert(alb, n, sh) * 1.15);
-  c = mix(c, u_fogCol.rgb, fogGround(v_wpos, v_depth));
+  float sh = mix(mix(0.42, 0.9, shadowAt(v_wpos, n)) * mix(0.75, 1.0, smoothstep(0.08, 0.45, u_sunDir.y)), 0.62, 0.85);
+  vec3 c = outColor(lambert(alb, n, sh));
+  c = mix(c, u_fogCol.rgb, mix(fogObject(v_wpos, v_depth), fogGround(v_wpos, v_depth), smoothstep(60.0, 160.0, v_depth)));
   fragColor = vec4(c, 1.0);
 }
 )";
@@ -915,7 +929,7 @@ void main(){
   if (cov < 0.22) discard;
   float d = distance(v_wpos.xz, u_camPos.xz);
   float fin = smoothstep(u_in.x, u_in.y, d);
-  float dh = fract(sin(dot(floor(gl_FragCoord.xy), vec2(12.9898, 78.233))) * 43758.5453);
+  float dh = FADE_NOISE_STATIC();
   if (dh < 1.0 - fin) discard;
   float pine = v_c.g, rnd = v_c.b;
   float n1 = fract(sin(dot(floor(v_wpos.xz * 0.35), vec2(41.3, 289.1))) * 9631.7);
@@ -1187,6 +1201,8 @@ static void drawPart(PartSlot& p, InstBatch& b, int extra, float f0, float f1, f
   if (p.proc) s = &render::object(VFmt::P3C4N4, IM_LITE, SeasonKind::Grass, OF_WIND | OF_DOUBLE | extra);
   else s = &render::objectFor(p.mat, IM_LITE, extra);
   s->set1f("u_packed", packed ? 1.0f : 0.0f);
+  if (render::dbgMode == 2) { if (f1 > 0) f0 = f1 = (f0 + f1) * 0.5f, f1 += 0.01f; if (i1 > 0) i0 = i1 = (i0 + i1) * 0.5f, i1 += 0.01f; }
+  s->set1i("u_tier", &b == &p.lodBatch ? 1 : 0);
   s->set2f("u_fade", f0, f1);
   s->set2f("u_fadeIn", i0, i1);
   b.draw();
@@ -1232,6 +1248,7 @@ struct PrepassTuner {
     testing = ph >= period - test;
     on = testing ? !best : best;
     if (avgOff < 0 && frames > 60 && frames < 120) on = false;
+    if (const char* f = std::getenv("HW_PREPASS")) on = f[0] == '1';
     mode[idx] = on;
     glQueryCounter(q[idx][0], GL_TIMESTAMP);
   }
@@ -1246,7 +1263,7 @@ void drawOpaque() {
   glDisable(GL_CULL_FACE);
   bool imp = g_impReady;
   g_tuner.begin();
-  bool pre = g_tuner.on;
+  bool pre = false;  // depth prepass caused speckles on NVIDIA (prepass/colour depth mismatch)
   int pD = profOpen ? profOpen("forest.depthPre") : -1;
   glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
   for (auto& s : g_slots) {
@@ -1302,8 +1319,10 @@ void drawOpaque() {
       if (s->imp < 0 || s->impBatch.count <= 0) continue;
       LodCfg lc = lodFor(s->layer);
       float cn = canopyNear();
-      if (lc.canopy) sh.set4f("u_range", lc.imp, lc.imp + IMP_BAND, cn, cn + CANOPY_BAND);
-      else sh.set4f("u_range", lc.imp, lc.imp + IMP_BAND, lc.outer * 0.85f, lc.outer);
+      float ib = render::dbgMode == 2 ? 0.01f : IMP_BAND, i0 = render::dbgMode == 2 ? lc.imp + IMP_BAND * 0.5f : lc.imp;
+      sh.set1i("u_dbg", render::dbgMode);
+      if (lc.canopy) sh.set4f("u_range", i0, i0 + ib, cn, cn + CANOPY_BAND);
+      else sh.set4f("u_range", i0, i0 + ib, lc.outer * 0.85f, lc.outer);
       sh.set4f("u_cell", s->impW, s->impBase, (float)s->imp, (float)g_impRows);
       s->impBatch.draw();
     }
@@ -1369,15 +1388,53 @@ void drawBlobs() { drawCasts(g_casts); }
 int instanceCount() { return g_instances; }
 
 void resolveTreeCollision(float& x, float& z, float radius) {
+  static unsigned s_frame = ~0u;
+  static int s_new = 0;
+  if (s_frame != (unsigned)render::frameNo) { s_frame = (unsigned)render::frameNo; s_new = 0; }
+  const Vec3& pp = E.player.pos;
+  bool nearPlayer = std::fabs(x - pp.x) + std::fabs(z - pp.z) < 60;
   int ccx = (int)std::floor(x / CELL), ccz = (int)std::floor(z / CELL);
   for (int cx = ccx - 1; cx <= ccx + 1; cx++)
     for (int cz = ccz - 1; cz <= ccz + 1; cz++) {
+      if (!nearPlayer && !g_mainCache.cells.count(CellKey{L_TREE, cx, cz})) {
+        if (s_new >= 3) continue;
+        s_new++;
+      }
       const auto& c = getCell(g_mainCache, L_TREE, cx, cz);
       for (const Item& it : c) {
         float r = it.scale * 0.7f + radius;
         float dx = x - it.x, dz = z - it.z;
         float d2 = dx * dx + dz * dz;
         if (d2 < r * r && d2 > 1e-6f && !blocked(it.x, it.z)) {
+          float d = std::sqrt(d2);
+          x = it.x + (dx / d) * r;
+          z = it.z + (dz / d) * r;
+        }
+      }
+    }
+  static float rockR = -1;
+  if (rockR < 0) {
+    rockR = 0;
+    for (auto& sp : g_slots)
+      if (sp->layer == L_ROCK)
+        for (auto& p : sp->parts) rockR = std::max(rockR, std::max(std::max(std::fabs(p.mesh->bmin.x), std::fabs(p.mesh->bmax.x)), std::max(std::fabs(p.mesh->bmin.z), std::fabs(p.mesh->bmax.z))));
+    rockR *= 0.8f;
+    if (rockR <= 0) rockR = -1;
+  }
+  if (rockR <= 0) return;
+  for (int cx = ccx - 1; cx <= ccx + 1; cx++)
+    for (int cz = ccz - 1; cz <= ccz + 1; cz++) {
+      if (!g_mainCache.cells.count(CellKey{L_ROCK, cx, cz})) {
+        if (!nearPlayer || s_new >= 3) continue;
+        s_new++;
+      }
+      for (const Item& it : getCell(g_mainCache, L_ROCK, cx, cz)) {
+        float rr = it.scale * rockR;
+        if (rr < 0.3f) continue;
+        float r = rr + radius;
+        float dx = x - it.x, dz = z - it.z;
+        float d2 = dx * dx + dz * dz;
+        if (d2 < r * r && d2 > 1e-6f) {
           float d = std::sqrt(d2);
           x = it.x + (dx / d) * r;
           z = it.z + (dz / d) * r;

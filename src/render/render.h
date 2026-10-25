@@ -32,6 +32,7 @@ struct Camera {
 };
 
 enum InstMode { IM_NONE = 0, IM_LITE = 1, IM_FULL = 2 };
+namespace render { extern int dbgMode; }
 enum ObjFlag { OF_CUTOUT = 1, OF_DOUBLE = 2, OF_WIND = 4, OF_TINTWHITE = 8, OF_SOFT = 16, OF_CAPTURE = 32, OF_DEPTH = 64 };
 
 inline InstFull toInst(const Mat4& m, uint32_t tint = 0xffffffffu) {

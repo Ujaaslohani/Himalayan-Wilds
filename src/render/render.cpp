@@ -143,6 +143,7 @@ static const char* kindDefine(SeasonKind k) {
   }
 }
 
+int dbgMode = std::getenv("HW_DBG") ? std::atoi(std::getenv("HW_DBG")) : 0;
 Shader& object(VFmt fmt, InstMode inst, SeasonKind kind, int flags) {
   bool sp = shadowPass;
   uint32_t key = (uint32_t)fmt | ((uint32_t)inst << 4) | ((uint32_t)kind << 8) | ((uint32_t)flags << 16) | (sp ? 1u << 24 : 0);
@@ -182,6 +183,8 @@ Shader& object(VFmt fmt, InstMode inst, SeasonKind kind, int flags) {
   s->set2f("u_fade", 0, 0);
   s->set2f("u_fadeIn", 0, 0);
   s->set1f("u_packed", 0);
+  s->set1i("u_dbg", dbgMode);
+  s->set1i("u_tier", 0);
   return *s;
 }
 

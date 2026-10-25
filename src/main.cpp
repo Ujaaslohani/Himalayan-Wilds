@@ -6,6 +6,7 @@
 #include "render/terrain_render.h"
 #include "render/water.h"
 #include "render/sky.h"
+#include "render/sunfx.h"
 #include "render/grass.h"
 #include "world/terrain.h"
 #include "world/forest.h"
@@ -50,8 +51,8 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 namespace {
 
 struct SceneTarget {
-  GLuint fbo = 0, color = 0, depth = 0;
-  int w = 0, h = 0;
+  GLuint fbo = 0, color = 0, depth = 0, msFbo = 0, msColor = 0, msDepth = 0;
+  int w = 0, h = 0, samples = 0;
   void ensure(int W, int H) {
     if (W == w && H == h && fbo) return;
     release();
@@ -61,20 +62,53 @@ struct SceneTarget {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glGenRenderbuffers(1, &depth);
-    glBindRenderbuffer(GL_RENDERBUFFER, depth);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h);
+    glGenTextures(1, &depth);
+    glBindTexture(GL_TEXTURE_2D, depth);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, w, h, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glGenFramebuffers(1, &fbo);
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color, 0);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depth);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth, 0);
+    samples = 0;
+    GLint maxS = 0;
+    glGetIntegerv(GL_MAX_SAMPLES, &maxS);
+    int want = std::min((int)maxS, std::max(0, g_settings.msaa));
+    if (want > 1) {
+      glGenRenderbuffers(1, &msColor);
+      glBindRenderbuffer(GL_RENDERBUFFER, msColor);
+      glRenderbufferStorageMultisample(GL_RENDERBUFFER, want, GL_RGBA8, w, h);
+      glGenRenderbuffers(1, &msDepth);
+      glBindRenderbuffer(GL_RENDERBUFFER, msDepth);
+      glRenderbufferStorageMultisample(GL_RENDERBUFFER, want, GL_DEPTH_COMPONENT24, w, h);
+      glGenFramebuffers(1, &msFbo);
+      glBindFramebuffer(GL_FRAMEBUFFER, msFbo);
+      glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, msColor);
+      glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, msDepth);
+      if (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) samples = want;
+      else { glDeleteFramebuffers(1, &msFbo); glDeleteRenderbuffers(1, &msColor); glDeleteRenderbuffers(1, &msDepth); msFbo = msColor = msDepth = 0; }
+    }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+  GLuint drawFbo() const { return samples ? msFbo : fbo; }
+  void resolve(GLbitfield bits) {
+    if (!samples) return;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, msFbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
+    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, bits, GL_NEAREST);
+    glBindFramebuffer(GL_FRAMEBUFFER, msFbo);
   }
   void release() {
     if (fbo) glDeleteFramebuffers(1, &fbo);
     if (color) glDeleteTextures(1, &color);
-    if (depth) glDeleteRenderbuffers(1, &depth);
-    fbo = color = depth = 0;
+    if (depth) glDeleteTextures(1, &depth);
+    if (msFbo) glDeleteFramebuffers(1, &msFbo);
+    if (msColor) glDeleteRenderbuffers(1, &msColor);
+    if (msDepth) glDeleteRenderbuffers(1, &msDepth);
+    fbo = color = depth = msFbo = msColor = msDepth = 0;
     w = h = 0;
   }
 };
@@ -273,6 +307,9 @@ void drawShadows() {
   render::endShadowPass();
 }
 
+GLuint g_sunDepth = 0;
+SceneTarget* g_scene = nullptr;
+int g_sunW = 0, g_sunH = 0;
 void drawWorld(float dt, bool viewModel) {
   fx::beginFrame();
   const Color hz = sky::horizon();
@@ -306,6 +343,7 @@ void drawWorld(float dt, bool viewModel) {
   PROF(sky::drawStarsAndMist());
   PROF(sky::drawWeather(dt));
   PROF(water::drawParticles());
+  if (g_sunDepth) { if (g_scene) g_scene->resolve(GL_DEPTH_BUFFER_BIT); PROF(sunfx::occlusion(g_sunDepth, g_sunW, g_sunH)); }
   if (viewModel) archery::drawViewModel(dt, player::cameraWorld());
 }
 
@@ -326,7 +364,7 @@ int main(int argc, char** argv) {
   audio::init();
   if (A.sfxMuted) audio::toggleSfxMute();
 
-  auto mem = [](const char* tag) { if (platform::hasArg("--memlog")) std::printf("[mem] %-12s %.0f MB\n", tag, rssMB()); };
+  auto mem = [](const char* tag) { if (platform::hasArg("--memlog")) std::printf("[mem] %-12s %.0f MB  t=%.2fs\n", tag, rssMB(), platform::time()); };
   mem("gl+ui");
   loadingFrame("Shaping the valley...");
   world::generate();
@@ -375,6 +413,49 @@ int main(int argc, char** argv) {
         {30, "", [=] { screens::setTitlePage(0); app::newGame(); }},
         {200, "village", look(0, 14, 0, -0.08f)},
         {260, "forest", look(40, -60, 2.2f, -0.05f)},
+        {262, "sun", [=] { E.time = 9.5f; float ang = (9.5f - 6) / 24 * TAU; Vec3 sd = Vec3(std::cos(ang), std::sin(ang), -0.32f).normalized(); look(4, 18, std::atan2(-sd.x, -sd.z), std::asin(sd.y) * 0.85f)(); }},
+        {270, "sun2", [=] {}},
+        {272, "sunshade", [=] { E.time = 8.2f; float ang = (8.2f - 6) / 24 * TAU; Vec3 sd = Vec3(std::cos(ang), std::sin(ang), -0.32f).normalized(); std::vector<float> t; forest::nearTrees(40, -60, 60, t, 8); float tx = 40, tz = -60; if (t.size() >= 4) { tx = t[0]; tz = t[2]; } Vec3 h = Vec3(sd.x, 0, sd.z).normalized(); float x = tx - h.x * 5.0f, z = tz - h.z * 5.0f; look(x, z, std::atan2(-sd.x, -sd.z), std::asin(sd.y))(); }},
+        {280, "sunshade2", [=] {}},
+        {282, "suntemple", [=] { E.time = 7.2f; E.cutscene.dur = 0; float ang = (7.2f - 6) / 24 * TAU; Vec3 sd = Vec3(std::cos(ang), std::sin(ang), -0.32f).normalized(); const Shrine& sh = world::SHRINES[0]; Vec3 h = Vec3(sd.x, 0, sd.z).normalized(); float x = sh.x - h.x * 14.0f, z = sh.z - h.z * 14.0f; E.player.pos = {x, std::max(world::getTerrainHeight(x, z), sh.y) + 1.7f, z}; E.player.velY = 0; E.player.yaw = std::atan2(-sd.x, -sd.z); E.player.pitch = std::asin(sd.y); }},
+        {292, "suntemple2", [=] {}},
+        {294, "fdusk", [=] { restoreSeason(0, 2, 18.2f); E.time = 18.2f; look(40, -60, 2.2f, -0.02f)(); }},
+        {330, "fspring", [=] { restoreSeason(0, 2, 8.0f); E.time = 8.0f; look(40, -60, 2.2f, -0.02f)(); }},
+        {345, "fspring2", [=] {}},
+        {350, "ftree", [=] { restoreSeason(0, 2, 13.0f); E.time = 13.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 34, z = tz + 6; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.08f)(); }},
+        {365, "ftree2", [=] {}},
+        {370, "tclose", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 7, z = tz + 2; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.3f)(); }},
+        {385, "tclose2", [=] {}},
+        {390, "tmid", [=] { std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 22, z = tz + 5; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.1f)(); }},
+        {405, "tmid2", [=] {}},
+        {410, "", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 14.0f, z = tz; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.12f)(); }},
+        {424, "sw14", [=] {}},
+        {425, "", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 18.0f, z = tz; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.12f)(); }},
+        {439, "sw18", [=] {}},
+        {440, "", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 22.0f, z = tz; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.12f)(); }},
+        {454, "sw22", [=] {}},
+        {455, "", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 26.0f, z = tz; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.12f)(); }},
+        {469, "sw26", [=] {}},
+        {470, "", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 30.0f, z = tz; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.12f)(); }},
+        {484, "sw30", [=] {}},
+        {485, "", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 34.0f, z = tz; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.12f)(); }},
+        {499, "sw34", [=] {}},
+        {500, "", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 38.0f, z = tz; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.12f)(); }},
+        {514, "sw38", [=] {}},
+        {515, "", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 42.0f, z = tz; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.12f)(); }},
+        {529, "sw42", [=] {}},
+        {530, "", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 46.0f, z = tz; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.12f)(); }},
+        {544, "sw46", [=] {}},
+        {545, "", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 50.0f, z = tz; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.12f)(); }},
+        {559, "sw50", [=] {}},
+        {560, "", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 54.0f, z = tz; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.12f)(); }},
+        {574, "sw54", [=] {}},
+        {575, "", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 58.0f, z = tz; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.12f)(); }},
+        {589, "sw58", [=] {}},
+        {306, "fdusk2", [=] {}},
+        {308, "fnight", [=] { restoreSeason(0, 2, 20.6f); E.time = 20.6f; std::vector<float> t; forest::nearTrees(40, -60, 60, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 9, z = tz + 2; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.25f)(); }},
+        {320, "fnight2", [=] {}},
+
         {330, "river", [=] { auto& rv = world::RIVER; size_t i = rv.pts.size() / 2; float x = rv.pts[i][0] + 18, z = rv.pts[i][1]; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.7f, z}; E.player.yaw = PI / 2; E.player.pitch = -0.12f; }},
         {400, "falls", [=] { auto& hd = world::RIVER.head; float x = hd[0] + 10, z = hd[1] + 40; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.7f, z}; E.player.yaw = 0.25f; E.player.pitch = 0.1f; }},
         {460, "inventory", [=] { look(0, 14, 0, -0.08f)(); A.tab = Tab::Inventory; }},
@@ -434,6 +515,7 @@ int main(int argc, char** argv) {
   double gpuAcc = 0, cpuAcc = 0;
   int gpuN = 0;
   SceneTarget scene;
+  g_scene = &scene;
   float renderScale = g_settings.renderScale;
 
   while (!platform::shouldClose()) {
@@ -451,7 +533,7 @@ int main(int argc, char** argv) {
     if (in.pressed[K_ESC]) screens::escape();
     else {
       for (int k = 0; k < K_COUNT; k++) {
-        if (!in.pressed[k] || k == K_ESC || k == K_F2 || k == K_F3 || k == K_F11) continue;
+        if (!in.pressed[k] || k == K_ESC || k == K_F2 || k == K_F3 || k == K_F4 || k == K_F11) continue;
         if (k == K_R && E.playing && !E.uiOpen && E.world.placing.empty()) { app::craftArrows(false); continue; }
         player::onKeyPressed(k);
       }
@@ -504,14 +586,19 @@ int main(int argc, char** argv) {
     if (sky::shadowNeedsUpdate() || sky::shadowStaticDirty()) PROF(drawShadows());
     bool cut = E.cutscene.dur > 0;
     float rs = clampf(g_settings.adaptiveQuality ? renderScale : g_settings.renderScale, 0.4f, 1.0f);
-    bool scaled = rs < 0.99f || g_settings.fxaa;
+    bool sunOn = !cut && sunfx::wanted();
+    bool scaled = rs < 0.99f || g_settings.fxaa || sunOn;
     if (scaled) {
       scene.ensure(std::max(1, (int)(W * rs)), std::max(1, (int)(H * rs)));
-      glBindFramebuffer(GL_FRAMEBUFFER, scene.fbo);
+      glBindFramebuffer(GL_FRAMEBUFFER, scene.drawFbo());
       glViewport(0, 0, scene.w, scene.h);
     }
+    g_sunDepth = scaled && sunOn ? scene.depth : 0;
+    g_sunW = scene.w;
+    g_sunH = scene.h;
     drawWorld(dt, E.playing && !E.uiOpen && !cut);
     if (scaled) {
+      scene.resolve(GL_COLOR_BUFFER_BIT);
       glBindFramebuffer(GL_FRAMEBUFFER, 0);
       glViewport(0, 0, W, H);
       static const char* UPVS = "out vec2 v_uv;\nvoid main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); v_uv = p; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }\n";
@@ -548,6 +635,7 @@ void main(){
       up.set1i("u_fxaa", g_settings.fxaa ? 1 : 0);
       PROF(render::drawFullscreen());
       glEnable(GL_DEPTH_TEST);
+      if (sunOn) PROF(sunfx::composite(W, H));
     }
 
     float uiScale = std::max(1.0f, H / 820.0f) * g_settings.uiScale;
@@ -648,8 +736,8 @@ void main(){
         if (fs.gpuMs > budget * 0.78f || fs.fps < (g_settings.fpsLimit > 0 ? g_settings.fpsLimit : 60) * 0.92f) slowT += (float)statT, fastT = 0;
         else if (fs.gpuMs < budget * 0.55f) fastT += (float)statT, slowT = 0;
         bool gpuBound = fs.gpuMs > fs.cpuMs * 0.8f;
-        if (slowT > 2 && gpuBound && renderScale > 0.6f) {
-          renderScale = std::max(0.6f, renderScale - 0.1f);
+        if (slowT > 2 && gpuBound && renderScale > 0.85f) {
+          renderScale = std::max(0.85f, renderScale - 0.05f);
           slowT = 0;
         } else if (slowT > 2 && g_settings.grassRadius > baseGrass * 0.55f) {
           g_settings.grassRadius *= 0.85f;

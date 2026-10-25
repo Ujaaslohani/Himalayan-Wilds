@@ -1,3 +1,4 @@
+#include "../render/render.h"
 #include "../world/forest.h"
 #include "screens.h"
 #include "ui.h"

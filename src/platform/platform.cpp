@@ -36,7 +36,7 @@ int mapKey(int k) {
     case GLFW_KEY_UP: return K_UP; case GLFW_KEY_DOWN: return K_DOWN; case GLFW_KEY_LEFT: return K_LEFT; case GLFW_KEY_RIGHT: return K_RIGHT;
     case GLFW_KEY_1: return K_1; case GLFW_KEY_2: return K_2; case GLFW_KEY_3: return K_3;
     case GLFW_KEY_4: return K_4; case GLFW_KEY_5: return K_5; case GLFW_KEY_6: return K_6;
-    case GLFW_KEY_F2: return K_F2; case GLFW_KEY_F3: return K_F3; case GLFW_KEY_F11: return K_F11;
+    case GLFW_KEY_F2: return K_F2; case GLFW_KEY_F3: return K_F3; case GLFW_KEY_F4: return K_F4; case GLFW_KEY_F11: return K_F11;
     default: return -1;
   }
 }

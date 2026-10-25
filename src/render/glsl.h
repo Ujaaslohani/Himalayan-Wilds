@@ -42,6 +42,8 @@ layout(std140) uniform Frame {
 #define u_shadowTexel u_wind.z
 #define u_shadowHalf u_wind.w
 #define PI 3.141592653589793
+#define FADE_NOISE_STATIC() fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(0.06711056, 0.00583715))))
+#define FADE_NOISE() fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy) + 5.588238 * mod(floor(u_clock * 60.0), 64.0), vec2(0.06711056, 0.00583715))))
 )";
 
 static const char* NOISE = R"(
@@ -157,8 +159,8 @@ void main(){
 #endif
   M = u_model * M;
   vec3 sO = M[3].xyz;
-  v_fade = u_fade.y > 0.0 ? 1.0 - smoothstep(u_fade.x, u_fade.y, distance(sO.xz, u_camPos.xz)) : 1.0;
-  v_fadeIn = u_fadeIn.y > 0.0 ? smoothstep(u_fadeIn.x, u_fadeIn.y, distance(sO.xz, u_camPos.xz)) : 1.0;
+  v_fade = u_fade.y > 0.0 ? 1.0 - smoothstep(mix(u_fade.x, u_fade.y, 0.5), u_fade.y, distance(sO.xz, u_camPos.xz)) : 1.0;
+  v_fadeIn = u_fadeIn.y > 0.0 ? smoothstep(u_fadeIn.x, mix(u_fadeIn.x, u_fadeIn.y, 0.5), distance(sO.xz, u_camPos.xz)) : 1.0;
 #if defined(INST_LITE)
   if (u_packed > 0.5) v_fade *= 1.0 - floor(a_i1 / 6.2831853) / 15.0;
 #endif
@@ -238,13 +240,14 @@ const vec3 SNOWC = vec3(0.86, 0.9, 0.96);
 #endif
 vec3 seasonColor(vec3 sc, vec3 wp, float ny, float seed){
 #if defined(K_LEAF)
-  float sL = clamp(dot(sc, vec3(0.3, 0.59, 0.11)) * 3.2, 0.35, 1.25);
-  vec3 sAu = mix(vec3(0.95, 0.33, 0.03), vec3(0.62, 0.06, 0.03), smoothstep(0.35, 0.75, seed));
-  sAu = mix(sAu, vec3(0.98, 0.62, 0.05), step(0.8, seed));
-  sAu = mix(sAu, vec3(0.9, 0.45, 0.04), sHash(floor(wp * 1.3)) * 0.5);
+  float sL = mix(0.85, clamp(dot(sc, vec3(0.3, 0.59, 0.11)) * 3.2, 0.35, 1.25), 0.35);
+  float sNear = 1.0 - smoothstep(10.0, 30.0, distance(wp, u_camPos));
+  vec3 sAu = mix(vec3(0.95, 0.33, 0.03), vec3(0.62, 0.06, 0.03), mix(0.5, smoothstep(0.35, 0.75, seed), sNear));
+  sAu = mix(sAu, vec3(0.98, 0.62, 0.05), step(0.8, seed) * sNear * 0.8);
+  sAu = mix(sAu, vec3(0.9, 0.45, 0.04), sHash(floor(wp * 1.3)) * 0.5 * sNear);
   sc = mix(sc, sAu * sL, clamp(u_autumn, 0.0, 1.0));
   sc = mix(sc, sc * vec3(0.9, 1.18, 0.82), u_spring);
-  sc = mix(sc, vec3(0.98, 0.55, 0.7) * sL * 1.2, u_spring * step(0.72, seed) * 0.8);
+  sc = mix(sc, vec3(0.98, 0.55, 0.7) * sL, u_spring * mix(0.12, step(0.72, seed) * 0.8, sNear));
   sc = mix(sc, sc * vec3(1.08, 1.0, 0.72), u_dry * 0.35);
   sc = mix(sc, vec3(sL * 0.5, sL * 0.4, sL * 0.33), u_snow * 0.55);
   sc = mix(sc, SNOWC, u_snow * SNOWK * (0.3 + 0.6 * smoothstep(0.1, 0.7, ny)));
@@ -293,6 +296,8 @@ uniform int u_hasTex;
 uniform vec4 u_emissive;
 uniform float u_alpha;
 uniform float u_recv;
+uniform int u_dbg;
+uniform int u_tier;
 in float v_fade;
 in float v_fadeIn;
 #ifdef CAPTURE
@@ -303,7 +308,11 @@ out vec4 fragColor;
 #endif
 void main(){
   if (v_fade < 0.999 || v_fadeIn < 0.999) {
-    float dh = fract(sin(dot(floor(gl_FragCoord.xy), vec2(12.9898, 78.233))) * 43758.5453);
+#ifdef SHADOW_PASS
+    float dh = FADE_NOISE_STATIC();
+#else
+    float dh = FADE_NOISE_STATIC();
+#endif
     if (dh >= v_fade || dh < 1.0 - v_fadeIn) discard;
   }
 #ifdef K_LEAF
@@ -336,13 +345,30 @@ void main(){
   if (!gl_FrontFacing) n = -n;
 #endif
 #endif
+#if defined(CUTOUT) && !defined(CAPTURE)
+  float leafFar = smoothstep(8.0, 28.0, v_depth);
+  float edgeOn = 1.0 - smoothstep(0.05, 0.45, abs(dot(n, normalize(u_camPos - v_wpos))));
+  n = normalize(mix(n, vec3(0.0, 1.0, 0.0), max(0.75 * leafFar, 0.85 * edgeOn)));
+#endif
   vec3 sc = seasonColor(base.rgb, v_wpos, n.y, v_seed);
+#if defined(CUTOUT) && !defined(CAPTURE)
+  if (u_dbg == 1) { fragColor = u_tier == 1 ? vec4(0.1, 0.3, 1.0, 1.0) : vec4(1.0, 0.55, 0.0, 1.0); return; }
+  if (u_dbg == 3) { fragColor = vec4(linearToSrgb(base.rgb), 1.0); return; }
+#endif
 #ifdef CAPTURE
   fragColor = vec4(sqrt(max(sc, vec3(0.0))), 1.0);
   fragNormal = vec4(n * 0.5 + 0.5, 1.0);
   return;
 #endif
   float sh = mix(1.0, shadowAt(v_wpos, n), u_recv);
+#ifdef CUTOUT
+#endif
+#ifdef CUTOUT
+  sh = mix(0.42, 0.9, sh) * mix(0.75, 1.0, smoothstep(0.08, 0.45, u_sunDir.y));
+#ifndef CAPTURE
+  sh = mix(sh, 0.62, 0.85 * max(leafFar, edgeOn));
+#endif
+#endif
   vec3 lit = lambert(sc, n, sh) + u_emissive.rgb * sc + u_emissive.a * vec3(1.0, 0.78, 0.42);
 #ifdef SOFT
   {

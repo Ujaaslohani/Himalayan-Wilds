@@ -8,6 +8,7 @@ void drawSky();
 void drawStarsAndMist();
 void drawWeather(float dt);
 Vec3 lightDir();
+Vec3 sunDir();
 Mat4 shadowMatrix();
 bool shadowNeedsUpdate();
 bool shadowStaticDirty();
