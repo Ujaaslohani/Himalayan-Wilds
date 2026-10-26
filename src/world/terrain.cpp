@@ -1044,18 +1044,19 @@ Color terrainColor(float x, float z, float h, float normalY) {
     float shore = std::max(0.0f, 1 - std::fabs(d - L.r - 2.5f) / 4.0f);
     out = out.lerp(sand.lerp(pebble, sstep(fine, 0.0f, 0.8f)), shore * 0.65f);
   }
-  out = out.lerp(alpine, sstep(h, 50, 72) * (1 - sstep(h, 100, 120)) * 0.8f);
+  out = out.lerp(alpine, sstep(h, 70, 100) * (1 - sstep(h, 130, 150)) * 0.45f);
   float slope = 1 - sstep(normalY, 0.55f, 0.84f);
-  float band = std::sin(h * 1.3f + fine * 2.5f) * 0.5f + 0.5f;
+  float band = fbm(x * 0.05f + h * 0.02f, z * 0.05f - h * 0.03f, 3, 77) * 0.5f + 0.5f;
   Color rk = rock.lerp(rockDark, band * 0.6f).lerp(rockWarm, sstep(fbm(x * 0.04f, z * 0.04f, 2, 51), 0.1f, 0.6f) * 0.5f);
-  out = out.lerp(rk, std::min(1.0f, slope * 1.1f + sstep(h, 95, 130) * 0.45f));
+  float cliff = 1 - sstep(normalY, 0.42f, 0.66f);
+  out = out.lerp(rk, std::min(1.0f, (slope * 0.6f + sstep(h, 130, 155) * 0.6f) * sstep(h, 85, 135) + cliff * (0.55f + 0.35f * sstep(fine, -0.3f, 0.5f))));
   out = out.lerp(scree, (1 - slope) * sstep(h, 85, 115) * sstep(fine, -0.2f, 0.6f) * 0.5f);
   float tq = 1 - sstep(q.td, 2.4f, 4.2f);
   if (tq > 0) {
     Color t = dirt.lerp(gravel, 0.45f).lerp(dirtDark, sstep(fine, 0.2f, 0.8f) * 0.4f);
     out = out.lerp(t, tq * 0.9f);
   }
-  float snowLine = 138 + fbm(x * 0.02f, z * 0.02f, 2, 61) * 18;
+  float snowLine = 152 + fbm(x * 0.02f, z * 0.02f, 2, 61) * 18;
   out = out.lerp(snow, sstep(h, snowLine, snowLine + 22) * (0.08f + 0.92f * sstep(normalY, 0.58f, 0.8f)) * (1 - tq * 0.5f));
   out = out.offsetHSL(0, 0, fine * 0.03f);
   return out;
@@ -1084,7 +1085,7 @@ std::vector<std::vector<Vec3>> fenceLines() {
 }
 
 MeshData buildBackdrop() {
-  const int A = 160, Rn = 30;
+  const int A = 720, Rn = 96;
   const float r0 = MAP_HALF - 2, r1 = 3600;
   static const Color forest = Color::hex("2f5a24"), rockDark = Color::hex("57534d"), rock = Color::hex("7f7b74"), rockWarm = Color::hex("8c7c6a"), snow = Color::hex("eef3f7");
   MeshData d;
@@ -1097,9 +1098,10 @@ MeshData buildBackdrop() {
     for (int i = 0; i <= A; i++) {
       float a = (float)i / A * TAU;
       float x = std::cos(a) * rr, z = std::sin(a) * rr;
-      float ridge = ridged(x * 0.0026f + 5, z * 0.0026f - 3, 5, 71);
+      float ridge = ridged(x * 0.0026f + 5, z * 0.0026f - 3, 6, 71);
+      float crag = ridged(x * 0.011f - 2, z * 0.011f + 7, 4, 13);
       float env = std::sin(std::min(1.0f, t * 1.25f) * PI);
-      float y = 140 + env * (80 + ridge * 300) + (1 - t) * 70;
+      float y = 140 + env * (80 + std::pow(ridge, 1.7f) * 420 + crag * 55 * sstep(ridge, 0.25f, 0.7f)) + (1 - t) * 70;
       if (t > 0.92f) y *= 1 - (t - 0.92f) / 0.08f * 0.6f;
       float edge = getTerrainHeight(std::cos(a) * r0, std::sin(a) * r0) - 0.6f;
       y = lerpf(edge, std::max(y, edge), sstep(t, 0, 0.1f));

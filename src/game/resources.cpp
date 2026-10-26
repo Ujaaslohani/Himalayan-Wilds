@@ -39,7 +39,8 @@ bool okSpot(ResType t, float x, float z) {
   if (hypot2(x, z) < SETTLEMENT_RADIUS + 5) return false;
   for (auto& c : npcs::CAMPS)
     if (hypot2(x - c.campX, z - c.campZ) < 9) return false;
-  if (world::riverMask(x, z) > 0.02f || world::pathDistance(x, z) < 2.2f) return false;
+  if (world::riverMask(x, z) > 0.02f || world::pathDistance(x, z) < 3.5f || world::nearRoute(x, z) < 5.5f) return false;
+  for (const Shrine& sh : world::SHRINES) if (hypot2(x - sh.x, z - sh.z) < 13.0f + 10) return false;
   if (world::lakeAt(x, z, 4) >= 0) return false;
   float h = world::getTerrainHeight(x, z);
   if (h < -0.4f || h > 42) return false;

@@ -77,7 +77,10 @@ float walkHeight(float x, float z) {
     float c = std::cos(b.rotY), s = std::sin(b.rotY);
     float lx = (x - b.pos[0]) * c - (z - b.pos[2]) * s;
     float lz = (x - b.pos[0]) * s + (z - b.pos[2]) * c;
-    if (std::fabs(lx) < BRIDGE_LENGTH / 2 && std::fabs(lz) < 1.5f) h = std::max(h, b.pos[1] + BRIDGE_DECK_Y);
+    if (std::fabs(lz) >= 1.5f) continue;
+    float deck = b.pos[1] + BRIDGE_DECK_Y, ax = std::fabs(lx);
+    if (ax < BRIDGE_LENGTH / 2) h = std::max(h, deck);
+    else if (ax < BRIDGE_LENGTH / 2 + BRIDGE_RAMP) h = std::max(h, deck - (ax - BRIDGE_LENGTH / 2) * (BRIDGE_RAMP_DROP / BRIDGE_RAMP));
   }
   return h;
 }

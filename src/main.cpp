@@ -221,7 +221,7 @@ void loadingFrame(const char* msg) {
 
 bool g_prof = false;
 std::map<std::string, double> g_profMs;
-std::map<std::string, long long> g_profTri;
+std::map<std::string, long long> g_profTri, g_profDraw;
 struct PassProf {
   static const int RING = 4, MAXP = 512;
   GLuint q[RING][MAXP * 2] = {};
@@ -288,9 +288,11 @@ struct PassProf {
     gAcc.clear(); cAcc.clear(); frames = 0;
   }
 } g_pp;
-#define PROF(x) do { if (g_pp.on && !g_prof) { int i_ = g_pp.open(#x); x; g_pp.close(i_); } else if (g_prof) { glFinish(); double t0_ = platform::time(); long long tr_ = gfx::triangles; x; glFinish(); g_profMs[#x] += (platform::time() - t0_) * 1000; g_profTri[#x] += gfx::triangles - tr_; } else { x; } } while (0)
+#define PROF(x) do { if (g_pp.on && !g_prof) { int i_ = g_pp.open(#x); x; g_pp.close(i_); } else if (g_prof) { glFinish(); double t0_ = platform::time(); long long tr_ = gfx::triangles, dr_ = gfx::drawCalls; x; glFinish(); g_profDraw[#x] += gfx::drawCalls - dr_; g_profMs[#x] += (platform::time() - t0_) * 1000; g_profTri[#x] += gfx::triangles - tr_; } else { x; } } while (0)
 void drawShadows() {
   if (sky::shadowStaticDirty()) {
+    sky::onStaticRebuild();
+    render::uploadFrame();
     render::beginShadowPass(sky::shadowMatrix(), g_settings.shadowSize, 1);
     PROF(forest::drawShadow());
     PROF(props::drawShadow());
@@ -424,6 +426,16 @@ int main(int argc, char** argv) {
         {345, "fspring2", [=] {}},
         {350, "ftree", [=] { restoreSeason(0, 2, 13.0f); E.time = 13.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 34, z = tz + 6; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.08f)(); }},
         {365, "ftree2", [=] {}},
+        {590, "rock", [=] { g_settings.undergrowthRadius = 0; forest::markDirty(); restoreSeason(0, 1, 10.5f); E.time = 10.5f; float rx = 40, rz = -60, rs = 1; forest::nearestRock(4, 30, rx, rz, rs); float x = rx - 1.2f * rs - 1.0f, z = rz - 1.0f * rs - 0.6f; look(x, z, std::atan2(-(rx - x), -(rz - z)), -0.5f)(); }},
+        {700, "", [=] { restoreSeason(1, 1, 6.1f); E.time = 6.1f; E.cutscene.dur = 0; const Shrine& sh = world::SHRINES[world::SHRINES.size() > 1 ? 1 : 0]; float L = std::sqrt(sh.x * sh.x + sh.z * sh.z) + 1e-3f; float x = sh.x - sh.x / L * 16, z = sh.z - sh.z / L * 16; E.player.pos = {x, std::max(world::getTerrainHeight(x, z), sh.y) + 1.7f, z}; E.player.velY = 0; E.player.yaw = std::atan2(sh.x, sh.z); E.player.pitch = -0.3f; }},
+        {712, "peak", [=] { E.player.velY = 0; }},
+        {713, "", [=] { E.time = 7.4f; }},
+        {725, "peak2", [=] { E.player.velY = 0; }},
+        {726, "", [=] { E.player.pitch = 0.35f; }},
+        {738, "sky", [=] {}},
+        {606, "tday", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; E.cutscene.dur = 0; const Shrine& sh = world::SHRINES[0]; float x = sh.x + std::sin(sh.yaw) * 11.0f + 3.0f, z = sh.z + std::cos(sh.yaw) * 11.0f + 2.0f; E.player.pos = {x, std::max(world::getTerrainHeight(x, z), sh.y) + 1.7f, z}; E.player.velY = 0; E.player.yaw = std::atan2(-(sh.x - x), -(sh.z - z)); E.player.pitch = 0.1f; }},
+        {620, "tday2", [=] {}},
+        {605, "rock2", [=] { g_settings.undergrowthRadius = 0; forest::markDirty(); restoreSeason(0, 1, 10.5f); E.time = 10.5f; float rx = 40, rz = -60, rs = 1; forest::nearestRock(4, 30, rx, rz, rs); float x = rx - 1.2f * rs - 1.0f, z = rz - 1.0f * rs - 0.6f; look(x, z, std::atan2(-(rx - x), -(rz - z)), -0.5f)(); }},
         {370, "tclose", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 7, z = tz + 2; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.3f)(); }},
         {385, "tclose2", [=] {}},
         {390, "tmid", [=] { std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 22, z = tz + 5; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.1f)(); }},
@@ -465,19 +477,21 @@ int main(int argc, char** argv) {
         {600, "night", [=] { A.tab = Tab::None; E.time = 22.5f; look(10, 30, PI, -0.02f)(); }},
         {640, "dusk", [=] { A.tab = Tab::None; E.time = 18.5f; look(40, -60, 1.6f, 0.05f)(); }},
         {660, "dawn", [=] { E.time = 5.8f; look(40, -60, 1.6f, 0.05f)(); }},
-        {640, "vnight", [=] { A.tab = Tab::None; A.population = 5; restoreSeason(3, 1, 4.7f); E.time = 4.7f; look(4, 18, 0.2f, -0.06f)(); g_profMs.clear(); g_profTri.clear(); g_prof = platform::hasArg("--prof"); }},
-        {660, "vnight2", [=] { if (g_prof) { for (auto& kv : g_profMs) std::printf("prof %8.1f ms %9lld tri  %s\n", kv.second, g_profTri[kv.first], kv.first.c_str()); } g_prof = false; }},
+        {640, "vnight", [=] { A.tab = Tab::None; A.population = 5; restoreSeason(3, 1, 4.7f); E.time = 4.7f; look(4, 18, 0.2f, -0.06f)(); g_profMs.clear(); g_profTri.clear(); g_profDraw.clear(); g_prof = platform::hasArg("--prof"); }},
+        {660, "vnight2", [=] { if (g_prof) { for (auto& kv : g_profMs) std::printf("prof %8.1f ms %9lld tri %5lld draws  %s\n", kv.second, g_profTri[kv.first], g_profDraw[kv.first], kv.first.c_str()); } g_prof = false; }},
         {680, "winter", [=] { E.time = 11; restoreSeason(3, 2, 11); look(-30, 50, 0.6f, -0.04f)(); }},
         {760, "mountain", [=] { restoreSeason(2, 0, 9); E.time = 9; look(160, -40, -0.8f, 0.05f)(); }},
         {820, "menu", [=] { A.menuOpen = true; }},
         {840, "deer", [=] { screens::openOptions(false); A.menuOpen = false; A.status = Status::Playing; float hx, hz; if (wildlife::nearestHerd(SP_DEER, 0, 0, hx, hz)) { float x = hx + 5, z = hz + 4; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.4f, z}; E.player.yaw = std::atan2(-(hx - x), -(hz - z)); E.player.pitch = -0.15f; } }},
         {846, "deer2", [=] {}},
+        {852, "", [=] { E.time = 12.0f; float hx, hz; if (wildlife::nearestHerd(SP_LEOPARD, 0, 0, hx, hz)) { float x = hx + 2.2f, z = hz + 1.6f; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.0f, z}; E.player.velY = 0; E.player.yaw = std::atan2(-(hx - x), -(hz - z)); E.player.pitch = -0.25f; } }},
+        {853, "leo", [=] {}},
         {850, "wolf", [=] { float hx, hz; if (wildlife::nearestHerd(SP_WOLF, 0, 0, hx, hz)) { float x = hx + 6, z = hz + 5; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.5f, z}; E.player.yaw = std::atan2(-(hx - x), -(hz - z)); E.player.pitch = -0.15f; E.player.hp = 1e6f; } }},
         {600, "kalyan", [=] { A.tab = Tab::None; float hx = 5, hz = -4; npcs::position("hunter", hx, hz); std::printf("hunter at %.1f %.1f\n", hx, hz); float x = hx, z = hz + 2.4f; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.55f, z}; E.player.yaw = 0; E.player.pitch = -0.1f; }},
         {606, "kalyan2", [=] {}},
         {610, "temple", [=] { E.time = 19.1f; ([=] { A.tab = Tab::None; const Shrine& sh = world::SHRINES[0]; float x = sh.x + std::sin(sh.yaw) * 26, z = sh.z + std::cos(sh.yaw) * 26; E.player.pos = {x, std::max(world::getTerrainHeight(x, z), sh.y) + 3.5f, z}; E.player.velY = 0; E.player.yaw = sh.yaw; E.player.pitch = -0.08f; })(); }},
-        {616, "temple2", [=] { restoreSeason(3, 1, 19.8f); E.time = 19.8f; A.tab = Tab::None; E.cutscene.dur = 0; const Shrine& sh = world::SHRINES[0]; float L = std::sqrt(sh.x * sh.x + sh.z * sh.z); float x = sh.x - sh.x / L * 30, z = sh.z - sh.z / L * 30; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.7f, z}; E.player.velY = 0; E.player.yaw = std::atan2(sh.x, sh.z); E.player.pitch = -0.45f; g_profMs.clear(); g_profTri.clear(); g_prof = platform::hasArg("--prof"); }},
-        {624, "temple3", [=] { if (g_prof) { for (auto& kv : g_profMs) std::printf("prof %8.1f ms %9lld tri  %s\n", kv.second, g_profTri[kv.first], kv.first.c_str()); } g_prof = false; }},
+        {616, "temple2", [=] { restoreSeason(3, 1, 19.8f); E.time = 19.8f; A.tab = Tab::None; E.cutscene.dur = 0; const Shrine& sh = world::SHRINES[0]; float L = std::sqrt(sh.x * sh.x + sh.z * sh.z); float x = sh.x - sh.x / L * 30, z = sh.z - sh.z / L * 30; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.7f, z}; E.player.velY = 0; E.player.yaw = std::atan2(sh.x, sh.z); E.player.pitch = -0.45f; g_profMs.clear(); g_profTri.clear(); g_profDraw.clear(); g_prof = platform::hasArg("--prof"); }},
+        {624, "temple3", [=] { if (g_prof) { for (auto& kv : g_profMs) std::printf("prof %8.1f ms %9lld tri %5lld draws  %s\n", kv.second, g_profTri[kv.first], g_profDraw[kv.first], kv.first.c_str()); } g_prof = false; }},
         {826, "options", [=] { screens::openOptions(true); }},
         {830, "place", [=] { screens::openOptions(false); A.menuOpen = false; look(4, 16, 0.3f, -0.15f)(); for (auto& k : {"wood", "stone", "fiber"}) A.inv[k] = 99; app::startStructure(SK_COTTAGE); A.showStyle = true; }},
         {832, "dialogue", [=] { actions::cancelPlacement(); actions::openDialogue("carpenter"); }},
@@ -554,9 +568,11 @@ int main(int argc, char** argv) {
     if (g_pp.on) g_pp.begin();
     forest::profOpen = g_pp.on ? +[](const char* n) { return g_pp.open(n); } : nullptr;
     forest::profClose = g_pp.on ? +[](int i) { g_pp.close(i); } : nullptr;
-    PROF(player::update(dt));
-    PROF(app::update(dt));
-    updateWind(dt);
+    // pause menu freezes the world: game time, animals, villagers, wind
+    float simDt = (A.menuOpen && E.playing && !test) ? 0.0f : dt;
+    PROF(player::update(simDt));
+    PROF(app::update(simDt));
+    updateWind(simDt);
     updateSeason(E.time);
     audio::setMusicPlaying(A.status == Status::Playing && !A.menuOpen);
     audio::setMusicMuted(A.musicMuted);
@@ -571,7 +587,7 @@ int main(int argc, char** argv) {
     if (W <= 0 || H <= 0) { platform::clearFrameInput(); continue; }
     glViewport(0, 0, W, H);
     player::updateCamera((float)W / H);
-    sky::update(dt);
+    sky::update(simDt);
     render::uploadFrame();
     PROF(forest::update(render::cam.pos, render::cam.forward()));
 
@@ -583,11 +599,19 @@ int main(int argc, char** argv) {
       for (auto& b : A.buildings) if (b.built) sg += 1 + b.pos[0] * 0.37 + b.pos[2] * 0.91 + b.rotY;
       if (sg != bsig) { bsig = sg; sky::invalidateStaticShadow(); }
     }
-    if (sky::shadowNeedsUpdate() || sky::shadowStaticDirty()) PROF(drawShadows());
     bool cut = E.cutscene.dur > 0;
+    // Full-screen menus: render the world once, then reuse that frame until the menu closes.
+    static bool frozenValid = false;
+    static int frozenW = 0, frozenH = 0;
+    static float frozenRs = 1;
+    bool freeze = E.playing && !test && !cut && (A.menuOpen || A.howToOpen || A.tab == Tab::Map || A.tab == Tab::Inventory || A.tab == Tab::Quests);
+    if (!freeze) frozenValid = false;
+    bool skipWorld = freeze && frozenValid && frozenW == W && frozenH == H;
+    if (!skipWorld && (sky::shadowNeedsUpdate() || sky::shadowStaticDirty())) PROF(drawShadows());
     float rs = clampf(g_settings.adaptiveQuality ? renderScale : g_settings.renderScale, 0.4f, 1.0f);
+    if (skipWorld) rs = frozenRs;
     bool sunOn = !cut && sunfx::wanted();
-    bool scaled = rs < 0.99f || g_settings.fxaa || sunOn;
+    bool scaled = rs < 0.99f || g_settings.fxaa || sunOn || freeze;
     if (scaled) {
       scene.ensure(std::max(1, (int)(W * rs)), std::max(1, (int)(H * rs)));
       glBindFramebuffer(GL_FRAMEBUFFER, scene.drawFbo());
@@ -596,9 +620,10 @@ int main(int argc, char** argv) {
     g_sunDepth = scaled && sunOn ? scene.depth : 0;
     g_sunW = scene.w;
     g_sunH = scene.h;
-    drawWorld(dt, E.playing && !E.uiOpen && !cut);
+    if (!skipWorld) drawWorld(dt, E.playing && !E.uiOpen && !cut);
+    if (freeze && !skipWorld) { frozenValid = true; frozenW = W; frozenH = H; frozenRs = rs; }
     if (scaled) {
-      scene.resolve(GL_COLOR_BUFFER_BIT);
+      if (!skipWorld) scene.resolve(GL_COLOR_BUFFER_BIT);
       glBindFramebuffer(GL_FRAMEBUFFER, 0);
       glViewport(0, 0, W, H);
       static const char* UPVS = "out vec2 v_uv;\nvoid main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); v_uv = p; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }\n";
@@ -638,6 +663,18 @@ void main(){
       if (sunOn) PROF(sunfx::composite(W, H));
     }
 
+    if (E.playing) {
+      static const char* VG_VS = "out vec2 v_uv;\nvoid main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); v_uv = p; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }\n";
+      static const char* VG_FS = "in vec2 v_uv;\nout vec4 o;\nvoid main(){ vec2 d = (v_uv - 0.5) * vec2(1.6, 1.0); float v = smoothstep(0.35, 1.05, length(d)); o = vec4(vec3(1.0 - v * 0.38), 1.0); }\n";
+      render::program("vignette", VG_VS, VG_FS);
+      glDisable(GL_DEPTH_TEST);
+      glEnable(GL_BLEND);
+      glBlendFunc(GL_DST_COLOR, GL_ZERO);
+      render::drawFullscreen();
+      glDisable(GL_BLEND);
+      glEnable(GL_DEPTH_TEST);
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    }
     float uiScale = std::max(1.0f, H / 820.0f) * g_settings.uiScale;
     ui::begin(W, H, uiScale);
     float pr = platform::pixelRatio();

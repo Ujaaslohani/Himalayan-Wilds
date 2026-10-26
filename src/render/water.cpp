@@ -72,7 +72,7 @@ void main(){
   col *= lightK;
   float alpha = mix(smoothstep(0.0, 0.05, depth) * 0.9, 0.97, max(ice, foam * 0.6));
   alpha = max(alpha, fres * 0.6 * smoothstep(0.0, 0.03, depth));
-  col = mix(col, u_fogCol.rgb, fogObject(v_wpos, v_depth));
+  col = mix(col, fogTint(v_wpos), fogObject(v_wpos, v_depth));
   fragColor = vec4(col, alpha);
 }
 )";
@@ -104,7 +104,7 @@ void main(){
   col = mix(col, vec3(1.0), smoothstep(0.75, 1.0, 1.0 - v_uv.y) * 0.8);
   float edge = smoothstep(0.0, 0.12, v_uv.x) * smoothstep(1.0, 0.88, v_uv.x);
   col *= clamp(0.18 + 0.82 * u_daylight, 0.0, 1.0);
-  col = mix(col, u_fogCol.rgb, fogObject(v_wpos, v_depth));
+  col = mix(col, fogTint(v_wpos), fogObject(v_wpos, v_depth));
   fragColor = vec4(col, (0.78 + 0.2 * s2) * edge * (1.0 - 0.4 * u_ice));
 }
 )";
@@ -122,7 +122,7 @@ void main(){
   float ring = vnoise(vec2(atan(p.y, p.x) * 4.0, r * 1.6 - u_clock * 1.8));
   float foam = smoothstep(0.35, 0.8, ring) * (1.0 - smoothstep(1.5, 5.5, r));
   vec3 col = vec3(0.97) * clamp(0.18 + 0.82 * u_daylight, 0.0, 1.0);
-  col = mix(col, u_fogCol.rgb, fogObject(v_wpos, v_depth));
+  col = mix(col, fogTint(v_wpos), fogObject(v_wpos, v_depth));
   fragColor = vec4(col, foam * (1.0 - smoothstep(4.5, 6.0, r)));
 }
 )";
@@ -184,6 +184,8 @@ Mesh uploadW(const std::vector<WVert>& v, const std::vector<uint32_t>& idx) {
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(idx.size() * 4), idx.data(), GL_STATIC_DRAW);
   m.indexType = GL_UNSIGNED_INT;
   m.count = (GLsizei)idx.size();
+  m.bmin = {1e9f, 1e9f, 1e9f}; m.bmax = {-1e9f, -1e9f, -1e9f};
+  for (auto& q : v) { m.bmin = {std::min(m.bmin.x, q.p[0]), std::min(m.bmin.y, q.p[1]), std::min(m.bmin.z, q.p[2])}; m.bmax = {std::max(m.bmax.x, q.p[0]), std::max(m.bmax.y, q.p[1]), std::max(m.bmax.z, q.p[2])}; }
   glBindVertexArray(0);
   gfx::addBufferBytes((long long)(d.verts.size() + idx.size() * 4));
   return m;
@@ -332,17 +334,21 @@ void draw() {
   g_river.draw();
   s.set1f("u_lake", 1);
   g_lakes.draw();
-  render::program("fall", FALL_VS, FALL_FS);
-  g_fall.draw();
-  Shader& p = render::program("pool", WATER_VS, POOL_FS);
-  p.set3("u_center", g_poolCenter);
-  g_pool.draw();
+  Vec3 fc = (g_fall.bmin + g_fall.bmax) * 0.5f;
+  float fr = (g_fall.bmax - g_fall.bmin).length() * 0.5f + 8;
+  if (render::sphereVisible(fc, fr) || render::sphereVisible(g_poolCenter, 10)) {
+    render::program("fall", FALL_VS, FALL_FS);
+    g_fall.draw();
+    Shader& p = render::program("pool", WATER_VS, POOL_FS);
+    p.set3("u_center", g_poolCenter);
+    g_pool.draw();
+  }
   glDepthMask(GL_TRUE);
   glDisable(GL_BLEND);
 }
 
 void drawParticles() {
-  if (render::cam.pos.distanceTo(g_poolCenter) > 400) return;
+  if (render::cam.pos.distanceTo(g_poolCenter) > 400 || !render::sphereVisible(g_poolCenter, 20)) return;
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glDepthMask(GL_FALSE);

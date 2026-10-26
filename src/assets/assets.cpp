@@ -592,7 +592,7 @@ void loadAll(const std::vector<AssetRequest>& reqs) {
           if (n && std::getenv("HW_TRIM")) std::printf("trim %s: %d cards trimmed (%d empty) area %.0f%%\n", c.req.file.c_str(), n, dropped, 100.0 * g_trimA / std::max(1e-9, g_trimQ));
         }
       }
-      if (lm.cutout && c.req.layer == "tree" && !std::getenv("HW_NOTHIN")) thinCanopy(p.data, 0.3f, 0.7f, 1.18f);
+      if (lm.cutout && c.req.layer == "tree" && c.req.file.find("Pine") == std::string::npos && !std::getenv("HW_NOTHIN")) thinCanopy(p.data, 0.3f, 0.7f, 1.18f);
       ap.mesh = uploadMesh(p.data);
       if (c.req.layer == "tree" || c.req.layer == "rock" || c.req.layer == "under") {
         MeshData ld = makeLod(lodSrc, lm.cutout, c.req.layer == "under");

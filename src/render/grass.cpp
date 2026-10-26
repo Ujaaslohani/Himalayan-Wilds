@@ -61,7 +61,7 @@ void main(){
   vec3 n = normalize(vec3(0.0, 1.0, 0.0) + (u_sunDir.xyz * vec3(1.0, 0.0, 1.0)) * 0.35);
   float sh = shadowAt(t > 0.5 ? wpos : vec3(p.x, base + 0.3, p.y), vec3(0.0, 1.0, 0.0));
   vec3 c = outColor(lambert(alb, n, sh) * (0.7 + 0.3 * t));
-  v_col = mix(c, u_fogCol.rgb, fogGround(wpos, -vp.z));
+  v_col = mix(c, fogTint(wpos), fogGround(wpos, -vp.z));
   gl_Position = u_proj * vp;
 }
 )";
@@ -148,7 +148,7 @@ void main(){
   vec3 n = vec3(0.0, 1.0, 0.0);
   float sh = shadowAt(v_wpos, n);
   vec3 c = outColor(lambert(alb, n, sh));
-  c = mix(c, u_fogCol.rgb, fogGround(v_wpos, v_depth));
+  c = mix(c, fogTint(v_wpos), fogGround(v_wpos, v_depth));
   fragColor = vec4(c, 1.0);
 }
 )";
@@ -160,7 +160,7 @@ int g_lastBlades = 0;
 struct Ring { float spacing, rIn, rOut, fade, width, height, density; };
 
 std::vector<uint8_t> g_densCpu;
-const int GT = 48;
+const int GT = 64;
 struct GTile { GLuint vbo = 0; int n = 0; uint64_t used = 0; size_t bytes = 0; };
 std::unordered_map<uint64_t, GTile> g_tiles;
 size_t g_tileBytes = 0;

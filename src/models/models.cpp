@@ -8,6 +8,7 @@ using V = Vec3;
 const V Z0{0, 0, 0};
 
 void eyes(Shape& s, const char* color, float x, float y, float z, float r) {
+  z += r * 0.3f;
   s.ball("#0c0a09", {x, y, z}, {r * 1.25f, r * 1.1f, r * 0.7f}, Z0, 0)
       .ball("#0c0a09", {-x, y, z}, {r * 1.25f, r * 1.1f, r * 0.7f}, Z0, 0)
       .ball(color, {x, y, z + r * 0.35f}, {r, r * 0.9f, r * 0.5f}, Z0, 0)
@@ -282,7 +283,7 @@ SpeciesBuild leopard() {
       .ball(sp, {-0.05f, 0.16f, 0.23f}, {0.01f, 0.01f, 0.01f}, Z0, 0)
       .ball(sp, {0.1f, 0.1f, 0.2f}, {0.012f, 0.012f, 0.012f}, Z0, 0)
       .ball(sp, {-0.1f, 0.1f, 0.2f}, {0.012f, 0.012f, 0.012f}, Z0, 0);
-  eyes(m.head, "#9bb03a", 0.055f, 0.12f, 0.25f, 0.02f);
+  eyes(m.head, "#d9b23a", 0.058f, 0.125f, 0.272f, 0.024f);
   m.leg.rod(y1, {0, 0.04f, 0}, {0, -0.26f, 0.02f}, 0.065f, 0.045f, 6)
       .rod(y1, {0, -0.26f, 0.02f}, {0, -0.48f, 0}, 0.045f, 0.04f, 6)
       .ball(w, {0, -0.52f, 0.04f}, {0.055f, 0.035f, 0.07f})
@@ -408,6 +409,12 @@ Shape buildingShape(const std::string& type) {
     b.box(WOOD2, {0, deck - 0.3f, -W / 2 + 0.2f}, {L, 0.25f, 0.25f});
     for (float x : {-5.5f, 5.5f}) b.box(GREY1, {x, deck - 2.4f, 0}, {1.4f, 4.4f, 3.4f});
     for (float x : {-L / 2 + 0.6f, L / 2 - 0.6f}) b.box(GREY2, {x, deck - 1.2f, 0}, {1.6f, 2.2f, 3.8f});
+    // approach ramps: buried on the high bank, a walkable slope on the low bank
+    const float RL = BRIDGE_RAMP, RD = BRIDGE_RAMP_DROP, ang = std::atan2(RD, RL), hyp = std::sqrt(RL * RL + RD * RD);
+    for (int s = -1; s <= 1; s += 2) {
+      b.box("#8a5a34", {s * (L / 2 + RL / 2), deck - RD / 2 - 0.12f, 0}, {hyp, 0.24f, W - 0.2f}, {0, 0, -s * ang});
+      b.box(GREY2, {s * (L / 2 + RL * 0.35f), deck - RD * 0.35f - 0.9f, 0}, {RL * 0.7f, 1.6f, W - 0.4f}, {0, 0, -s * ang});
+    }
     for (int i = 0; i <= 11; i++) {
       float x = -L / 2 + i * (L / 11);
       for (int s = -1; s <= 1; s += 2) b.rod(WOOD2, {x, deck, s * (W / 2 - 0.1f)}, {x, deck + 1.0f, s * (W / 2 - 0.1f)}, 0.06f, 0.05f);

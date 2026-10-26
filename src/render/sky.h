@@ -14,6 +14,7 @@ bool shadowNeedsUpdate();
 bool shadowStaticDirty();
 void clearStaticShadow();
 void invalidateStaticShadow();
+void onStaticRebuild();
 Color horizon();
 void shutdown();
 }

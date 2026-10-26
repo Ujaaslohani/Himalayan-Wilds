@@ -40,12 +40,12 @@ vec3 groundShade(vec3 sc, vec3 wp, float ny, float road){
   float sSteep = 1.0 - smoothstep(0.42, 0.8, ny);
   if (sSteep > 0.01) {
     if (sNear) {
-      float sSt = vnoise(vec2(wp.y * 0.85 + vnoise(wp.xz * 0.12) * 3.0, (wp.x + wp.z) * 0.07));
-      float sCr = vnoise(vec2((wp.x - wp.z) * 0.55, wp.y * 0.22));
-      sc *= mix(1.0, (0.7 + 0.42 * sSt) * (0.78 + 0.3 * smoothstep(0.2, 0.65, sCr)), sSteep);
+      float sSt = vnoise(wp.xz * 0.35 + vec2(wp.y * 0.21, -wp.y * 0.17));
+      float sCr = vnoise(wp.xz * 0.9 + wp.y * 0.3);
+      sc *= mix(1.0, (0.86 + 0.2 * sSt) * (0.86 + 0.2 * smoothstep(0.2, 0.65, sCr)), sSteep * smoothstep(60.0, 120.0, wp.y));
     } else {
-      float sSt = 0.5 + 0.5 * sin(wp.y * 0.85 + sN2 * 4.0);
-      sc *= mix(1.0, (0.7 + 0.42 * sSt) * 0.93, sSteep);
+      float sSt = vnoise(wp.xz * 0.02 + vec2(wp.y * 0.013, -wp.y * 0.017));
+      sc *= mix(1.0, (0.88 + 0.18 * sSt) * 0.96, sSteep * smoothstep(70.0, 130.0, wp.y));
     }
   }
   float sFlat = smoothstep(0.68, 0.92, ny);
@@ -55,6 +55,24 @@ vec3 groundShade(vec3 sc, vec3 wp, float ny, float road){
   vec3 sCol = mix(vec3(0.72, 0.77, 0.85), vec3(0.88, 0.91, 0.96), sPatch) * (0.92 + 0.08 * sN1);
   sc = mix(sc, sCol, sAmt);
   return sc;
+}
+float mountainDetail(vec3 wp, float ny){
+  float steep = 1.0 - smoothstep(0.45, 0.85, ny);
+#ifndef GROUND_BAKE
+  vec3 big = texture(u_ptexA, vec2(wp.x + wp.z * 0.6, wp.y * 1.3) * 0.012).rgb * 2.0;
+  float bl = dot(big, vec3(0.333));
+#else
+  float bl = 1.0;
+#endif
+  vec2 sp = vec2(wp.x + wp.z * 0.7, wp.y) + vec2(vnoise(wp.xz * 0.006) * 90.0, vnoise(wp.zx * 0.008 + 3.0) * 40.0);
+#ifndef GROUND_BAKE
+  sp *= mix(1.0, 0.2, smoothstep(150.0, 700.0, length(wp - u_camPos)));
+#endif
+  float rb = vnoise(sp * vec2(0.03, 0.05)) * 0.5 + vnoise(wp.xz * 0.011 + 4.0) * 0.3 + vnoise(sp * 0.13 + 2.0) * 0.2;
+  float gul = smoothstep(0.5, 0.85, vnoise(vec2(sp.x * 0.14, sp.y * 0.012)));
+  float rid = smoothstep(0.62, 0.92, vnoise(vec2(sp.x * 0.09, sp.y * 0.02) + 7.0));
+  float hi = smoothstep(80.0, 150.0, wp.y);
+  return mix(1.0, mix(0.6, 1.3, rb) * (1.0 - 0.4 * gul) * (1.0 + 0.28 * rid) * mix(1.0, bl, 0.7), (0.3 + 0.7 * steep) * mix(0.3, 1.0, hi));
 }
 vec3 groundBump(vec3 n, vec3 wp, float road){
   float sK = (0.42 + 0.35 * road) * (1.0 - smoothstep(25.0, 70.0, length(wp - u_camPos)));
@@ -100,6 +118,33 @@ void main(){
   vec3 n = normalize(vec3(hl - hr, 2.0 * u_grid.y, hd - hu));
   vec4 t = texture(u_color, (g + 0.5) / u_grid.z);
   vec3 sc = groundShade(srgbToLinear(t.rgb), vec3(w.x, h, w.y), n.y, t.a);
+  // baked horizon ambient occlusion (valleys, gullies, cliff bases)
+  float occ = 0.0;
+  for (int a = 0; a < 8; a++) {
+    float ang = float(a) * 0.785398 + 0.39;
+    vec2 dir = vec2(cos(ang), sin(ang));
+    float hz = 0.0;
+    for (int k = 0; k < 4; k++) {
+      float dm = 3.0 * pow(2.6, float(k));
+      float hs = heightAt(g + dir * (dm / u_grid.y));
+      hz = max(hz, (hs - h) / dm);
+    }
+    occ += clamp(hz, 0.0, 1.5);
+  }
+  float ao = 1.0 - clamp(occ / 8.0 * 0.85, 0.0, 0.6);
+  // cavity: concave creases darker, convex ridges lighter
+  float lap = (hl + hr + hd + hu - 4.0 * hAt(ci)) / u_grid.y;
+  float cav = clamp(1.0 - lap * 0.35, 0.72, 1.18);
+  float steep = 1.0 - smoothstep(0.45, 0.85, n.y);
+  // rock macro detail on steep ground: blotches, cracks, weathering streaks
+  vec3 wp3 = vec3(w.x, h, w.y);
+  float rb = fbm4(vec2(wp3.x + wp3.z, wp3.y * 1.7) * 0.09) * 0.6 + fbm3(wp3.xz * 0.23) * 0.4;
+  float rc = 1.0 - abs(vnoise(vec2((wp3.x - wp3.z) * 0.3, wp3.y * 0.45)) * 2.0 - 1.0);
+  float streak = vnoise(vec2((wp3.x + wp3.z) * 0.8, wp3.y * 0.06));
+  vec3 rockT = mix(vec3(0.72, 0.69, 0.64), vec3(1.22, 1.15, 1.03), smoothstep(0.25, 0.75, rb)) * (1.0 - 0.45 * smoothstep(0.86, 0.97, rc)) * mix(0.9, 1.08, streak);
+  sc *= mix(vec3(1.0), rockT, steep * 0.85 * max(smoothstep(70.0, 125.0, h), 1.0 - smoothstep(0.42, 0.66, n.y)));
+  sc *= ao * mix(1.0, cav, 0.8);
+  sc = mix(sc, sc * vec3(0.9, 1.12, 0.82), (1.0 - smoothstep(70.0, 130.0, h)) * 0.6 * smoothstep(0.5, 0.75, n.y));
   fragColor = vec4(sqrt(max(sc, vec3(0.0))), t.a);
 }
 )";
@@ -148,10 +193,10 @@ void main(){
   v_farCol = vec3(0.0);
   if (d > 40.0) {
     vec4 t = textureLod(u_bake, cell / (u_grid.z - 1.0), clamp(log2(d / 30.0), 0.0, 6.0));
-    vec3 sc = t.rgb * t.rgb;
+    vec3 sc = t.rgb * t.rgb * mountainDetail(v_wpos, v_nrm.y);
     float sh = shadowAt(v_wpos, v_nrm);
     vec3 c = outColor(lambert(sc, v_nrm, sh));
-    v_farCol = mix(c, u_fogCol.rgb, fogGround(v_wpos, v_depth));
+    v_farCol = mix(c, fogTint(v_wpos), fogGround(v_wpos, v_depth));
   }
   gl_Position = u_proj * vp;
 }
@@ -179,9 +224,30 @@ void main(){
     sc = groundShade(srgbToLinear(t.rgb), v_wpos, n.y, t.a);
   }
   vec3 nb = groundBump(n, v_wpos, road);
+  // snow surface: wind-carved ripples and soft blue shade in hollows
+  {
+    float lum = dot(sc, vec3(0.3, 0.59, 0.11));
+    float snowy = smoothstep(0.42, 0.62, lum) * (1.0 - smoothstep(0.06, 0.16, max(sc.r, max(sc.g, sc.b)) - min(sc.r, min(sc.g, sc.b)))) * (1.0 - smoothstep(55.0, 85.0, fd));
+    if (snowy > 0.01) {
+      vec2 q = v_wpos.xz;
+      float rip = vnoise(vec2(q.x * 0.35 + vnoise(q * 0.08) * 3.0, q.y * 1.4));
+      float drift = vnoise(q * 0.05);
+      float hol = clamp(rip * 0.6 + (1.0 - drift) * 0.4, 0.0, 1.0);
+      sc = mix(sc, sc * mix(vec3(1.03, 1.03, 1.04), vec3(0.84, 0.9, 1.0), hol), snowy);
+      vec2 g = vec2(vnoise(vec2((q.x + 0.4) * 0.35, q.y * 1.4)) - vnoise(vec2((q.x - 0.4) * 0.35, q.y * 1.4)), vnoise(vec2(q.x * 0.35, (q.y + 0.3) * 1.4)) - vnoise(vec2(q.x * 0.35, (q.y - 0.3) * 1.4)));
+      nb = normalize(nb + vec3(-g.x, 0.0, -g.y) * 0.35 * snowy);
+    }
+  }
+  float steepN = (1.0 - smoothstep(0.4, 0.82, n.y)) * (1.0 - smoothstep(55.0, 85.0, fd)) * mix(0.35, 1.0, max(smoothstep(70.0, 125.0, v_wpos.y), 1.0 - smoothstep(0.4, 0.62, n.y)));
+  if (steepN > 0.01) {
+    vec3 nr = nb;
+    vec3 alb = ptexRock(v_wpos, nr, 0.16, 1.0);
+    sc *= mix(vec3(1.0), alb, steepN);
+    nb = normalize(mix(nb, nr, steepN));
+  }
   float sh = shadowAt(v_wpos, n);
   vec3 c = outColor(lambert(sc, nb, sh));
-  c = mix(c, u_fogCol.rgb, fogGround(v_wpos, v_depth));
+  c = mix(c, fogTint(v_wpos), fogGround(v_wpos, v_depth));
   if (fd > 70.0) c = mix(c, v_farCol, smoothstep(70.0, 85.0, fd));
   fragColor = vec4(c, 1.0);
 }
@@ -214,10 +280,31 @@ out vec4 fragColor;
 void main(){
   vec3 n = normalize(v_nrm);
   vec3 sc = groundShade(v_col, v_wpos, n.y, 0.0);
+  sc *= mountainDetail(v_wpos, n.y);
   vec3 nb = groundBump(n, v_wpos, 0.0);
+  if (v_wpos.y > 120.0) {
+    // alpine look: snow clings to gentler faces above the snowline, steep faces show streaked rock
+    vec2 sp = vec2(v_wpos.x + v_wpos.z * 0.6, v_wpos.y);
+    float gul = vnoise(vec2(sp.x * 0.03, sp.y * 0.004));
+    float line = 210.0 + vnoise(v_wpos.xz * 0.004) * 70.0;
+    float alt = smoothstep(line - 40.0, line + 30.0, v_wpos.y + gul * 30.0);
+    float slope = smoothstep(0.42, 0.72, n.y + (gul - 0.5) * 0.45 + vnoise(sp * 0.02) * 0.2);
+    float snow = alt * slope;
+    vec3 rockc = mix(vec3(0.16, 0.15, 0.14), vec3(0.34, 0.31, 0.28), vnoise(sp * vec2(0.02, 0.05))) * mix(0.75, 1.15, gul);
+    vec3 big = texture(u_ptexA, sp * 0.004).rgb * 2.0;
+    rockc *= mix(vec3(1.0), big, 0.3);
+    float rocky = smoothstep(165.0, 230.0, v_wpos.y);
+    sc = mix(sc, rockc, rocky * (1.0 - snow) * 0.85);
+    sc = mix(sc, vec3(0.86, 0.89, 0.93) * mix(0.92, 1.04, gul), snow);
+  }
   float sh = shadowAt(v_wpos, n);
-  vec3 c = outColor(lambert(sc, nb, sh));
-  c = mix(c, u_fogCol.rgb, fogGround(v_wpos, v_depth));
+  vec3 lit = lambert(sc, nb, sh);
+  // shaded faces pick up blue sky light, sunlit faces stay warm: gives the peaks depth
+  float facing = max(dot(nb, u_sunDir.xyz), 0.0);
+  lit += sc * u_hemiSky.rgb * 0.35 * (1.0 - facing) * smoothstep(100.0, 250.0, v_wpos.y);
+  vec3 c = outColor(lit);
+  float fg = fogGround(v_wpos, v_depth) * mix(1.0, 0.6, smoothstep(160.0, 380.0, v_wpos.y));
+  c = mix(c, fogTint(v_wpos), fg);
   fragColor = vec4(c, 1.0);
 }
 )";

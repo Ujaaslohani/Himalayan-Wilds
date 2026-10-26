@@ -18,6 +18,7 @@ void markDirty();
 void drawOpaque();
 void drawShadow();
 void drawBlobs();
+bool nearestRock(float x, float z, float& ox, float& oz, float& os);
 void resolveTreeCollision(float& x, float& z, float radius = 0.35f);
 void nearTrees(float x, float z, float r, std::vector<float>& out, int max);
 bool treeTrunkAt(float x, float y, float z);

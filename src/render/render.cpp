@@ -16,7 +16,7 @@ int render::frameNo = 0;
 
 namespace {
 GLuint g_ubo = 0;
-GLuint g_shadowFbo = 0, g_shadowTex = 0, g_staticFbo = 0, g_staticTex = 0;
+GLuint g_shadowFbo = 0, g_shadowTex = 0, g_staticFbo = 0, g_staticTex = 0, g_prevFbo = 0, g_prevTex = 0;
 int g_shadowSize = 0;
 GLuint g_emptyVao = 0, g_quadVao = 0, g_quadVbo = 0;
 std::unordered_map<uint32_t, std::unique_ptr<Shader>> g_objects;
@@ -122,6 +122,13 @@ void uploadFrame() {
 GLuint quadVao() { return g_quadVao; }
 GLuint quadVaoBuffer() { return g_quadVbo; }
 
+bool sphereVisible(const Vec3& p, float r) {
+  Vec4 c = cam.viewProj.transform4(p, 1.0f);
+  if (c.w < -r) return false;
+  float m = r * 2.0f + 0.5f;
+  return std::fabs(c.x) <= c.w + m && std::fabs(c.y) <= c.w + m;
+}
+
 void drawFullscreen() {
   glBindVertexArray(g_emptyVao);
   glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -162,6 +169,7 @@ Shader& object(VFmt fmt, InstMode inst, SeasonKind kind, int flags) {
     if (flags & OF_SOFT) def += "#define SOFT\n";
     if (flags & OF_CAPTURE) def += "#define CAPTURE\n";
     if (flags & OF_DEPTH) def += "#define DEPTH_ONLY\n";
+    if (flags & OF_FUR) def += "#define FUR\n";
     if (sp) def += "#define SHADOW_PASS\n";
     auto sh = std::make_unique<Shader>();
     std::string head = commonHeader();
@@ -170,6 +178,11 @@ Shader& object(VFmt fmt, InstMode inst, SeasonKind kind, int flags) {
     sh->set1i("u_shadowMap", 7);
     sh->set1i("u_noiseTex", 6);
     sh->set1i("u_tex", 0);
+    sh->set1i("u_ptexA", 8);
+    sh->set1i("u_ptexN", 9);
+    sh->set1i("u_ptexW", 10);
+    sh->set1i("u_shadowPrev", 11);
+  sh->set1i("u_shadowPrev", 11);
     s = sh.get();
     g_objects[key] = std::move(sh);
   } else s = it->second.get();
@@ -218,6 +231,11 @@ Shader& program(const std::string& name, const char* vs, const char* fs, const s
   if (!compileShader(*sh, head + vs, head + fs, defines)) std::fprintf(stderr, "program %s failed\n", name.c_str());
   sh->use();
   sh->set1i("u_shadowMap", 7);
+  sh->set1i("u_noiseTex", 6);
+  sh->set1i("u_ptexA", 8);
+  sh->set1i("u_ptexN", 9);
+  sh->set1i("u_ptexW", 10);
+  sh->set1i("u_shadowPrev", 11);
   Shader& r = *sh;
   g_programs[name] = std::move(sh);
   return r;
@@ -250,10 +268,16 @@ void beginShadowPass(const Mat4& lightVP, int size, int target) {
   if (size != g_shadowSize) {
     makeDepth(g_shadowTex, g_shadowFbo, size, true);
     makeDepth(g_staticTex, g_staticFbo, size, false);
+    makeDepth(g_prevTex, g_prevFbo, size, true);
     g_shadowSize = size;
   }
   (void)lightVP;
   glGetIntegerv(GL_VIEWPORT, g_vp);
+  if (target == 1 && g_prevFbo) {
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, g_shadowFbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_prevFbo);
+    glBlitFramebuffer(0, 0, size, size, 0, 0, size, size, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+  }
   if (target == 2) {
     glBindFramebuffer(GL_READ_FRAMEBUFFER, g_staticFbo);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_shadowFbo);
@@ -277,7 +301,170 @@ void endShadowPass() {
   shadowPass = false;
 }
 
+static GLuint g_ptexA = 0, g_ptexN = 0, g_ptexW = 0;
+static const char* PT_VS = "out vec2 v_uv;\nvoid main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); v_uv = p; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }\n";
+// Expensive, tileable rock generator: fractured plates (periodic Voronoi), domain-warped fbm, ridged erosion, strata, lichen.
+static const char* PT_GEN = R"(in vec2 v_uv;
+out vec4 o;
+float hp(vec2 i, float P){ i = mod(i, P); return fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5453); }
+vec2 hp2(vec2 i, float P){ i = mod(i, P); return fract(sin(vec2(dot(i, vec2(127.1, 311.7)), dot(i, vec2(269.5, 183.3)))) * 43758.5453); }
+float vn(vec2 p, float P){ vec2 i = floor(p), f = fract(p); vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  return mix(mix(hp(i, P), hp(i + vec2(1, 0), P), u.x), mix(hp(i + vec2(0, 1), P), hp(i + vec2(1, 1), P), u.x), u.y); }
+float fbm(vec2 p, float P, int oct){ float s = 0.0, a = 0.5; for (int i = 0; i < 8; i++) { if (i >= oct) break; s += a * vn(p, P); p *= 2.0; P *= 2.0; a *= 0.5; } return s; }
+float ridged(vec2 p, float P, int oct){ float s = 0.0, a = 0.5; for (int i = 0; i < 8; i++) { if (i >= oct) break; s += a * (1.0 - abs(vn(p, P) * 2.0 - 1.0)); p *= 2.0; P *= 2.0; a *= 0.5; } return s; }
+vec3 vor(vec2 p, float P){ vec2 i = floor(p), f = fract(p); float d1 = 9.0, d2 = 9.0; float id = 0.0;
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) { vec2 g = vec2(x, y); vec2 c = g + hp2(i + g, P) * 0.85 + 0.075; float d = length(c - f);
+    if (d < d1) { d2 = d1; d1 = d; id = hp(i + g + 17.0, P); } else if (d < d2) d2 = d; }
+  return vec3(d1, d2, id); }
+void main(){
+  vec2 p = v_uv;
+  vec2 warp = vec2(fbm(p * 4.0, 4.0, 5), fbm(p * 4.0 + 5.2, 4.0, 5)) - 0.5;
+  vec3 v1 = vor(p * 6.0 + warp * 1.4, 6.0);
+  vec3 v2 = vor(p * 17.0 + warp * 2.5, 17.0);
+  float crack1 = smoothstep(0.0, 0.07, v1.y - v1.x);
+  float crack2 = smoothstep(0.0, 0.045, v2.y - v2.x);
+  float plates = v1.z;
+  float grain = fbm(p * 32.0, 32.0, 6);
+  float er = ridged(p * 8.0 + warp, 8.0, 5);
+  float strata = 0.5 + 0.5 * sin((p.y + warp.y * 0.25 + fbm(p * 2.0, 2.0, 3) * 0.3) * 6.2831853 * 9.0);
+  float h = plates * 0.32 + er * 0.28 + grain * 0.22 + strata * 0.06;
+  h *= mix(0.25, 1.0, crack1) * mix(0.6, 1.0, crack2);
+  float hue = fbm(p * 3.0 + 9.0, 3.0, 4);
+  vec3 a = mix(vec3(0.44, 0.42, 0.40), vec3(0.58, 0.52, 0.45), hue);
+  a = mix(a, vec3(0.62, 0.6, 0.57), smoothstep(0.55, 0.85, plates) * 0.5);
+  a *= mix(0.78, 1.18, grain) * mix(0.9, 1.06, strata);
+  a *= mix(0.45, 1.0, crack1) * mix(0.72, 1.0, crack2);
+  a *= mix(0.85, 1.12, smoothstep(0.3, 0.8, h));
+  float lich = smoothstep(0.7, 0.76, fbm(p * 24.0 + 3.0, 24.0, 4)) * smoothstep(0.4, 0.7, h);
+  a = mix(a, vec3(0.55, 0.55, 0.32), lich * 0.6);
+  float spk = step(0.985, hp(floor(p * 512.0), 512.0));
+  a = mix(a, vec3(0.78), spk * 0.5);
+  o = vec4(clamp(a, 0.0, 1.0), clamp(h, 0.0, 1.0));
+}
+)";
+static const char* PT_NRM = R"(in vec2 v_uv;
+uniform sampler2D u_src;
+uniform float u_px;
+out vec4 o;
+float H(vec2 uv){ return texture(u_src, fract(uv)).a; }
+void main(){
+  float l = H(v_uv - vec2(u_px, 0)), r = H(v_uv + vec2(u_px, 0)), d = H(v_uv - vec2(0, u_px)), u = H(v_uv + vec2(0, u_px));
+  float c = H(v_uv);
+  vec2 g = vec2(l - r, d - u) * 6.0;
+  float blur = 0.0;
+  for (int k = 0; k < 8; k++) { float a = float(k) * 0.785398; blur += H(v_uv + vec2(cos(a), sin(a)) * u_px * 6.0); }
+  blur /= 8.0;
+  float cav = clamp(0.62 + (c - blur) * 4.0, 0.0, 1.0);
+  o = vec4(clamp(g * 0.5 + 0.5, 0.0, 1.0), cav, 1.0);
+}
+)";
+// Wood: stretched grain along u, growth rings, knots, plank seams, weathering. rgb = albedo mult*0.5, a = height.
+static const char* PT_WOOD = R"(in vec2 v_uv;
+out vec4 o;
+float hp(vec2 i, float P){ i = mod(i, P); return fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5453); }
+float vn(vec2 p, vec2 P){ vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+  vec2 a = mod(i, P), b = mod(i + vec2(1, 0), P), c = mod(i + vec2(0, 1), P), d = mod(i + 1.0, P);
+  return mix(mix(hp(a, 1e4), hp(b, 1e4), u.x), mix(hp(c, 1e4), hp(d, 1e4), u.x), u.y); }
+float fbm(vec2 p, vec2 P){ float s = 0.0, a = 0.5; for (int i = 0; i < 6; i++) { s += a * vn(p, P); p *= 2.0; P *= 2.0; a *= 0.5; } return s; }
+void main(){
+  vec2 p = v_uv;
+  float plank = floor(p.y * 6.0);
+  float py = fract(p.y * 6.0);
+  float seam = smoothstep(0.0, 0.035, py) * smoothstep(1.0, 0.965, py);
+  float off = hp(vec2(plank, 3.0), 64.0);
+  vec2 q = vec2(p.x + off, p.y);
+  float w = fbm(q * vec2(4.0, 24.0), vec2(4.0, 24.0));
+  float rings = 0.5 + 0.5 * sin((py * 7.0 + w * 3.5 + off * 10.0) * 6.2831853);
+  float fibre = fbm(q * vec2(6.0, 160.0), vec2(6.0, 160.0));
+  vec2 kc = vec2(hp(vec2(plank, 7.0), 64.0), 0.5);
+  float kd = length((vec2(fract(q.x * 2.0), py) - kc) * vec2(2.0, 1.0));
+  float knot = smoothstep(0.12, 0.0, kd) * step(0.55, hp(vec2(plank, 11.0), 64.0));
+  float tone = mix(0.82, 1.12, hp(vec2(plank, 5.0), 64.0));
+  float m = tone * mix(0.8, 1.1, rings) * mix(0.85, 1.12, fibre) * (1.0 - 0.55 * knot) * mix(0.45, 1.0, seam);
+  float weather = fbm(p * vec2(3.0, 3.0) + 9.0, vec2(3.0)) ;
+  m *= mix(0.92, 1.08, weather);
+  float h = clamp(fibre * 0.4 + rings * 0.2 + 0.4, 0.0, 1.0) * mix(0.2, 1.0, seam);
+  o = vec4(m * 0.5, h, m * 0.5, 1.0);
+}
+)";
+static void ptexEnsure() {
+  if (g_ptexA) return;
+  const int N = 1024;
+  auto mk = [&](GLuint& t) {
+    glGenTextures(1, &t);
+    glBindTexture(GL_TEXTURE_2D, t);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, N, N, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    if (gfx::maxAniso() > 1.0f) glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, std::min(4.0f, gfx::maxAniso()));
+    gfx::addBufferBytes((long long)N * N * 4 * 4 / 3);
+  };
+  mk(g_ptexA);
+  mk(g_ptexN);
+  mk(g_ptexW);
+  GLint vp[4], prev = 0;
+  glGetIntegerv(GL_VIEWPORT, vp);
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev);
+  GLuint fbo;
+  glGenFramebuffers(1, &fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_BLEND);
+  glViewport(0, 0, N, N);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_ptexA, 0);
+  program("ptexgen", PT_VS, PT_GEN);
+  drawFullscreen();
+  glBindTexture(GL_TEXTURE_2D, g_ptexA);
+  glGenerateMipmap(GL_TEXTURE_2D);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_ptexW, 0);
+  program("ptexwood", PT_VS, PT_WOOD);
+  drawFullscreen();
+  glBindTexture(GL_TEXTURE_2D, g_ptexW);
+  glGenerateMipmap(GL_TEXTURE_2D);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_ptexN, 0);
+  Shader& n = program("ptexnrm", PT_VS, PT_NRM);
+  n.set1i("u_src", 0);
+  n.set1f("u_px", 1.0f / N);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, g_ptexA);
+  drawFullscreen();
+  glBindTexture(GL_TEXTURE_2D, g_ptexN);
+  glGenerateMipmap(GL_TEXTURE_2D);
+  glBindFramebuffer(GL_FRAMEBUFFER, prev);
+  glDeleteFramebuffers(1, &fbo);
+  // compress colour textures to DXT1 (0.5 byte/px); normal/cavity texture stays RGBA8 for clean bumps
+  auto squash = [&](GLuint& t) {
+    if (!gfx::hasS3TC()) return;
+    std::vector<uint8_t> px((size_t)N * N * 4);
+    glBindTexture(GL_TEXTURE_2D, t);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    for (size_t i = 3; i < px.size(); i += 4) px[i] = 255;
+    TexLevels L = prepareTexture(px.data(), N, N, true, true, false);
+    if (!L.bc) return;
+    Texture nt = uploadPrepared(L, true);
+    if (gfx::maxAniso() > 1.0f) glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, std::min(4.0f, gfx::maxAniso()));
+    glDeleteTextures(1, &t);
+    gfx::addBufferBytes(-(long long)N * N * 4 * 4 / 3);
+    t = nt.id;
+  };
+  squash(g_ptexA);
+  squash(g_ptexW);
+  glViewport(vp[0], vp[1], vp[2], vp[3]);
+  glEnable(GL_DEPTH_TEST);
+}
+
 void bindShadow() {
+  ptexEnsure();
+  glActiveTexture(GL_TEXTURE8);
+  glBindTexture(GL_TEXTURE_2D, g_ptexA);
+  glActiveTexture(GL_TEXTURE9);
+  glBindTexture(GL_TEXTURE_2D, g_ptexN);
+  glActiveTexture(GL_TEXTURE10);
+  glBindTexture(GL_TEXTURE_2D, g_ptexW);
+  glActiveTexture(GL_TEXTURE11);
+  glBindTexture(GL_TEXTURE_2D, g_prevTex);
   glActiveTexture(GL_TEXTURE7);
   glBindTexture(GL_TEXTURE_2D, g_shadowTex);
   glActiveTexture(GL_TEXTURE0);

@@ -19,6 +19,8 @@ layout(std140) uniform Frame {
   vec4 u_season2;
   vec4 u_wind;
   vec4 u_misc;
+  mat4 u_shadowMatPrev;
+  vec4 u_shadowMix;
 };
 #define u_camPos u_cam.xyz
 #define u_clock u_cam.w
@@ -52,6 +54,37 @@ uniform sampler2D u_noiseTex;
 float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return textureLod(u_noiseTex, (i + f + 0.5) * (1.0 / 256.0), 0.0).r; }
 float fbm4(vec2 p){ float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { s += a * vnoise(p); p = p * 2.03 + vec2(1.7, 9.2); a *= 0.5; } return s + 0.03; }
+uniform sampler2D u_ptexA;
+uniform sampler2D u_ptexN;
+uniform sampler2D u_ptexW;
+// wood grain, triplanar; grain runs vertically on walls/posts and along x on horizontal faces
+vec3 ptexWood(vec3 wp, inout vec3 n, float scale, float bumpK){
+  vec3 w = pow(abs(n), vec3(6.0)); w /= (w.x + w.y + w.z);
+  vec2 ux = wp.yz * scale, uy = wp.xz * scale, uz = wp.yx * scale;
+  vec4 ax = texture(u_ptexW, ux), ay = texture(u_ptexW, uy), az = texture(u_ptexW, uz);
+  vec3 alb = vec3(ax.r * w.x + ay.r * w.y + az.r * w.z) * 2.0;
+  const float e = 1.0 / 512.0;
+  vec2 gx = vec2(texture(u_ptexW, ux + vec2(e, 0.0)).g - ax.g, texture(u_ptexW, ux + vec2(0.0, e)).g - ax.g);
+  vec2 gy = vec2(texture(u_ptexW, uy + vec2(e, 0.0)).g - ay.g, texture(u_ptexW, uy + vec2(0.0, e)).g - ay.g);
+  vec2 gz = vec2(texture(u_ptexW, uz + vec2(e, 0.0)).g - az.g, texture(u_ptexW, uz + vec2(0.0, e)).g - az.g);
+  vec3 dn = vec3(0.0, gx.x, gx.y) * w.x + vec3(gy.x, 0.0, gy.y) * w.y + vec3(gz.y, gz.x, 0.0) * w.z;
+  n = normalize(n - dn * bumpK * 8.0);
+  return alb;
+}
+// Pre-baked procedural rock material (albedo multiplier*0.5 in rgb, height in a; normal xy + cavity in b).
+// Triplanar: returns albedo multiplier, perturbs n.
+vec3 ptexRock(vec3 wp, inout vec3 n, float scale, float bumpK){
+  vec3 w = pow(abs(n), vec3(4.0)); w /= (w.x + w.y + w.z);
+  vec2 ux = wp.zy * scale, uy = wp.xz * scale + 0.37, uz = wp.xy * scale + 0.71;
+  vec4 ax = texture(u_ptexA, ux), ay = texture(u_ptexA, uy), az = texture(u_ptexA, uz);
+  vec4 bx = texture(u_ptexN, ux), by = texture(u_ptexN, uy), bz = texture(u_ptexN, uz);
+  vec3 alb = (ax.rgb * w.x + ay.rgb * w.y + az.rgb * w.z) * 2.0;
+  float cav = bx.b * w.x + by.b * w.y + bz.b * w.z;
+  vec2 tx = bx.xy * 2.0 - 1.0, ty = by.xy * 2.0 - 1.0, tz = bz.xy * 2.0 - 1.0;
+  vec3 dn = vec3(0.0, tx.y, tx.x) * w.x + vec3(ty.x, 0.0, ty.y) * w.y + vec3(tz.x, tz.y, 0.0) * w.z;
+  n = normalize(n + dn * bumpK);
+  return alb * mix(0.55, 1.05, cav);
+}
 float fbm3(vec2 p){ float s = 0.0, a = 0.5; for (int i = 0; i < 3; i++) { s += a * vnoise(p); p = p * 2.03 + vec2(1.7, 9.2); a *= 0.5; } return s + 0.06; }
 )";
 
@@ -73,7 +106,15 @@ vec3 lambert(vec3 albedo, vec3 n, float shadow){
   irr += u_sunCol.rgb * max(dot(n, u_sunDir.xyz), 0.0) * shadow;
   return albedo * irr * (1.0 / PI);
 }
-vec3 outColor(vec3 lit){ return linearToSrgb(aces(lit)); }
+vec3 outColor(vec3 lit){
+  vec3 a = aces(lit);
+  // cinematic grade: richer colour, warm highlights / cool shadows at low sun
+  float L = dot(a, vec3(0.2126, 0.7152, 0.0722));
+  a = max(mix(vec3(L), a, 1.12), 0.0);
+  float gold = (1.0 - smoothstep(0.08, 0.5, u_sunDir.y)) * smoothstep(0.05, 0.3, u_daylight);
+  a *= mix(vec3(1.0), mix(vec3(0.94, 0.98, 1.06), vec3(1.07, 1.0, 0.9), smoothstep(0.1, 0.6, L)), gold);
+  return linearToSrgb(a);
+}
 float fogObject(vec3 wp, float depth){
   float r = smoothstep(3.0, 45.0, abs(wp.y - u_camPos.y));
   float alt = clamp(u_camPos.y / 50.0, 0.0, 5.0);
@@ -81,37 +122,63 @@ float fogObject(vec3 wp, float depth){
   float ff = mix(u_fogFar * (1.0 + alt * 1.5), 2200.0, r * r);
   return smoothstep(fn, ff, depth);
 }
+vec3 fogTint(vec3 wp){
+  // aerial perspective: haze brightens and warms toward the sun
+  vec3 v = normalize(wp - u_camPos);
+  float s = max(dot(v, u_sunDir.xyz), 0.0);
+  float k = (pow(s, 6.0) * 0.75 + s * s * 0.12) * smoothstep(-0.04, 0.18, u_sunDir.y);
+  vec3 warm = min(u_fogCol.rgb * vec3(1.32, 1.18, 0.98) + vec3(0.07, 0.045, 0.0), vec3(1.0));
+  return mix(u_fogCol.rgb, warm, k);
+}
+float valleyMist(vec3 wp, float depth){
+  // dawn/dusk mist pooled in the valleys, visible from high viewpoints
+  float tw = smoothstep(0.02, 0.3, u_daylight) * (1.0 - smoothstep(0.5, 0.95, u_daylight));
+  float low = 1.0 - smoothstep(2.0, 26.0, wp.y);
+  float view = smoothstep(18.0, 60.0, u_camPos.y - wp.y + 10.0);
+  return tw * low * view * smoothstep(50.0, 320.0, depth) * 0.7;
+}
 float fogGround(vec3 wp, float depth){
   float r = smoothstep(3.0, 45.0, abs(wp.y - u_camPos.y));
   float alt = clamp(u_camPos.y / 50.0, 0.0, 5.0);
   float nf = smoothstep(u_fogNear * (1.0 + alt), u_fogFar * (1.0 + alt * 1.5), depth) * mix(0.55, 0.22, r);
-  return max(nf, smoothstep(260.0, 2600.0, depth) * 0.78);
+  return max(max(nf, smoothstep(180.0, 2300.0, depth) * 0.84), valleyMist(wp, depth));
 }
 uniform sampler2DShadow u_shadowMap;
-float shadowAt(vec3 wp, vec3 n){
-  if (u_shadowOn < 0.5) return 1.0;
-  vec4 sp = u_shadowMat * vec4(wp + n * 0.06, 1.0);
+uniform sampler2DShadow u_shadowPrev;
+float shadowTap(sampler2DShadow m, mat4 M, vec3 wp, vec3 n, float dc){
+  vec4 sp = M * vec4(wp + n * 0.06, 1.0);
   vec3 c = sp.xyz * 0.5 + 0.5;
   if (c.x <= 0.0 || c.x >= 1.0 || c.y <= 0.0 || c.y >= 1.0 || c.z >= 1.0) return 1.0;
   float t = u_shadowTexel;
   float z = c.z - 0.0006;
   float s;
-  if (distance(wp, u_camPos) > 30.0) s = texture(u_shadowMap, vec3(c.xy, z));
-  else {
-    s = texture(u_shadowMap, vec3(c.xy + vec2(-0.5, -0.5) * t, z));
-    s += texture(u_shadowMap, vec3(c.xy + vec2(0.5, -0.5) * t, z));
-    s += texture(u_shadowMap, vec3(c.xy + vec2(-0.5, 0.5) * t, z));
-    s += texture(u_shadowMap, vec3(c.xy + vec2(0.5, 0.5) * t, z));
-    s *= 0.25;
+  if (dc > 45.0) {
+    s = (texture(m, vec3(c.xy + vec2(-0.6, -0.6) * t, z)) + texture(m, vec3(c.xy + vec2(0.6, 0.6) * t, z))) * 0.5;
+  } else {
+    const vec2 D[8] = vec2[8](vec2(-0.94, -0.34), vec2(0.94, 0.34), vec2(-0.34, 0.94), vec2(0.34, -0.94),
+                              vec2(-0.6, 0.55), vec2(0.6, -0.55), vec2(0.15, 0.25), vec2(-0.2, -0.15));
+    s = 0.0;
+    for (int i = 0; i < 8; i++) s += texture(m, vec3(c.xy + D[i] * t * 1.6, z));
+    s *= 0.125;
   }
   vec2 e = abs(c.xy - 0.5) * 2.0;
-  float fade = smoothstep(0.82, 1.0, max(e.x, e.y));
-  return mix(s, 1.0, fade);
+  return mix(s, 1.0, smoothstep(0.82, 1.0, max(e.x, e.y)));
+}
+float shadowAt(vec3 wp, vec3 n){
+  if (u_shadowOn < 0.01) return 1.0;
+  float dc = distance(wp, u_camPos);
+  float s = shadowTap(u_shadowMap, u_shadowMat, wp, n, dc);
+  // crossfade from the previous shadow map so shadows glide as the sun moves instead of stepping
+  if (u_shadowMix.x < 0.999) s = mix(shadowTap(u_shadowPrev, u_shadowMatPrev, wp, n, dc), s, u_shadowMix.x);
+  return mix(1.0, s, u_shadowOn);
 }
 )";
 
 static const char* OBJECT_VS = R"(
 invariant gl_Position;
+#ifdef FUR
+out vec3 v_opos;
+#endif
 in vec3 a_pos;
 in vec4 a_col;
 #if defined(VF_SMOOTH) || defined(VF_GLB)
@@ -205,6 +272,9 @@ void main(){
 #endif
   vec4 wp = M * vec4(p, 1.0);
   v_wpos = wp.xyz;
+#ifdef FUR
+  v_opos = a_pos;
+#endif
   v_nrm = normalize(mat3(M) * n);
   v_seed = fract(sin(dot(sO.xz, vec2(12.9898, 78.233))) * 43758.5453);
   vec3 col = srgbToLinear(a_col.rgb) * u_tint.rgb;
@@ -298,6 +368,9 @@ uniform float u_alpha;
 uniform float u_recv;
 uniform int u_dbg;
 uniform int u_tier;
+#ifdef FUR
+in vec3 v_opos;
+#endif
 in float v_fade;
 in float v_fadeIn;
 #ifdef CAPTURE
@@ -345,6 +418,63 @@ void main(){
   if (!gl_FrontFacing) n = -n;
 #endif
 #endif
+#if defined(FUR) && !defined(SHADOW_PASS)
+  {
+    // fur: fine strands along the body, darker roots, soft tonal patches; fades with distance
+    float fd = 1.0 - smoothstep(12.0, 40.0, v_depth);
+    vec3 q = v_opos;
+    float strand = vnoise(vec2(q.x * 90.0 + q.y * 20.0, q.z * 14.0 + q.y * 70.0)) * 0.6 + vnoise(vec2(q.z * 160.0, q.y * 160.0 + q.x * 40.0)) * 0.4;
+    float patchv = vnoise(q.xz * 7.0 + q.y * 5.0);
+    base.rgb *= mix(1.0, mix(0.78, 1.14, strand) * mix(0.9, 1.08, patchv), fd);
+    n = normalize(n + (vec3(vnoise(q.zy * 120.0), vnoise(q.xz * 120.0), vnoise(q.xy * 120.0)) - 0.5) * 0.35 * fd);
+  }
+#endif
+#if defined(K_BUILD) && !defined(CAPTURE) && !defined(SHADOW_PASS)
+  if (v_col.a > 0.999) {
+    float bd = 1.0 - smoothstep(45.0, 110.0, v_depth);
+    if (bd > 0.001) {
+      vec3 c = base.rgb;
+      float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
+      float sat = (mx - mn) / max(mx, 1e-4);
+      float lum = dot(c, vec3(0.3, 0.59, 0.11));
+      float woody = smoothstep(0.18, 0.35, sat) * step(c.b, c.g) * step(c.g, c.r * 1.02) * (1.0 - smoothstep(0.35, 0.6, lum));
+      float stony = (1.0 - smoothstep(0.1, 0.22, sat));
+      float plaster = (1.0 - woody) * (1.0 - stony);
+      vec3 n0 = n;
+      vec3 nw = n0, ns = n0, np = n0;
+      vec3 aw = ptexWood(v_wpos, nw, 0.45, 1.0);
+      // dark grey = dressed stone (rock texture, gentle); light = lime plaster (mottled, fine grain, no cracks)
+      float darkStone = stony * (1.0 - smoothstep(0.18, 0.32, lum));
+      float lightWall = stony - darkStone;
+      plaster += lightWall;
+      stony = darkStone;
+      vec3 as = mix(vec3(1.0), ptexRock(v_wpos, ns, 0.55, 0.5), 0.75);
+      float mot = vnoise(v_wpos.xz * 0.9 + v_wpos.y * 0.7) * 0.6 + vnoise(v_wpos.xy * 3.1 + v_wpos.z) * 0.25 + vnoise((v_wpos.zy + v_wpos.x) * 9.0) * 0.15;
+      float stain = smoothstep(0.55, 0.85, vnoise(vec2(v_wpos.x + v_wpos.z, v_wpos.y * 0.25) * 0.8));
+      vec3 ap = vec3(mix(0.88, 1.08, mot)) * mix(1.0, 0.86, stain);
+      np = normalize(n0 + (vec3(vnoise(v_wpos.zy * 6.0), vnoise(v_wpos.xz * 6.0), vnoise(v_wpos.xy * 6.0)) - 0.5) * 0.08);
+      vec3 alb = aw * woody + as * stony + ap * plaster;
+      vec3 nn = normalize(nw * woody + ns * stony + np * plaster);
+      // grime toward the base, edge wear from cavity-like noise
+      float grime = 1.0 - 0.18 * (1.0 - smoothstep(0.0, 1.6, v_wpos.y - u_camPos.y + 1.7)) * (0.5 + 0.5 * vnoise(v_wpos.xz * 1.7));
+      base.rgb *= mix(vec3(1.0), alb * grime, bd);
+      n = normalize(mix(n0, nn, bd));
+    }
+  }
+#endif
+#if defined(K_ROCK) && !defined(CAPTURE)
+  {
+    // pre-baked procedural rock material, triplanar
+    float rd = 1.0 - smoothstep(60.0, 140.0, v_depth);
+    base.rgb = mix(base.rgb, vec3(0.3, 0.28, 0.25), 0.7);
+    vec3 nr = n;
+    vec3 alb = ptexRock(v_wpos, nr, 0.33, 1.1);
+    base.rgb *= mix(vec3(1.0), alb, rd);
+    n = normalize(mix(n, nr, rd));
+    float moss = smoothstep(0.62, 0.92, n.y) * smoothstep(0.45, 0.7, vnoise(v_wpos.xz * 0.9)) * rd;
+    base.rgb = mix(base.rgb, base.rgb * vec3(0.72, 0.92, 0.55), moss * 0.45);
+  }
+#endif
 #if defined(CUTOUT) && !defined(CAPTURE)
   float leafFar = smoothstep(8.0, 28.0, v_depth);
   float edgeOn = 1.0 - smoothstep(0.05, 0.45, abs(dot(n, normalize(u_camPos - v_wpos))));
@@ -380,7 +510,7 @@ void main(){
   }
 #endif
   vec3 c = outColor(lit);
-  c = mix(c, u_fogCol.rgb, fogObject(v_wpos, v_depth));
+  c = mix(c, fogTint(v_wpos), fogObject(v_wpos, v_depth));
 #ifdef CUTOUT
   fragColor = vec4(c, base.a);
 #else

@@ -19,6 +19,7 @@ struct SpeciesModel {
 };
 
 constexpr float BRIDGE_LENGTH = 22.0f;
+constexpr float BRIDGE_RAMP = 8.0f, BRIDGE_RAMP_DROP = 3.6f;
 constexpr float BRIDGE_DECK_Y = 1.1f;
 float footprint(const std::string& type);
 

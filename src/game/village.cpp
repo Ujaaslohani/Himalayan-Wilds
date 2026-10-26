@@ -202,7 +202,7 @@ in float v_depth;
 out vec4 fragColor;
 void main(){
   vec3 c = outColor(v_col);
-  c = mix(c, u_fogCol.rgb, fogObject(v_wpos, v_depth));
+  c = mix(c, fogTint(v_wpos), fogObject(v_wpos, v_depth));
   fragColor = vec4(c, 1.0);
 }
 )";

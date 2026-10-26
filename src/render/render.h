@@ -18,6 +18,8 @@ struct FrameUBO {
   float season2[4];
   float wind[4];
   float misc[4];
+  float shadowMatPrev[16];
+  float shadowMix[4];
 };
 
 struct Camera {
@@ -33,7 +35,7 @@ struct Camera {
 
 enum InstMode { IM_NONE = 0, IM_LITE = 1, IM_FULL = 2 };
 namespace render { extern int dbgMode; }
-enum ObjFlag { OF_CUTOUT = 1, OF_DOUBLE = 2, OF_WIND = 4, OF_TINTWHITE = 8, OF_SOFT = 16, OF_CAPTURE = 32, OF_DEPTH = 64 };
+enum ObjFlag { OF_CUTOUT = 1, OF_DOUBLE = 2, OF_WIND = 4, OF_TINTWHITE = 8, OF_SOFT = 16, OF_CAPTURE = 32, OF_DEPTH = 64, OF_FUR = 128 };
 
 inline InstFull toInst(const Mat4& m, uint32_t tint = 0xffffffffu) {
   InstFull f;
@@ -91,6 +93,7 @@ void beginShadowPass(const Mat4& lightVP, int size, int target = 0);
 void endShadowPass();
 void bindShadow();
 void drawFullscreen();
+bool sphereVisible(const Vec3& c, float r);
 std::string commonHeader();
 GLuint quadVao();
 GLuint quadVaoBuffer();

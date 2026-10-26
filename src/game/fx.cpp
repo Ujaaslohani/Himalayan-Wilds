@@ -58,7 +58,7 @@ uniform float u_useVC;
 out vec4 fragColor;
 void main(){
   vec3 c = outColor(mix(vec3(1.0), v_col, u_useVC) * u_color.rgb);
-  c = mix(c, u_fogCol.rgb, fogObject(v_wpos, v_depth) * u_fog);
+  c = mix(c, fogTint(v_wpos), fogObject(v_wpos, v_depth) * u_fog);
   fragColor = vec4(c, u_color.a);
 }
 )";
@@ -232,8 +232,8 @@ void beginFrame() {
 
 void blob(float x, float y, float z, float yaw, float sx, float sz) { g_blobs.push_back({x, y, z, 0, yaw, sx, sz, 0}); }
 void campfire(float x, float y, float z, float s) { g_fires.push_back({x, y, z, s}); }
-void glow(float x, float y, float z, float size) { g_glows.insert(g_glows.end(), {x, y, z, size}); }
-void pool(float x, float y, float z, float r) { g_pools.insert(g_pools.end(), {x, y, z, r}); }
+void glow(float x, float y, float z, float size) { if (render::sphereVisible({x, y, z}, std::fabs(size) * 1.5f + 1)) g_glows.insert(g_glows.end(), {x, y, z, size}); }
+void pool(float x, float y, float z, float r) { if (render::sphereVisible({x, y, z}, r + 1)) g_pools.insert(g_pools.end(), {x, y, z, r}); }
 void ghost(const Mesh* mesh, const Mat4& m, bool ok, bool custom) { g_ghosts.push_back({mesh, m, ok, custom}); }
 
 void drawBlobs() {
@@ -266,7 +266,7 @@ void drawTransparent() {
     float t = E.clock;
     Color outer = Color::hex("f97316"), inner = Color::hex("fde047");
     for (auto& f : g_fires) {
-      if (render::cam.pos.distanceTo({f.x, f.y, f.z}) > 260) continue;
+      if (render::cam.pos.distanceTo({f.x, f.y, f.z}) > 260 || !render::sphereVisible({f.x, f.y + f.s, f.z}, 2 * f.s + 1)) continue;
       Mat4 root = Mat4::compose({f.x, f.y, f.z}, Quat(), {f.s, f.s, f.s});
       Mat4 mo = root * Mat4::compose({0, 0, 0}, Quat::axisAngle({0, 1, 0}, t * 0.8f), {1 + std::sin(t * 9) * 0.06f, 1 + std::sin(t * 7.3f) * 0.12f, 1 + std::cos(t * 8) * 0.06f});
       s.setMat4("u_model", mo);
@@ -282,7 +282,7 @@ void drawTransparent() {
     Shader& e = render::program("ember", EMBER_VS, EMBER_FS);
     glBindVertexArray(g_emberVao);
     for (auto& f : g_fires) {
-      if (render::cam.pos.distanceTo({f.x, f.y, f.z}) > 160) continue;
+      if (render::cam.pos.distanceTo({f.x, f.y, f.z}) > 160 || !render::sphereVisible({f.x, f.y + 2 * f.s, f.z}, 3 * f.s + 1)) continue;
       e.set4f("u_place", f.x, f.y, f.z, f.s);
       glDrawArrays(GL_POINTS, 0, 24);
       gfx::drawCalls++;

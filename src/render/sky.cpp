@@ -54,14 +54,14 @@ void main(){
   if (d.y > 0.0) {
     vec2 uv = d.xz / (d.y + 0.15) * 1.35 + vec2(u_clock * 0.004, u_clock * 0.0017);
     float n = fbm4(uv);
-    float c = smoothstep(0.62 - u_cover * 0.3, 0.9 - u_cover * 0.15, n);
+    float c = smoothstep(0.66 - u_cover * 0.3, 0.8 - u_cover * 0.2, n);
     float n2 = fbm3(uv + u_sun.xz * 0.12);
     float lit = clamp(0.7 + (n - n2) * 3.0, 0.15, 1.25);
     float mglow = pow(max(md, 0.0), 6.0);
     vec3 dark = mix(vec3(0.025, 0.03, 0.05), vec3(0.52, 0.56, 0.64), day);
     vec3 bright = mix(vec3(0.07, 0.085, 0.12) + vec3(0.16, 0.18, 0.22) * mglow, mix(u_sunTint, vec3(1.0), 0.55), day);
     vec3 cc = mix(dark, bright, clamp(lit, 0.0, 1.0)) + u_sunTint * pow(sd, 6.0) * (1.0 - c) * 0.6 * day + vec3(0.35, 0.42, 0.55) * pow(max(md, 0.0), 160.0) * night * 0.35;
-    float fade = smoothstep(0.0, 0.2, d.y);
+    float fade = smoothstep(0.0, 0.07, d.y);
     col = mix(col, cc, c * fade * 0.94);
   }
   fragColor = vec4(col, 1.0);
@@ -213,6 +213,10 @@ Mat4 g_shadowMat;
 Vec3 g_shadowC, g_lastShadowC{1e9f, 0, 0};
 int g_shadowTick = 0;
 bool g_shadowUpdate = true, g_staticDirty = true;
+float g_shadowK = 1.0f;
+Mat4 g_builtMat, g_prevMat;
+float g_mixT = 1.0f;
+bool g_haveBuilt = false;
 float g_cover = 0.4f;
 GLuint g_starVao = 0, g_starVbo = 0, g_mistVao = 0, g_mistIbo = 0, g_snowVao = 0, g_snowVbo = 0, g_leafVao = 0, g_leafSeedVbo = 0, g_leafEmitVbo = 0;
 int g_mistCount = 0;
@@ -319,8 +323,14 @@ void init() {
 }
 
 void update(float dt) {
-  (void)dt;
-  float h = E.time;
+  // seasonal day length: summer sun rises ~1h earlier, winter ~0.5h later
+  static float sOff = 1e9f;
+  // day-length factor: summer sunrise ~4:55 / sunset ~19:05, winter ~6:30 / 17:30
+  float tOff = season.index == 1 ? 0.845f : season.index == 3 ? 1.09f : season.index == 0 ? 0.93f : 1.0f;
+  sOff = (sOff > 1e8f || std::fabs(tOff - sOff) > 0.05f) ? tOff : sOff + (tOff - sOff) * std::min(1.0f, dt * 0.2f);
+  float hr = E.time;
+  float h = hr >= 0 ? 12.0f + (hr - 12.0f) * sOff : hr;
+  h = std::fmod(h + 48.0f, 24.0f);
   float ang = ((h - 6) / 24) * TAU;
   float elev = std::sin(ang);
   float daylight = sstep(elev, -0.08f, 0.3f);
@@ -337,6 +347,9 @@ void update(float dt) {
   float sunI = 2.1f * std::pow(daylight, 1.15f) * (1 - 0.18f * snow);
   float moonI = 0.32f * moonUp * (1 - daylight);
   bool useSun = sunI >= moonI;
+  // shadows fade out as sun and moon trade places, so the light direction swap is never visible
+  float ratio = std::min(sunI, moonI) / std::max(1e-4f, std::max(sunI, moonI));
+  g_shadowK = 1.0f - sstep(ratio, 0.35f, 0.9f);
   g_lightDir = useSun ? g_sunDir : g_moonDir;
   g_lightDir.y = std::max(g_lightDir.y, 0.1f);
   g_lightDir.normalize();
@@ -345,7 +358,7 @@ void update(float dt) {
   float lightI = std::max(std::max(sunI, moonI), 0.05f);
   float hemiI = lerpf(0.32f, 1.05f, daylight);
   Color ground = G_SUMMER.lerp(G_AUTUMN, au * 0.8f).lerp(G_WINTER, snow);
-  g_cover = 0.5f + 0.3f * season.fall + 0.1f * season.autumn;
+  g_cover = 0.64f + 0.22f * season.fall + 0.08f * season.autumn;
 
   const Vec3& p = E.player.pos;
   float texel = (SHADOW_HALF * 2) / (float)g_settings.shadowSize;
@@ -354,7 +367,7 @@ void update(float dt) {
   static Vec3 s_light{0, 1, 0};
   static int s_size = 0;
   bool moved = c.distanceSq(g_shadowC) > 0.01f || s_size != g_settings.shadowSize;
-  bool turned = g_lightDir.dot(s_light) < 0.99999f;
+  bool turned = g_lightDir.dot(s_light) < 0.999995f;
   if (moved || turned || g_staticDirty) {
     g_shadowC = c;
     s_light = g_lightDir;
@@ -368,6 +381,8 @@ void update(float dt) {
   g_shadowUpdate = g_staticDirty || (g_shadowTick++ % 2) == 0;
 
   FrameUBO& F = render::frame;
+  g_mixT = std::min(1.0f, g_mixT + dt / 0.3f);
+  F.shadowMix[0] = g_mixT * g_mixT * (3 - 2 * g_mixT);
   std::memcpy(F.view, render::cam.view.m, 64);
   std::memcpy(F.proj, render::cam.proj.m, 64);
   std::memcpy(F.viewProj, render::cam.viewProj.m, 64);
@@ -376,7 +391,7 @@ void update(float dt) {
   float strength = useSun ? std::min(1.0f, sunI / 1.3f) : 0.45f * moonUp;
   setv(F.sunDir, g_lightDir, strength);
   setv(F.sunCol, lightCol * lightI, daylight);
-  setv(F.hemiSky, HEMI_SKY * hemiI, 1);
+  setv(F.hemiSky, HEMI_SKY * hemiI, std::max(0.011f, g_shadowK));
   setv(F.hemiGround, ground * hemiI, season.fall);
   setv(F.fogCol, g_hor, (60 - 25 * season.fall) * g_settings.drawDist());
   F.fogParam[0] = (260 - 100 * season.fall) * g_settings.drawDist();
@@ -396,6 +411,13 @@ bool shadowNeedsUpdate() { return g_shadowUpdate; }
 bool shadowStaticDirty() { return g_staticDirty; }
 void clearStaticShadow() { g_staticDirty = false; }
 void invalidateStaticShadow() { g_staticDirty = true; }
+void onStaticRebuild() {
+  g_prevMat = g_haveBuilt ? g_builtMat : g_shadowMat;
+  g_mixT = g_haveBuilt ? 0.0f : 1.0f;
+  g_builtMat = g_shadowMat;
+  g_haveBuilt = true;
+  std::memcpy(render::frame.shadowMatPrev, g_prevMat.m, 64);
+}
 Color horizon() { return g_hor; }
 
 void drawSky() {
@@ -428,7 +450,62 @@ void drawSky() {
   glDepthMask(GL_TRUE);
 }
 
+static const char* BIRD_VS = R"(
+uniform float u_t;
+out float v_flap;
+out float v_a;
+void main(){
+  int f = gl_VertexID / 7, b = gl_VertexID % 7;
+  float ff = float(f);
+  vec3 c = vec3(sin(ff * 2.1 + 0.7) * 260.0, 70.0 + ff * 18.0, cos(ff * 1.7 + 1.9) * 260.0);
+  float r = 55.0 + ff * 20.0;
+  float a = u_t * (0.05 + ff * 0.012) + ff * 2.0;
+  float sb = float(b);
+  float side = (b % 2 == 0 ? 1.0 : -1.0) * floor((sb + 1.0) * 0.5);
+  vec3 fwd = vec3(-sin(a), 0.0, cos(a));
+  vec3 rt = vec3(fwd.z, 0.0, -fwd.x);
+  vec3 p = c + vec3(cos(a), 0.0, sin(a)) * r - fwd * abs(side) * 3.2 + rt * side * 2.6 + vec3(0.0, sin(u_t * 0.4 + sb) * 1.5, 0.0);
+  vec4 vp = u_view * vec4(p, 1.0);
+  gl_Position = u_proj * vp;
+  float d = -vp.z;
+  gl_PointSize = clamp(900.0 / d, 3.0, 22.0);
+  v_flap = sin(u_t * (5.0 + sb * 0.37) + sb * 1.3);
+  v_a = (1.0 - smoothstep(350.0, 700.0, d)) * smoothstep(0.15, 0.4, u_daylight);
+}
+)";
+static const char* BIRD_FS = R"(
+in float v_flap;
+in float v_a;
+out vec4 o;
+void main(){
+  vec2 q = gl_PointCoord * 2.0 - 1.0;
+  q.y = -q.y;
+  float wy = abs(q.x) * (0.55 * v_flap) ;
+  float w = 1.0 - smoothstep(0.06, 0.16, abs(q.y - wy)) ;
+  w *= step(abs(q.x), 0.95);
+  if (w * v_a < 0.05) discard;
+  o = vec4(vec3(0.06, 0.06, 0.07), w * v_a * 0.85);
+}
+)";
+GLuint g_birdVao = 0;
+void drawBirds() {
+  if (E.daylight < 0.15f) return;
+  if (!g_birdVao) glGenVertexArrays(1, &g_birdVao);
+  Shader& s = render::program("birds", BIRD_VS, BIRD_FS);
+  s.set1f("u_t", E.clock);
+  glEnable(GL_PROGRAM_POINT_SIZE);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glDepthMask(GL_FALSE);
+  glBindVertexArray(g_birdVao);
+  glDrawArrays(GL_POINTS, 0, 4 * 7);
+  gfx::drawCalls++;
+  glDepthMask(GL_TRUE);
+  glDisable(GL_BLEND);
+}
+
 void drawStarsAndMist() {
+  drawBirds();
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glDepthMask(GL_FALSE);

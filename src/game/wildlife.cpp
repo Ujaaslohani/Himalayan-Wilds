@@ -17,9 +17,9 @@ enum AState { S_GRAZE, S_WALK, S_ALERT, S_FLEE, S_CHARGE, S_DOWNED, S_STALK, S_C
 struct Hear { float still, crouch, walk, sprint; };
 struct Spec { const char* name; float hp, walk, run; Hear hear; int herdLo, herdHi, groups; float gait, grazePitch; Cost yields; };
 const Spec SPEC[SP_COUNT] = {
-    {"Deer", 80, 1.25f, 9.5f, {11, 8, 22, 36}, 3, 5, 7, 3.1f, 1.05f, {{"deer_pelt", 2}, {"bone", 2}, {"sinew", 1}, {"food", 6}}},
+    {"Deer", 80, 1.25f, 9.5f, {11, 8, 22, 36}, 3, 3, 4, 3.1f, 1.05f, {{"deer_pelt", 2}, {"bone", 2}, {"sinew", 1}, {"food", 6}}},
     {"Wild Boar", 140, 0.95f, 7.5f, {8, 6, 16, 28}, 2, 3, 5, 4.2f, 0.55f, {{"boar_hide", 2}, {"bone", 3}, {"sinew", 1}, {"food", 8}}},
-    {"Goral", 70, 1.1f, 8.6f, {13, 9, 25, 40}, 2, 4, 4, 3.4f, 0.85f, {{"goral_horn", 2}, {"bone", 2}, {"sinew", 1}, {"food", 5}}},
+    {"Goral", 70, 1.1f, 8.6f, {13, 9, 25, 40}, 2, 3, 5, 3.4f, 0.85f, {{"goral_horn", 2}, {"bone", 2}, {"sinew", 1}, {"food", 5}}},
     {"Himalayan Wolf", 220, 1.5f, 9.8f, {14, 10, 26, 40}, 3, 4, 3, 3.4f, 0.5f, {{"wolf_fur", 2}, {"bone", 3}, {"sinew", 2}, {"food", 3}}},
     {"Black Bear", 520, 1.0f, 8.2f, {9, 7, 18, 30}, 1, 1, 3, 2.6f, 0.6f, {{"bear_hide", 2}, {"bone", 5}, {"sinew", 3}, {"food", 12}}},
     {"Leopard", 260, 1.2f, 11, {12, 9, 24, 38}, 1, 1, 3, 3.6f, 0.4f, {{"leopard_pelt", 1}, {"bone", 3}, {"sinew", 2}, {"food", 3}}},
@@ -1107,7 +1107,7 @@ static void fill(bool shadow) {
 }
 
 static void drawBatches(Batches* B, int n) {
-  Shader& s = render::object(VFmt::P3C4, IM_FULL, SeasonKind::None, 0);
+  Shader& s = render::object(VFmt::P3C4, IM_FULL, SeasonKind::None, OF_FUR | OF_SOFT);
   for (int sp = 0; sp < n; sp++) {
     if (n > SP_COUNT) {
       if (sp < SP_COUNT) s.set2f("u_fade", W_MID, W_MID + W_BAND);

@@ -283,8 +283,9 @@ void defineLayers() {
                     0.45f, 0.9f, [] { return g_settings.fullMap ? 260.0f : g_settings.undergrowthRadius; }, 32, 0.3f, 0.6f});
   LAYERS.push_back({L_ROCK, 303, {{"Rock Medium.glb", 1}}, 2,
                     [](float x, float z, float h) -> float {
-                      if (h < -0.8f || world::pathDistance(x, z) < 1.6f || hypot2(x, z) < 14) return 0;
-                      if (world::nearRoute(x, z) < 3.5f) return 0;
+                      if (h < -0.8f || world::pathDistance(x, z) < 3.5f || hypot2(x, z) < 14) return 0;
+                      if (world::nearRoute(x, z) < 5.5f) return 0;
+                      for (const Shrine& sh : world::SHRINES) if (hypot2(x - sh.x, z - sh.z) < COURT + 10) return 0;
                       if (world::lakeAt(x, z, 1) >= 0) return 0;
                       return (world::pathDistance(x, z) < 6 ? 0.45f : 0.22f) + std::min(0.45f, world::slopeAt(x, z) * 0.35f);
                     },
@@ -627,6 +628,9 @@ bool gatherVisible(const std::vector<InstLite>& items, const std::vector<FileSlo
 Vec3 g_occPos{1e9f, 0, 0};
 int g_occAge = 0;
 
+extern bool g_impMergeDirty;
+extern Mesh g_impQuad;
+void rebuildImpostorMerge(int layer);
 void cullVisible() {
   const Vec3& cp = render::cam.pos;
   if (++g_occAge > 20 || hypot2(cp.x - g_occPos.x, cp.z - g_occPos.z) > 3 || std::fabs(cp.y - g_occPos.y) > 2) {
@@ -636,6 +640,8 @@ void cullVisible() {
   }
   g_culledOcc = 0;
   g_instances = 0;
+  bool impDirty[4] = {g_impMergeDirty, g_impMergeDirty, g_impMergeDirty, g_impMergeDirty};
+  g_impMergeDirty = false;
   for (auto& s : g_slots) {
     LodCfg lc = lodFor(s->layer);
     bool useImp = g_impReady && s->imp >= 0;
@@ -643,13 +649,15 @@ void cullVisible() {
     if (gatherVisible(s->items, s->ranges, s->visible, s->gen, s->sigN, 0, nearMax)) uploadShared(s->parts, &PartSlot::batch, s->visible);
     g_instances += (int)s->visible.size();
     if (s->imp >= 0) {
-      if (gatherVisible(s->farItems, s->farRanges, s->farVisible, s->gen, s->sigF, lc.imp)) s->impBatch.upload(s->farVisible.data(), s->farVisible.size());
+      if (gatherVisible(s->farItems, s->farRanges, s->farVisible, s->gen, s->sigF, lc.imp)) impDirty[s->layer] = true;
       if (s->hasLod) {
         if (gatherVisible(s->midItems, s->midRanges, s->midVisible, s->gen, s->sigM, lc.mid, lc.imp + IMP_BAND)) uploadShared(s->parts, &PartSlot::lodBatch, s->midVisible);
         g_instances += (int)s->midVisible.size();
       }
     }
   }
+  if (g_impQuad.vao)
+    for (int L = 0; L < 4; L++) if (impDirty[L] && L != L_GRASS) rebuildImpostorMerge(L);
   int budget = g_settings.triBudget;
   if (budget <= 0 || !g_impReady) { g_budgetScale = 1.0f; return; }
   const int NB = 200;
@@ -722,9 +730,9 @@ void main(){
   float v0 = mod(floor(fv), 16.0), v1 = mod(v0 + 1.0, 16.0);
   v_blend = fract(fv);
   vec3 right = vec3(dir.y, 0.0, -dir.x);
-  float W = u_cell.x * s;
-  vec3 p = base + right * (a_pos.x * W) + vec3(0.0, u_cell.y * s + a_pos.y * 2.0 * W, 0.0);
-  float row = u_cell.z, rows = u_cell.w;
+  float W = s;
+  vec3 p = base + right * (a_pos.x * W) + vec3(0.0, a_pos.y * 2.0 * W, 0.0);
+  float row = floor(a_i1 / 6.2831853), rows = u_cell.w;
   float vv = (row + a_pos.y) / rows;
   v_uv0 = vec2((v0 + a_pos.x + 0.5) / 16.0, vv);
   v_uv1 = vec2((v1 + a_pos.x + 0.5) / 16.0, vv);
@@ -767,7 +775,7 @@ void main(){
   vec3 alb = t.rgb * t.rgb;
   float sh = mix(mix(0.42, 0.9, shadowAt(v_wpos, n)) * mix(0.75, 1.0, smoothstep(0.08, 0.45, u_sunDir.y)), 0.62, 0.85);
   vec3 c = outColor(lambert(alb, n, sh));
-  c = mix(c, u_fogCol.rgb, mix(fogObject(v_wpos, v_depth), fogGround(v_wpos, v_depth), smoothstep(60.0, 160.0, v_depth)));
+  c = mix(c, fogTint(v_wpos), mix(fogObject(v_wpos, v_depth), fogGround(v_wpos, v_depth), smoothstep(60.0, 160.0, v_depth)));
   fragColor = vec4(c, 1.0);
 }
 )";
@@ -776,7 +784,25 @@ float seasonSig() {
   return std::round(season.autumn * 10) + std::round(season.snow * 10) * 31 + std::round(season.bare * 10) * 961 + std::round(season.spring * 10) * 29791 + std::round(season.dry * 10) * 923521 + std::round(season.leaf * 10) * 7;
 }
 
+InstBatch g_impAll[4];
+bool g_impMergeDirty = true;
+std::vector<InstLite> g_impTmp;
+void rebuildImpostorMerge(int layer) {
+  g_impTmp.clear();
+  for (auto& s : g_slots) {
+    if (s->layer != layer || s->imp < 0) continue;
+    for (const InstLite& q : s->farVisible) {
+      float yaw = std::fmod(q.yaw, 6.2831853f);
+      if (yaw < 0) yaw += 6.2831853f;
+      g_impTmp.push_back({q.x, q.y + s->impBase * q.s, q.z, s->impW * q.s, yaw + 6.2831853f * (float)s->imp});
+    }
+  }
+  if (!g_impAll[layer].vao) g_impAll[layer].create(&g_impQuad, InstKind::Lite);
+  g_impAll[layer].upload(g_impTmp.data(), g_impTmp.size());
+}
+
 void captureImpostors(int only = -1, bool mips = true, int vFrom = 0, int vTo = 16) {
+  g_impMergeDirty = true;
   if (!g_impFbo) {
     int types = 0;
     for (auto& sp : g_slots) if (sp->layer != L_GRASS && !sp->parts.empty()) types++;
@@ -907,9 +933,11 @@ out vec3 v_wpos;
 out vec4 v_c;
 out vec3 v_n;
 out float v_depth;
+flat out float v_t;
 void main(){
   v_wpos = a_pos;
   v_c = a_col;
+  v_t = a_col.b;
   v_n = normalize(a_nrm.xyz);
   vec4 vp = u_view * vec4(a_pos, 1.0);
   v_depth = -vp.z;
@@ -922,11 +950,15 @@ in vec3 v_wpos;
 in vec4 v_c;
 in vec3 v_n;
 in float v_depth;
+flat in float v_t;
 uniform vec2 u_in;
+uniform float u_row[16];
+uniform float u_rows;
+uniform sampler2D u_atlas;
 out vec4 fragColor;
 void main(){
   float cov = v_c.r;
-  if (cov < 0.22) discard;
+  if (cov < 0.24 + 0.16 * vnoise(v_wpos.xz * 0.22)) discard;
   float d = distance(v_wpos.xz, u_camPos.xz);
   float fin = smoothstep(u_in.x, u_in.y, d);
   float dh = FADE_NOISE_STATIC();
@@ -941,12 +973,25 @@ void main(){
   dec = mix(dec, dec * vec3(0.9, 1.15, 0.8), u_spring);
   vec3 pin = mix(vec3(0.06, 0.15, 0.08), vec3(0.09, 0.19, 0.1), n1);
   vec3 alb = mix(dec, pin, pine);
+  // match the real tree colour: average of this tree type's impostor (captured with current season)
+  int ti = int(v_t * 255.0);
+  float row = ti < 16 ? u_row[ti] : -1.0;
+  if (row >= 0.0) {
+    vec4 a = textureLod(u_atlas, vec2(0.5, (row + 0.62) / u_rows), 6.0);
+    if (a.a > 0.05) { vec3 tc = (a.rgb - vec3(0.42, 0.38, 0.26) * (1.0 - a.a)) / a.a; tc = tc * tc * 0.85; alb = mix(alb, tc, 0.75); }
+  }
+  // individual crowns: lumpy tops with sunlit and shaded sides
+  vec2 cq = v_wpos.xz * 0.28;
+  float crown = vnoise(cq) * 0.6 + vnoise(cq * 2.3 + 4.0) * 0.4;
   vec3 n = normalize(v_n);
+  vec3 cg = vec3(vnoise(cq + vec2(0.35, 0.0)) - vnoise(cq - vec2(0.35, 0.0)), 0.0, vnoise(cq + vec2(0.0, 0.35)) - vnoise(cq - vec2(0.0, 0.35)));
+  n = normalize(n - cg * 1.6);
+  alb *= mix(0.72, 1.12, crown);
   float snowP = smoothstep(0.35, 0.75, fract(sin(dot(floor(v_wpos.xz * 0.6), vec2(17.1, 93.7))) * 3758.5));
   alb = mix(alb, vec3(0.8, 0.83, 0.88), u_snow * smoothstep(0.55, 0.95, n.y) * mix(0.15, 0.45, snowP) * (1.0 - 0.5 * pine));
   alb *= (0.62 + 0.3 * n1);
   vec3 c = outColor(lambert(alb, n, 1.0) * mix(0.7, 1.0, cov));
-  c = mix(c, u_fogCol.rgb, fogGround(v_wpos, v_depth));
+  c = mix(c, fogTint(v_wpos), fogGround(v_wpos, v_depth));
   fragColor = vec4(c, 1.0);
 }
 )";
@@ -985,7 +1030,7 @@ void buildCanopy() {
             if (q <= 0) continue;
             size_t k = (size_t)j * N + i;
             float w = std::sqrt(q);
-            if (w > cov[k]) { pine[k] = slotPine[it.file] ? 1.0f : 0.0f; rnd[k] = it.keep; }
+            if (w > cov[k]) { pine[k] = slotPine[it.file] ? 1.0f : 0.0f; rnd[k] = (it.file + 0.5f) / 255.0f; }
             cov[k] = std::max(cov[k], w);
             hgt[k] = std::max(hgt[k], h * (0.78f + 0.22f * w));
           }
@@ -1283,7 +1328,9 @@ void drawOpaque() {
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
   glDepthFunc(GL_LEQUAL);
   if (profClose) profClose(pD);
+  static bool noUnder = std::getenv("HW_NOUNDER") != nullptr;
   for (auto& s : g_slots) {
+    if (noUnder && s->layer == L_UNDER) continue;
     LodCfg lc = lodFor(s->layer);
     bool packed = s->layer == L_UNDER;
     bool useImp = imp && s->imp >= 0;
@@ -1315,22 +1362,31 @@ void drawOpaque() {
     glBindTexture(GL_TEXTURE_2D, g_impNrm);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, g_impTex);
-    for (auto& s : g_slots) {
-      if (s->imp < 0 || s->impBatch.count <= 0) continue;
-      LodCfg lc = lodFor(s->layer);
+    for (int L = 0; L < 4; L++) {
+      if (g_impAll[L].count <= 0) continue;
+      LodCfg lc = lodFor(L);
       float cn = canopyNear();
       float ib = render::dbgMode == 2 ? 0.01f : IMP_BAND, i0 = render::dbgMode == 2 ? lc.imp + IMP_BAND * 0.5f : lc.imp;
       sh.set1i("u_dbg", render::dbgMode);
       if (lc.canopy) sh.set4f("u_range", i0, i0 + ib, cn, cn + CANOPY_BAND);
       else sh.set4f("u_range", i0, i0 + ib, lc.outer * 0.85f, lc.outer);
-      sh.set4f("u_cell", s->impW, s->impBase, (float)s->imp, (float)g_impRows);
-      s->impBatch.draw();
+      sh.set4f("u_cell", 0, 0, 0, (float)g_impRows);
+      g_impAll[L].draw();
     }
     if (profClose) profClose(pImp);
     pImp = profOpen ? profOpen("forest.canopy") : -1;
     if (g_canopy.vao) {
       Shader& cs = render::program("canopy", CANOPY_VS, CANOPY_FS);
       cs.set2f("u_in", canopyNear(), canopyNear() + CANOPY_BAND);
+      cs.set1i("u_atlas", 0);
+      cs.set1f("u_rows", (float)g_impRows);
+      {
+        float rows[16];
+        for (int i = 0; i < 16; i++) rows[i] = -1;
+        const auto& ts = g_layerSlots[L_TREE];
+        for (size_t i = 0; i < ts.size() && i < 16; i++) if (ts[i] && ts[i]->imp >= 0) rows[i] = (float)ts[i]->imp;
+        glUniform1fv(cs.loc("u_row"), 16, rows);
+      }
       g_canopy.draw();
     }
   }
@@ -1464,6 +1520,19 @@ void nearTrees(float x, float z, float r, std::vector<float>& out, int max) {
   }
 }
 
+bool nearestRock(float x, float z, float& ox, float& oz, float& os) {
+  float best = 1e9f;
+  int cx0 = (int)std::floor((x - 60) / CELL), cx1 = (int)std::floor((x + 60) / CELL), cz0 = (int)std::floor((z - 60) / CELL), cz1 = (int)std::floor((z + 60) / CELL);
+  for (int cx = cx0; cx <= cx1; cx++)
+    for (int cz = cz0; cz <= cz1; cz++)
+      for (const Item& it : getCell(g_mainCache, L_ROCK, cx, cz)) {
+        if (it.scale < 0.7f) continue;
+        float d = hypot2(it.x - x, it.z - z);
+        if (d < best) { best = d; ox = it.x; oz = it.z; os = it.scale; }
+      }
+  return best < 1e8f;
+}
+
 bool treeTrunkAt(float x, float y, float z) {
   const auto& c = getCell(g_mainCache, L_TREE, (int)std::floor(x / CELL), (int)std::floor(z / CELL));
   for (const Item& it : c) {
@@ -1481,6 +1550,7 @@ void shutdown() {
   if (g_impDepth) glDeleteRenderbuffers(1, &g_impDepth);
   g_impQuad.destroy();
   g_canopy.destroy();
+  for (auto& b : g_impAll) b.destroy();
   for (auto& s : g_slots) { s->impBatch.destroy(); for (auto& p : s->parts) p.lodBatch.destroy(); }
   if (g_worker.joinable()) {
     { std::lock_guard<std::mutex> lk(g_jobMtx); g_quit = true; }
