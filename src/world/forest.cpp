@@ -291,7 +291,7 @@ void defineLayers() {
                     },
                     0.3f, 1.0f, [] { return g_settings.rockRadius * g_settings.drawDist(); }, 70, 0.6f, -1});
   LAYERS.push_back({L_TREE, 404,
-                    {{"Pine-79gmlLnweB.glb", 0.25f}, {"Tree.glb", 0.15f}, {"Tree-QVOop92WmG.glb", 0.15f}, {"Twisted Tree-GVTsMmuzv7.glb", 0.225f}, {"Twisted Tree-7PDBpElkQr.glb", 0.225f}},
+                    {{"ptree:oak", 0.24f}, {"ptree:maple", 0.2f}, {"ptree:birch", 0.16f}, {"ptree:Pine-cedar", 0.28f}, {"ptree:rhodo", 0.12f}},
                     3,
                     [](float x, float z, float h) -> float {
                       if (h < -0.3f || h > 84 || world::slopeAt(x, z) > 0.85f || world::nearRoute(x, z) < 4.5f) return 0;
@@ -1103,7 +1103,7 @@ std::vector<AssetRequest> requiredFiles() {
   std::vector<AssetRequest> out;
   for (auto& L : LAYERS)
     for (auto& f : L.files)
-      if (f.first.rfind("proc:", 0) != 0) out.push_back({f.first, names[L.id], L.colorFloor});
+      if (f.first.rfind("proc:", 0) != 0 && f.first.rfind("ptree:", 0) != 0) out.push_back({f.first, names[L.id], L.colorFloor});
   for (auto f : GARDEN_FILES) out.push_back({f, "under", -1});
   return out;
 }

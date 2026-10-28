@@ -66,6 +66,24 @@ void resolveBuildingCollision(float& px, float& pz, float radius) {
   if (px * px + pz * pz > 9000) temple::resolveCollision(px, pz, radius);
 }
 
+// bridge railings: keep walkers on the deck between the two fences
+void bridgeRailCollision(float& x, float& z, float y) {
+  for (auto& b : A.buildings) {
+    if (!b.built || b.type != "bridge") continue;
+    float c = std::cos(b.rotY), s = std::sin(b.rotY);
+    float dx = x - b.pos[0], dz = z - b.pos[2];
+    float lx = dx * c - dz * s, lz = dx * s + dz * c;
+    float deck = b.pos[1] + BRIDGE_DECK_Y;
+    if (std::fabs(lx) > BRIDGE_LENGTH / 2 - 0.3f || std::fabs(lz) > 2.1f || y < deck - 1.0f || y > deck + 2.6f) continue;
+    const float lim = 1.12f;
+    if (std::fabs(lz) > lim) {
+      lz = lz > 0 ? lim : -lim;
+      x = b.pos[0] + lx * c + lz * s;
+      z = b.pos[2] - lx * s + lz * c;
+    }
+  }
+}
+
 float walkHeight(float x, float z) {
   float h = world::getTerrainHeight(x, z);
   if (x * x + z * z > 9000) {

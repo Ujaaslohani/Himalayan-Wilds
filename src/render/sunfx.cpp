@@ -127,7 +127,8 @@ void computeState() {
   g_sx = nx * 0.5f + 0.5f;
   g_sy = ny * 0.5f + 0.5f;
   float cover = 1 - 0.55f * std::min(1.0f, season.fall + 0.3f * season.autumn);
-  g_k = up * day * cover;
+  float dk = 1.0f - sstep(sun.y, 0.02f, 0.42f);
+  g_k = up * day * cover * (1.0f - 0.35f * dk * dk);
   float align = std::max(0.0f, cam.forward().dot(sun));
   g_look = std::min(1.0f, std::pow(align, 6.0f) * 1.15f);
   g_on = g_k > 0.01f;
@@ -136,6 +137,7 @@ void computeState() {
 }  // namespace
 
 namespace sunfx {
+static float fxStep(float x, float a, float b) { float t = std::min(1.0f, std::max(0.0f, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
 
 bool wanted() {
   computeState();
@@ -199,7 +201,8 @@ void composite(int W, int H) {
   s.set1f("u_k", g_k);
   s.set1f("u_look", g_look);
   s.set1f("u_time", E.clock);
-  Color col = E.daylight > 0.55f ? Color::hex("fff3dc") : Color::hex("ffc890");
+  float dusk = 1.0f - fxStep(sky::sunDir().y, 0.02f, 0.42f);
+  Color col = Color::hex("fff3dc").lerp(Color::hex("ffc890"), fxStep(dusk, 0.0f, 0.55f)).lerp(Color::hex("ff8a3a"), fxStep(dusk, 0.45f, 1.0f));
   s.set3f("u_col", col.r, col.g, col.b);
   render::drawFullscreen();
   glDisable(GL_BLEND);

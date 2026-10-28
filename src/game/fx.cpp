@@ -132,6 +132,59 @@ void main(){
 }
 )";
 
+const char* FLAME_VS = R"(
+uniform vec4 u_place;
+uniform float u_layer;
+out vec2 v_uv;
+out float v_depth;
+out vec3 v_wpos;
+void main(){
+  vec2 q = vec2((gl_VertexID == 1 || gl_VertexID == 2 || gl_VertexID == 4) ? 1.0 : 0.0, (gl_VertexID >= 2 && gl_VertexID != 3) ? 1.0 : 0.0);
+  if (gl_VertexID == 5) q = vec2(0.0, 1.0);
+  v_uv = q;
+  vec3 right = normalize(vec3(u_view[0][0], u_view[1][0], u_view[2][0]));
+  vec3 fwd = normalize(vec3(u_view[0][2], 0.0, u_view[2][2]));
+  float s = u_place.w * (1.0 - 0.18 * u_layer);
+  vec3 p = u_place.xyz + right * ((q.x - 0.5) * 1.15 * s + (u_layer - 1.0) * 0.12 * s) + vec3(0.0, q.y * 2.0 * s - 0.1 * s, 0.0) + fwd * (u_layer - 1.0) * 0.08 * s;
+  v_wpos = p;
+  vec4 vp = u_view * vec4(p, 1.0);
+  v_depth = -vp.z;
+  gl_Position = u_proj * vp;
+}
+)";
+const char* FLAME_FS = R"(
+in vec2 v_uv;
+in float v_depth;
+in vec3 v_wpos;
+uniform float u_layer;
+uniform float u_seed;
+out vec4 fragColor;
+void main(){
+  vec2 uv = v_uv;
+  float t = u_clock * (1.6 + 0.25 * u_layer) + u_seed;
+  // rising turbulence, stronger toward the tips
+  float n1 = vnoise(vec2(uv.x * 4.0 + u_seed, uv.y * 3.0 - t * 2.2));
+  float n2 = vnoise(vec2(uv.x * 9.0 - u_seed, uv.y * 7.0 - t * 3.7));
+  float turb = (n1 * 0.65 + n2 * 0.35 - 0.5);
+  float x = uv.x - 0.5 + turb * 0.35 * uv.y + sin(t * 1.7 + uv.y * 5.0) * 0.04 * uv.y;
+  // teardrop: wide base, narrowing tongue
+  float width = 0.42 * pow(1.0 - uv.y, 0.75) * (0.75 + 0.25 * smoothstep(0.0, 0.25, uv.y));
+  float body = 1.0 - smoothstep(width * 0.55, width, abs(x));
+  float top = 1.0 - smoothstep(0.55 + 0.3 * n1, 1.0, uv.y);
+  float a = body * top * smoothstep(0.0, 0.06, uv.y);
+  if (a < 0.02) discard;
+  float core = (1.0 - smoothstep(0.0, width * 0.55, abs(x))) * (1.0 - smoothstep(0.1, 0.65, uv.y));
+  vec3 red = vec3(0.85, 0.16, 0.02), orange = vec3(1.0, 0.45, 0.06), yellow = vec3(1.0, 0.82, 0.32), white = vec3(1.0, 0.96, 0.82);
+  vec3 c = mix(red, orange, smoothstep(0.1, 0.5, a));
+  c = mix(c, yellow, smoothstep(0.45, 0.85, a) * (1.0 - uv.y * 0.6));
+  c = mix(c, white, core * 0.85);
+  float lum = mix(1.2, 2.4, core) * (0.85 + 0.3 * n2);
+  if (u_layer > 1.5) { c = mix(c, red, 0.5); lum *= 0.6; }
+  fragColor = vec4(c * lum * a, 1.0);
+}
+)";
+GLuint g_flameVao = 0;
+
 const char* EMBER_VS = R"(
 in vec3 a_pos;
 uniform vec4 u_place;
@@ -258,24 +311,20 @@ void drawTransparent() {
   glEnable(GL_BLEND);
   glDisable(GL_CULL_FACE);
   if (!g_fires.empty()) {
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE);
-    Shader& s = render::program("basic", BASIC_VS, BASIC_FS);
-    s.set1f("u_fog", 1);
-    s.set1f("u_useVC", 1);
-    float t = E.clock;
-    Color outer = Color::hex("f97316"), inner = Color::hex("fde047");
+    glBlendFunc(GL_ONE, GL_ONE);
+    if (!g_flameVao) glGenVertexArrays(1, &g_flameVao);
+    Shader& fl = render::program("flame", FLAME_VS, FLAME_FS);
+    glBindVertexArray(g_flameVao);
     for (auto& f : g_fires) {
       if (render::cam.pos.distanceTo({f.x, f.y, f.z}) > 260 || !render::sphereVisible({f.x, f.y + f.s, f.z}, 2 * f.s + 1)) continue;
-      Mat4 root = Mat4::compose({f.x, f.y, f.z}, Quat(), {f.s, f.s, f.s});
-      Mat4 mo = root * Mat4::compose({0, 0, 0}, Quat::axisAngle({0, 1, 0}, t * 0.8f), {1 + std::sin(t * 9) * 0.06f, 1 + std::sin(t * 7.3f) * 0.12f, 1 + std::cos(t * 8) * 0.06f});
-      s.setMat4("u_model", mo);
-      s.set4f("u_color", outer.r, outer.g, outer.b, 0.9f);
-      models::cone6().draw();
-      Mat4 mi = root * Mat4::scale({1, 1 + std::sin(t * 11 + 1) * 0.15f, 1});
-      s.setMat4("u_model", mi);
-      s.set4f("u_color", inner.r, inner.g, inner.b, 0.95f);
-      models::cone5().draw();
+      fl.set4f("u_place", f.x, f.y, f.z, f.s);
+      fl.set1f("u_seed", f.x * 0.37f + f.z * 0.11f);
+      for (int l = 2; l >= 0; l--) {  // outer red, mid orange, bright core
+        fl.set1f("u_layer", (float)l);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        gfx::drawCalls++;
+      }
     }
     glBlendFunc(GL_ONE, GL_ONE);
     glEnable(GL_PROGRAM_POINT_SIZE);
@@ -289,7 +338,7 @@ void drawTransparent() {
     }
     for (auto& f : g_fires) {
       float night = E.isNight ? 1.5f : 1;
-      g_glows.insert(g_glows.end(), {f.x, f.y + 0.8f * f.s, f.z, -(3.0f + std::sin(t * 6) * 0.25f) * night * f.s});
+      g_glows.insert(g_glows.end(), {f.x, f.y + 0.8f * f.s, f.z, -(3.0f + std::sin(E.clock * 6) * 0.25f) * night * f.s});
     }
     glDepthMask(GL_TRUE);
   }

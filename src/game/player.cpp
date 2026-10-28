@@ -366,7 +366,7 @@ void update(float dt) {
   P.pos.x += (g_vel.x + P.knock.x) * dt;
   P.pos.z += (g_vel.z + P.knock.z) * dt;
   P.knock *= std::max(0.0f, 1 - dt * 5);
-  { int pi_ = forest::profOpen ? forest::profOpen("treeCollision") : -1; forest::resolveTreeCollision(P.pos.x, P.pos.z, 0.38f); if (forest::profClose) forest::profClose(pi_); }
+  { int pi_ = forest::profOpen ? forest::profOpen("treeCollision") : -1; forest::resolveTreeCollision(P.pos.x, P.pos.z, 0.38f); bridgeRailCollision(P.pos.x, P.pos.z, P.pos.y - 1.7f); if (forest::profClose) forest::profClose(pi_); }
   resolveBuildingCollision(P.pos.x, P.pos.z, 0.38f);
   P.pos.x = clampf(P.pos.x, -MAP_HALF + 4, MAP_HALF - 4);
   P.pos.z = clampf(P.pos.z, -MAP_HALF + 4, MAP_HALF - 4);

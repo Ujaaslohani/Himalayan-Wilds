@@ -211,6 +211,7 @@ uniform sampler2D u_color;
 uniform vec4 u_grid;
 in vec3 v_farCol;
 uniform sampler2D u_bake;
+uniform sampler2D u_height;
 out vec4 fragColor;
 void main(){
   float fd = distance(v_wpos.xz, u_camPos.xz);
@@ -218,7 +219,10 @@ void main(){
   vec4 b = texture(u_bake, v_cell / (u_grid.z - 1.0));
   vec3 sc = b.rgb * b.rgb;
   float road = b.a;
-  vec3 n = normalize(v_nrm);
+  // per-pixel normal from the filtered height field: smooth curved shading instead of triangle facets
+  vec2 tc = (v_cell + 0.5) / u_grid.z, px = vec2(1.0 / u_grid.z, 0.0);
+  float hl = texture(u_height, tc - px.xy).r, hr = texture(u_height, tc + px.xy).r, hd = texture(u_height, tc - px.yx).r, hu = texture(u_height, tc + px.yx).r;
+  vec3 n = normalize(mix(normalize(vec3(hl - hr, 2.0 * u_grid.y, hd - hu)), normalize(v_nrm), smoothstep(40.0, 85.0, fd)));
   if (road > 0.01 && fd < 70.0) {
     vec4 t = texture(u_color, (v_cell + 0.5) / u_grid.z);
     sc = groundShade(srgbToLinear(t.rgb), v_wpos, n.y, t.a);

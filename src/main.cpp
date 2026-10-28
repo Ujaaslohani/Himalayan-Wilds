@@ -378,7 +378,12 @@ int main(int argc, char** argv) {
     for (auto& r : reqs) if (r.file == f) have = true;
     if (!have) reqs.push_back({f, f.find("Rock") != std::string::npos ? "rock" : "under", -1});
   }
+  {
+    auto ov = assets::procOverrides();
+    reqs.erase(std::remove_if(reqs.begin(), reqs.end(), [&](const AssetRequest& r) { return std::find(ov.begin(), ov.end(), r.file) != ov.end(); }), reqs.end());
+  }
   assets::loadAll(reqs);
+  assets::buildProcTrees();
   for (auto& m : assets::missing()) std::fprintf(stderr, "missing asset: %s (place it in assets/models)\n", m.c_str());
 
   mem("assets");
@@ -435,6 +440,10 @@ int main(int argc, char** argv) {
         {738, "sky", [=] {}},
         {606, "tday", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; E.cutscene.dur = 0; const Shrine& sh = world::SHRINES[0]; float x = sh.x + std::sin(sh.yaw) * 11.0f + 3.0f, z = sh.z + std::cos(sh.yaw) * 11.0f + 2.0f; E.player.pos = {x, std::max(world::getTerrainHeight(x, z), sh.y) + 1.7f, z}; E.player.velY = 0; E.player.yaw = std::atan2(-(sh.x - x), -(sh.z - z)); E.player.pitch = 0.1f; }},
         {620, "tday2", [=] {}},
+        {621, "", [=] { E.player.pitch = -0.6f; }},
+        {634, "tfloor", [=] {}},
+        {636, "", [=] { restoreSeason(1, 1, 18.6f); E.time = 18.6f; float ang = (18.6f - 6) / 24 * TAU; Vec3 sd = Vec3(std::cos(ang), std::sin(ang), -0.32f).normalized(); look(4, 18, std::atan2(-sd.x, -sd.z), 0.05f)(); }},
+        {648, "sset", [=] {}},
         {605, "rock2", [=] { g_settings.undergrowthRadius = 0; forest::markDirty(); restoreSeason(0, 1, 10.5f); E.time = 10.5f; float rx = 40, rz = -60, rs = 1; forest::nearestRock(4, 30, rx, rz, rs); float x = rx - 1.2f * rs - 1.0f, z = rz - 1.0f * rs - 0.6f; look(x, z, std::atan2(-(rx - x), -(rz - z)), -0.5f)(); }},
         {370, "tclose", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 7, z = tz + 2; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.3f)(); }},
         {385, "tclose2", [=] {}},
@@ -492,6 +501,8 @@ int main(int argc, char** argv) {
         {610, "temple", [=] { E.time = 19.1f; ([=] { A.tab = Tab::None; const Shrine& sh = world::SHRINES[0]; float x = sh.x + std::sin(sh.yaw) * 26, z = sh.z + std::cos(sh.yaw) * 26; E.player.pos = {x, std::max(world::getTerrainHeight(x, z), sh.y) + 3.5f, z}; E.player.velY = 0; E.player.yaw = sh.yaw; E.player.pitch = -0.08f; })(); }},
         {616, "temple2", [=] { restoreSeason(3, 1, 19.8f); E.time = 19.8f; A.tab = Tab::None; E.cutscene.dur = 0; const Shrine& sh = world::SHRINES[0]; float L = std::sqrt(sh.x * sh.x + sh.z * sh.z); float x = sh.x - sh.x / L * 30, z = sh.z - sh.z / L * 30; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.7f, z}; E.player.velY = 0; E.player.yaw = std::atan2(sh.x, sh.z); E.player.pitch = -0.45f; g_profMs.clear(); g_profTri.clear(); g_profDraw.clear(); g_prof = platform::hasArg("--prof"); }},
         {624, "temple3", [=] { if (g_prof) { for (auto& kv : g_profMs) std::printf("prof %8.1f ms %9lld tri %5lld draws  %s\n", kv.second, g_profTri[kv.first], g_profDraw[kv.first], kv.first.c_str()); } g_prof = false; }},
+        {862, "", [=] { A.menuOpen = false; A.tab = Tab::None; screens::openOptions(false); restoreSeason(1, 1, 10.5f); E.time = 10.5f; std::vector<float> t; forest::nearTrees(10, 40, 160, t, 12); float tx = 10, tz = 40, ts = 1; for (size_t i = 0; i + 3 < t.size(); i += 4) if (std::fabs(world::getTerrainHeight(t[i], t[i + 2]) - world::getTerrainHeight(t[i] + 12, t[i + 2] + 4)) < 2.5f) { tx = t[i]; tz = t[i + 2]; ts = t[i + 3]; break; } float x = tx + 12, z = tz + 4; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.22f)(); }},
+        {876, "ptree", [=] {}},
         {826, "options", [=] { screens::openOptions(true); }},
         {830, "place", [=] { screens::openOptions(false); A.menuOpen = false; look(4, 16, 0.3f, -0.15f)(); for (auto& k : {"wood", "stone", "fiber"}) A.inv[k] = 99; app::startStructure(SK_COTTAGE); A.showStyle = true; }},
         {832, "dialogue", [=] { actions::cancelPlacement(); actions::openDialogue("carpenter"); }},

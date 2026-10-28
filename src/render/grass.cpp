@@ -47,6 +47,10 @@ void main(){
   float gust = u_windS * (0.6 + 0.4 * sin(u_windT * 1.1 + p.x * 0.05 + p.y * 0.04));
   float sway = (0.35 + 0.65 * sin(u_windT * 2.3 + p.x * 0.35 + p.y * 0.27 + h.w * 6.0)) * gust;
   vec2 lean = face * (0.15 + 0.25 * fract(h.y * 9.1)) + u_windDir * sway * 0.55;
+  // bend away from the player
+  vec2 away = p - u_camPos.xz;
+  float pd = length(away);
+  if (pd < 1.3 && abs(u_camPos.y - 1.7 - base) < 1.5) lean += away / max(pd, 0.05) * (1.0 - pd / 1.3) * 1.4;
   vec2 xz = p + side * a_pos.x * W * (1.0 - t * 0.85) + lean * H * t * t;
   float y = base + H * t * (1.0 - 0.18 * t * length(lean));
   vec3 wpos = vec3(xz.x, y, xz.y);
@@ -57,7 +61,13 @@ void main(){
   vec3 tip = gc * vec3(1.35, 1.3, 0.95) + vec3(0.02, 0.025, 0.0);
   tip = mix(tip, vec3(0.62, 0.5, 0.22), 0.35 * u_dry + 0.25 * u_autumn);
   tip = mix(tip, vec3(0.85, 0.88, 0.92), u_snow * 0.7);
-  vec3 alb = mix(gc * 0.62, tip, smoothstep(0.0, 1.0, t)) * (0.85 + 0.3 * h.z);
+  // per-clump hue and dry tips
+  float clump = vnoise(p * 0.18);
+  tip = mix(tip, tip * vec3(1.12, 0.96, 0.78), smoothstep(0.55, 0.8, clump));
+  float dryTip = step(0.82, fract(h.x * 13.1 + h.y * 5.3)) * smoothstep(0.7, 1.0, t);
+  tip = mix(tip, vec3(0.6, 0.52, 0.28) * (gc.g * 4.0 + 0.3), dryTip * 0.6);
+  vec3 alb = mix(gc * 0.62, tip, smoothstep(0.0, 1.0, t)) * (0.85 + 0.3 * h.z) * mix(0.9, 1.08, clump);
+  alb = mix(gc * 0.9, alb, smoothstep(0.0, 0.6, grow));  // fade into the ground colour at the ring edge
   vec3 n = normalize(vec3(0.0, 1.0, 0.0) + (u_sunDir.xyz * vec3(1.0, 0.0, 1.0)) * 0.35);
   float sh = shadowAt(t > 0.5 ? wpos : vec3(p.x, base + 0.3, p.y), vec3(0.0, 1.0, 0.0));
   vec3 c = outColor(lambert(alb, n, sh) * (0.7 + 0.3 * t));
@@ -112,10 +122,10 @@ void main(){
   if (fract(h.w * 13.7) > fadeK) { kill(); return; }
   float ang = h.w * 6.2831853;
   vec2 ax = vec2(cos(ang), sin(ang)), az = vec2(-ax.y, ax.x);
-  float L = mix(0.07, 0.13, fract(h.x * 5.3)) * (1.0 + d * 0.012);
+  float L = mix(0.08, 0.15, fract(h.x * 5.3)) * (1.0 + d * 0.012);
   vec2 xz = p + ax * a_pos.x * L * 0.55 + az * a_pos.y * L;
   vec2 gg = (xz - u_grid.xx) / u_grid.y;
-  float y = heightAt(gg) + 0.012 + 0.01 * fract(h.y * 7.1);
+  float y = heightAt(gg) + 0.012 + 0.01 * fract(h.y * 7.1) + 0.012 * a_pos.x * a_pos.x;  // curled edges
   vec4 cc = u_viewProj * vec4(xz.x, y, xz.y, 1.0);
   v_wpos = vec3(xz.x, y, xz.y);
   vec4 vp = u_view * vec4(v_wpos, 1.0);
@@ -132,21 +142,47 @@ in float v_depth;
 in vec2 v_uv;
 in vec4 v_h;
 out vec4 fragColor;
+// leaf silhouette in local coords: q.y along leaf (-1 stem .. 1 tip), q.x across. returns signed inside (>0 inside)
+float leafShape(vec2 q, float kind){
+  float y = q.y * 0.5 + 0.5;
+  if (y < 0.0 || y > 1.0) return -1.0;
+  float w;
+  if (kind < 0.33) {            // ovate, pointed tip, fine teeth
+    w = 0.48 * pow(sin(y * 3.14159), 0.75) * (1.15 - 0.5 * y) * (1.0 + 0.06 * sin(y * 60.0));
+  } else if (kind < 0.66) {     // oak: rounded lobes
+    w = 0.5 * pow(sin(y * 3.14159), 0.55) * (0.62 + 0.38 * abs(sin(y * 14.0 + 0.4))) * (1.0 - 0.2 * y);
+  } else {                      // maple: five pointed lobes (polar)
+    vec2 c = vec2(q.x, q.y + 0.25);
+    float r = length(c), th = atan(c.x, c.y);
+    if (abs(th) > 2.6) return -1.0;
+    float lob = 0.42 + 0.5 * pow(abs(cos(th * 2.5)), 0.6);
+    return lob * 0.85 - r;
+  }
+  return w - abs(q.x);
+}
 void main(){
-  float y = v_uv.y;
-  float w = 0.95 * pow(max(0.0, 1.0 - y * y), 0.75);
-  float lobe = 1.0 + 0.12 * sin(y * 9.0 + v_h.x * 6.0);
-  if (abs(v_uv.x) > w * lobe) discard;
+  vec2 q = v_uv;
+  float kind = fract(v_h.x * 7.3 + v_h.y * 2.9);
+  float inside = leafShape(q, kind);
+  float stem = step(abs(q.x), 0.035) * step(q.y, -0.9) * step(-1.2, q.y);
+  if (inside < 0.0 && stem < 0.5) discard;
   float k = fract(v_h.z * 17.3 + v_h.y * 3.1);
-  vec3 c0 = vec3(0.62, 0.16, 0.03), c1 = vec3(0.78, 0.36, 0.04), c2 = vec3(0.72, 0.55, 0.08), c3 = vec3(0.36, 0.17, 0.06);
-  vec3 alb = k < 0.3 ? c0 : k < 0.6 ? c1 : k < 0.85 ? c2 : c3;
-  alb *= 0.8 + 0.35 * fract(v_h.w * 29.0);
-  alb *= mix(0.65, 1.0, smoothstep(0.0, 0.09, abs(v_uv.x)));
-  float vein = smoothstep(0.06, 0.0, abs(abs(v_uv.x) - (y + 1.0) * 0.18 * w) ) * step(0.15, abs(v_uv.x));
-  alb *= 1.0 - 0.15 * vein;
+  vec3 c0 = vec3(0.62, 0.16, 0.03), c1 = vec3(0.8, 0.38, 0.05), c2 = vec3(0.74, 0.56, 0.1), c3 = vec3(0.34, 0.18, 0.07), c4 = vec3(0.22, 0.13, 0.06);
+  vec3 alb = k < 0.25 ? c0 : k < 0.5 ? c1 : k < 0.68 ? c2 : k < 0.86 ? c3 : c4;
+  // decay: brown spots and drier edges on older leaves
+  float spot = smoothstep(0.62, 0.7, vnoise(v_wpos.xz * 40.0 + v_h.xy * 9.0));
+  alb = mix(alb, c4, spot * 0.6);
+  alb *= 0.82 + 0.3 * fract(v_h.w * 29.0);
+  float rib = 1.0 - 0.28 * smoothstep(0.04, 0.0, abs(q.x));
+  float vt = q.y * 4.0 - abs(q.x) * 3.0;
+  float vein = 1.0 - 0.12 * smoothstep(0.1, 0.0, abs(fract(vt) - 0.5));
+  float edge = mix(0.65, 1.0, smoothstep(0.0, 0.06, inside));
+  float curl = mix(0.82, 1.06, smoothstep(0.0, 0.4, abs(q.x)));     // edges catch more light than the creased middle
+  alb *= rib * vein * edge * curl;
+  if (stem > 0.5) alb = c4;
   alb = mix(alb, vec3(0.85, 0.88, 0.92), u_snow * 0.8);
-  vec3 n = vec3(0.0, 1.0, 0.0);
-  float sh = shadowAt(v_wpos, n);
+  vec3 n = normalize(vec3(q.x * 0.35, 1.0, 0.0));
+  float sh = shadowAt(v_wpos, vec3(0.0, 1.0, 0.0));
   vec3 c = outColor(lambert(alb, n, sh));
   c = mix(c, fogTint(v_wpos), fogGround(v_wpos, v_depth));
   fragColor = vec4(c, 1.0);
@@ -219,7 +255,7 @@ GTile* tileFor(int ring, float s, int tx, int tz, bool prewarm = false) {
 }
 
 void evictTiles() {
-  const size_t CAP = 192u << 20;
+  const size_t CAP = 64u << 20;
   if (g_tileBytes <= CAP) return;
   std::vector<std::pair<uint64_t, uint64_t>> order;
   for (auto& kv : g_tiles) if (kv.second.used + 2 < g_frame) order.push_back({kv.second.used, kv.first});
@@ -281,10 +317,12 @@ void init() {
 void draw() {
   float R = g_settings.fullMap ? 220.0f : std::max(40.0f, g_settings.grassRadius * 3.3f);
   R *= (0.5f + 0.5f * forest::detailLevel()) * (1.0f - 0.3f * season.snow);
-  Ring rings[3] = {
+  float RF = std::max(R + 40.0f, 420.0f * std::min(1.5f, g_settings.drawDist() / 2.0f));
+  Ring rings[4] = {
       {0.17f, 0, std::min(26.0f, R * 0.25f), 6, 0.055f, 1.0f, 1.0f},
       {0.36f, std::min(26.0f, R * 0.25f), R * 0.55f, 6, 0.1f, 1.05f, 0.95f},
-      {0.85f, R * 0.55f, R, 14, 0.24f, 1.1f, 0.9f},
+      {1.15f, R * 0.55f, R, 14, 0.34f, 1.1f, 0.9f},
+      {3.0f, R, RF, 40, 1.1f, 1.25f, 0.85f},  // sparse wide blades out to the horizon
   };
   static const std::string vs = std::string(terrain_render::groundCommon()) + GRASS_VS;
   Shader& s = render::program("grassgpu", vs.c_str(), GRASS_FS);
@@ -299,7 +337,7 @@ void draw() {
   g_frame++;
   const Camera& cam = render::cam;
   float snowK = 1.0f - 0.75f * season.snow;
-  for (int ri = 0; ri < 3; ri++) {
+  for (int ri = 0; ri < 4; ri++) {
     const Ring& r = rings[ri];
     s.set4f("u_ring", r.spacing, r.rIn, r.rOut, r.fade);
     s.set4f("u_blade", r.width, r.height, r.density * snowK, 0);
@@ -331,7 +369,7 @@ void draw() {
         g_lastBlades += t.n;
       }
   }
-  for (int ri = 0; ri < 3; ri++) {
+  for (int ri = 0; ri < 4; ri++) {
     const Ring& r = rings[ri];
     float ts = GT * r.spacing, R2 = r.rOut + ts;
     int tx0 = (int)std::floor((cam.pos.x - R2) / ts), tx1 = (int)std::floor((cam.pos.x + R2) / ts);

@@ -10,7 +10,7 @@ struct Settings {
   bool vsync = true;
   int msaa = 0;
   bool fxaa = true;
-  int shadowSize = 1536;
+  int shadowSize = 2048;
   float mouseSensitivity = 0.0024f;
   float playerSpeed = 4.8f;
   float sprintMultiplier = 1.75f;
@@ -29,7 +29,7 @@ struct Settings {
   int triBudget = 300000;
   float uiScale = 1.0f;
   float renderScale = 1.0f;
-  float drawDistance = 1.6f;
+  float drawDistance = 3.0f;
   bool fullMap = false;
   int fpsLimit = 60;
   int menuFps = 30;

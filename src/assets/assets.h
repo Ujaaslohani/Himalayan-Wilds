@@ -41,4 +41,8 @@ const Asset* get(const std::string& file);
 std::vector<std::string> missing();
 SeasonKind kindFor(const std::string& matName, const std::string& layer);
 void shutdown();
+void buildProcTrees();
+std::vector<uint8_t> loadImageRGBA(const std::string& rel, int& w, int& h);
+std::vector<std::string> procTreeFiles();
+std::vector<std::string> procOverrides();
 }

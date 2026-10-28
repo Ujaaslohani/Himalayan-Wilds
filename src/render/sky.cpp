@@ -37,7 +37,8 @@ void main(){
   float hz = smoothstep(-0.02, 0.03, d.y);
   float day = u_daylight;
   col += u_sunTint * (pow(sd, 1400.0) * 0.6 + pow(sd, 90.0) * 0.35 + pow(sd, 10.0) * 0.2) * day;
-  col = mix(col, vec3(1.0, 0.97, 0.88) * 1.6 + u_sunTint * 0.2, smoothstep(0.99955, 0.99972, sd) * hz);
+  vec3 disc = mix(vec3(1.0, 0.97, 0.88) * 1.6 + u_sunTint * 0.2, u_sunTint * 1.45, 1.0 - smoothstep(0.03, 0.4, u_sun.y));
+  col = mix(col, disc, smoothstep(0.99955, 0.99972, sd) * hz);
   float md = dot(d, u_moon);
   float night = 1.0 - day;
   if (md > 0.995) {
@@ -58,8 +59,9 @@ void main(){
     float n2 = fbm3(uv + u_sun.xz * 0.12);
     float lit = clamp(0.7 + (n - n2) * 3.0, 0.15, 1.25);
     float mglow = pow(max(md, 0.0), 6.0);
-    vec3 dark = mix(vec3(0.025, 0.03, 0.05), vec3(0.52, 0.56, 0.64), day);
-    vec3 bright = mix(vec3(0.07, 0.085, 0.12) + vec3(0.16, 0.18, 0.22) * mglow, mix(u_sunTint, vec3(1.0), 0.55), day);
+    float cday = smoothstep(0.0, 0.3, day);  // clouds stay lit until late dusk
+    vec3 dark = mix(vec3(0.025, 0.03, 0.05), vec3(0.52, 0.56, 0.64), cday);
+    vec3 bright = mix(vec3(0.07, 0.085, 0.12) + vec3(0.16, 0.18, 0.22) * mglow, mix(u_sunTint, vec3(1.0), 0.55), cday);
     vec3 cc = mix(dark, bright, clamp(lit, 0.0, 1.0)) + u_sunTint * pow(sd, 6.0) * (1.0 - c) * 0.6 * day + vec3(0.35, 0.42, 0.55) * pow(max(md, 0.0), 160.0) * night * 0.35;
     float fade = smoothstep(0.0, 0.07, d.y);
     col = mix(col, cc, c * fade * 0.94);
@@ -174,7 +176,7 @@ void main(){
   v_a = on * smoothstep(0.0, 0.06, t) * (1.0 - smoothstep(0.88, 1.0, t));
   v_rot = ft * (1.5 + sd.y * 3.0) + sd.z * 10.0;
   v_seed = sd;
-  gl_PointSize = on * clamp((0.09 + sd.x * 0.05) * u_viewH / max(-mv.z, 0.1), 1.5, 16.0);
+  gl_PointSize = on * clamp((0.13 + sd.x * 0.06) * u_viewH / max(-mv.z, 0.1), 1.5, 26.0);
 }
 )";
 const char* LEAF_FS = R"(
@@ -183,18 +185,50 @@ in float v_rot;
 in vec3 v_seed;
 uniform float u_petal;
 out vec4 fragColor;
+// leaf silhouette in local coords: q.y along leaf (-1 stem .. 1 tip), q.x across. returns signed inside (>0 inside)
+float leafShape(vec2 q, float kind){
+  float y = q.y * 0.5 + 0.5;
+  if (y < 0.0 || y > 1.0) return -1.0;
+  float w;
+  if (kind < 0.33) {            // ovate, pointed tip, fine teeth
+    w = 0.48 * pow(sin(y * 3.14159), 0.75) * (1.15 - 0.5 * y) * (1.0 + 0.06 * sin(y * 60.0));
+  } else if (kind < 0.66) {     // oak: rounded lobes
+    w = 0.5 * pow(sin(y * 3.14159), 0.55) * (0.62 + 0.38 * abs(sin(y * 14.0 + 0.4))) * (1.0 - 0.2 * y);
+  } else {                      // maple: five pointed lobes (polar)
+    vec2 c = vec2(q.x, q.y + 0.25);
+    float r = length(c), th = atan(c.x, c.y);
+    if (abs(th) > 2.6) return -1.0;
+    float lob = 0.42 + 0.5 * pow(abs(cos(th * 2.5)), 0.6);
+    return lob * 0.85 - r;
+  }
+  return w - abs(q.x);
+}
 void main(){
   vec2 q = gl_PointCoord - 0.5;
   float c = cos(v_rot), s = sin(v_rot);
   q = vec2(c * q.x - s * q.y, s * q.x + c * q.y);
-  float flip = 0.35 + 0.65 * abs(sin(v_rot * 0.7));
+  float tumble = sin(v_rot * 0.7);
+  float flip = 0.3 + 0.7 * abs(tumble);
   q.x /= flip;
-  float d = length(q * vec2(1.0, 1.9)) * 2.0;
-  if (d > 1.0 || v_a < 0.01) discard;
-  vec3 au = mix(vec3(0.95, 0.38, 0.05), vec3(0.7, 0.1, 0.04), smoothstep(0.3, 0.7, v_seed.z));
-  au = mix(au, vec3(0.98, 0.7, 0.1), step(0.8, v_seed.x));
+  q *= 2.1;
+  float kind = fract(v_seed.x * 7.3 + v_seed.z * 3.1);
+  float inside = u_petal > 0.5 ? 0.9 - length(q * vec2(1.4, 1.0)) : leafShape(q, kind);
+  float stem = u_petal > 0.5 ? 0.0 : step(abs(q.x), 0.03) * step(q.y, -0.9) * step(-1.15, q.y);
+  if ((inside < 0.0 && stem < 0.5) || v_a < 0.01) discard;
+  vec3 au = mix(vec3(0.95, 0.38, 0.05), vec3(0.72, 0.12, 0.04), smoothstep(0.3, 0.7, v_seed.z));
+  au = mix(au, vec3(0.96, 0.7, 0.12), step(0.78, v_seed.x));
+  au = mix(au, vec3(0.45, 0.24, 0.08), step(0.9, fract(v_seed.y * 11.0)));
   vec3 pe = mix(vec3(1.0, 0.75, 0.85), vec3(1.0, 0.95, 0.97), v_seed.z);
-  vec3 col = mix(au, pe, u_petal) * (0.75 + 0.25 * flip) * (0.3 + 0.7 * u_daylight);
+  vec3 col = mix(au, pe, u_petal);
+  float rib = 1.0 - 0.25 * smoothstep(0.035, 0.0, abs(q.x)) * (1.0 - u_petal);
+  float vt = q.y * 4.0 - abs(q.x) * 3.0;
+  float vein = 1.0 - 0.1 * smoothstep(0.1, 0.0, abs(fract(vt) - 0.5)) * (1.0 - u_petal);
+  float edge = mix(0.72, 1.0, smoothstep(0.0, 0.05, inside));
+  col *= rib * vein * edge;
+  col *= tumble > 0.0 ? 1.0 : 0.78;                      // paler underside / shaded back
+  col *= mix(vec3(1.0), u_sunCol.rgb * 0.6 + 0.5, 0.35); // pick up the light colour
+  col *= (0.7 + 0.3 * flip) * (0.3 + 0.7 * u_daylight);
+  if (stem > 0.5) col = vec3(0.3, 0.18, 0.08) * (0.3 + 0.7 * u_daylight);
   fragColor = vec4(col, v_a);
 }
 )";
@@ -202,7 +236,7 @@ void main(){
 struct SkyCols { Color zen, hor; };
 const Color NIGHT = Color::hex("0b1430"), NIGHTH = Color::hex("1c2846"), DAWN = Color::hex("f08a4b"), DAWNH = Color::hex("fbc99a");
 const Color DAY = Color::hex("78bdf0"), DAYH = Color::hex("d3e8ee"), GOLD = Color::hex("f6a35c"), GOLDH = Color::hex("fde3a7");
-const Color SUN = Color::hex("fff1d6"), SUNLOW = Color::hex("ffc58a"), MOON = Color::hex("9db4e0");
+const Color SUN = Color::hex("fff1d6"), SUNLOW = Color::hex("ffc58a"), SUNSET = Color::hex("ff7a2a"), MOON = Color::hex("9db4e0");
 const Color WINTER_H = Color::hex("e4eaf0"), WINTER_Z = Color::hex("9fb6cc"), AUTUMN_H = Color::hex("f3d9b5");
 const Color G_SUMMER = Color::hex("7a9a45"), G_AUTUMN = Color::hex("9a7038"), G_WINTER = Color::hex("c9d3dc"), HEMI_SKY = Color::hex("d6ecff");
 const float SHADOW_HALF = 32;
@@ -344,7 +378,10 @@ void update(float dt) {
   g_sunDir = Vec3(std::cos(ang), elev, -0.32f).normalized();
   g_moonDir = Vec3(-std::cos(ang) * 0.92f, -elev, 0.42f).normalized();
   float moonUp = sstep(g_moonDir.y, -0.04f, 0.22f);
-  float sunI = 2.1f * std::pow(daylight, 1.15f) * (1 - 0.18f * snow);
+  // golden hour: as the sun nears the horizon its light turns orange and dims, gradually
+  float sunElev = g_sunDir.y;
+  float dusk = 1.0f - sstep(sunElev, 0.02f, 0.42f);
+  float sunI = 2.1f * std::pow(daylight, 1.15f) * (1 - 0.18f * snow) * (1.0f - 0.28f * dusk * dusk);
   float moonI = 0.32f * moonUp * (1 - daylight);
   bool useSun = sunI >= moonI;
   // shadows fade out as sun and moon trade places, so the light direction swap is never visible
@@ -353,7 +390,7 @@ void update(float dt) {
   g_lightDir = useSun ? g_sunDir : g_moonDir;
   g_lightDir.y = std::max(g_lightDir.y, 0.1f);
   g_lightDir.normalize();
-  g_sunTint = daylight > 0.55f ? SUN : SUNLOW;
+  g_sunTint = SUN.lerp(SUNLOW, sstep(dusk, 0.0f, 0.55f)).lerp(SUNSET, sstep(dusk, 0.45f, 1.0f));
   Color lightCol = useSun ? g_sunTint : MOON;
   float lightI = std::max(std::max(sunI, moonI), 0.05f);
   float hemiI = lerpf(0.32f, 1.05f, daylight);

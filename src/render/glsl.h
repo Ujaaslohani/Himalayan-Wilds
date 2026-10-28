@@ -310,7 +310,7 @@ const vec3 SNOWC = vec3(0.86, 0.9, 0.96);
 #endif
 vec3 seasonColor(vec3 sc, vec3 wp, float ny, float seed){
 #if defined(K_LEAF)
-  float sL = mix(0.85, clamp(dot(sc, vec3(0.3, 0.59, 0.11)) * 3.2, 0.35, 1.25), 0.35);
+  float sL = mix(0.85, clamp(dot(sc, vec3(0.3, 0.59, 0.11)) * 3.2, 0.35, 1.25), 0.75);
   float sNear = 1.0 - smoothstep(10.0, 30.0, distance(wp, u_camPos));
   vec3 sAu = mix(vec3(0.95, 0.33, 0.03), vec3(0.62, 0.06, 0.03), mix(0.5, smoothstep(0.35, 0.75, seed), sNear));
   sAu = mix(sAu, vec3(0.98, 0.62, 0.05), step(0.8, seed) * sNear * 0.8);

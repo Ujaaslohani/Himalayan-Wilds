@@ -674,6 +674,11 @@ void migrate(Herd* h, float dt) {
       float x = h->ax + std::cos(ang) * r, z = h->az + std::sin(ang) * r;
       if (std::fabs(x) > MAP_HALF - 30 || std::fabs(z) > MAP_HALF - 30) continue;
       if (hypot2(x, z) < (PRED(h->sp) ? 110.0f : 45.0f)) continue;
+      if (h->sp == SP_DEER && hypot2(x, z) < 150) {  // at most one deer herd near camp
+        bool other = false;
+        for (auto& o : herds) if (o.get() != h && o->sp == SP_DEER && hypot2(o->ax, o->az) < 150) other = true;
+        if (other) continue;
+      }
       float s = habitatScore(h->sp, x, z);
       if (PRED(h->sp)) {
         for (auto& o : herds)
@@ -752,14 +757,15 @@ void spawn(uint32_t seed) {
   Rng rnd(seed);
   std::vector<Species> order;
   for (int sp = 0; sp < SP_COUNT; sp++)
-    for (int i = 0; i < SPEC[sp].groups * 3; i++) order.push_back((Species)sp);
+    for (int i = 0; i < SPEC[sp].groups * ((sp == SP_DEER || sp == SP_GORAL) ? 1 : 3); i++) order.push_back((Species)sp);
   for (size_t gi = 0; gi < order.size(); gi++) {
     Species sp = order[gi];
     bool tutorial = gi == 0;
     float bs = -1, bx = 0, bz = 0;
     for (int k = 0; k < 160; k++) {
       float ang = rnd.next() * TAU;
-      float r = tutorial ? 42 + rnd.next() * 30 : (PRED(sp) ? 100.0f : 55.0f) + rnd.next() * (gi < 30 ? 170 : 470);
+      // only the tutorial herd lives near camp; other deer stay well out in the wilds
+      float r = tutorial ? 42 + rnd.next() * 30 : (PRED(sp) ? 100.0f : sp == SP_DEER ? 170.0f : 55.0f) + rnd.next() * (gi < 30 ? 170 : 400);
       if (std::fabs(std::cos(ang) * r) > MAP_HALF - 30 || std::fabs(std::sin(ang) * r) > MAP_HALF - 30) continue;
       float x = std::cos(ang) * r, z = std::sin(ang) * r;
       float s = habitatScore(sp, x, z);

@@ -913,6 +913,46 @@ void generate() {
     for (int iz = a; iz < b; iz++)
       for (int ix = 0; ix < GRID_N; ix++) g_grid[(size_t)iz * GRID_N + ix] = baseHeight(GRID_MIN + ix * GRID_STEP, GRID_MIN + iz * GRID_STEP);
   });
+  // soften the height field so slopes and ridges read as curves, not facets (stronger on steep ground)
+  // keep trails, steps, jump gaps, roads and shrine grounds exactly as carved
+  std::vector<float> keep((size_t)GRID_N * GRID_N, 1.0f);
+  parallelFor(GRID_N, [&](int a, int b) {
+    for (int iz = a; iz < b; iz++)
+      for (int ix = 0; ix < GRID_N; ix++) {
+        float x = GRID_MIN + ix * GRID_STEP, z = GRID_MIN + iz * GRID_STEP;
+        PathHit q = pathQuery(x, z);
+        float k = sstep(std::min(q.td, q.rd), 2.6f, 4.8f);  // keep the walking surface, soften the cut edges
+        for (const Shrine& sh : SHRINES) k = std::min(k, sstep(hypot2(x - sh.x, z - sh.z), 24.0f, 34.0f));
+        k = std::min(k, sstep(nearRoute(x, z), 4.0f, 9.0f));
+        keep[(size_t)iz * GRID_N + ix] = k;
+      }
+  });
+  for (int pass = 0; pass < 3; pass++) {
+    std::vector<float> src = g_grid;
+    parallelFor(GRID_N, [&](int a, int b) {
+      for (int iz = a; iz < b; iz++)
+        for (int ix = 1; ix < GRID_N - 1; ix++) {
+          if (iz == 0 || iz == GRID_N - 1) continue;
+          auto S = [&](int i, int j) { return src[(size_t)j * GRID_N + i]; };
+          float c = S(ix, iz);
+          float avg = (c * 4 + (S(ix - 1, iz) + S(ix + 1, iz) + S(ix, iz - 1) + S(ix, iz + 1)) * 2 + S(ix - 1, iz - 1) + S(ix + 1, iz - 1) + S(ix - 1, iz + 1) + S(ix + 1, iz + 1)) / 16.0f;
+          float slope = (std::fabs(S(ix + 1, iz) - S(ix - 1, iz)) + std::fabs(S(ix, iz + 1) - S(ix, iz - 1))) / (2 * GRID_STEP);
+          float k = (0.45f + 0.55f * sstep(slope, 0.15f, 0.8f)) * keep[(size_t)iz * GRID_N + ix];
+          g_grid[(size_t)iz * GRID_N + ix] = c + (avg - c) * k;
+        }
+    });
+  }
+  // natural irregularity on trail and road banks: small bumps so the edges are never ruler-straight
+  parallelFor(GRID_N, [&](int a, int b) {
+    for (int iz = a; iz < b; iz++)
+      for (int ix = 0; ix < GRID_N; ix++) {
+        float x = GRID_MIN + ix * GRID_STEP, z = GRID_MIN + iz * GRID_STEP;
+        PathHit q = pathQuery(x, z);
+        float d = std::min(q.td, q.rd);
+        float band = sstep(d, 2.6f, 3.4f) * (1 - sstep(d, 5.0f, 9.0f));
+        if (band > 0) g_grid[(size_t)iz * GRID_N + ix] += band * (fbm(x * 0.35f, z * 0.35f, 3, 91) * 0.5f + fbm(x * 1.1f, z * 1.1f, 2, 92) * 0.18f);
+      }
+  });
   g_colors.assign((size_t)GRID_N * GRID_N, 0);
   parallelFor(GRID_N, [](int a, int b) {
     for (int iz = a; iz < b; iz++)
@@ -925,7 +965,8 @@ void generate() {
         n.normalize();
         Color c = terrainColor(x, z, y, n.y);
         PathHit q = pathQuery(x, z);
-        float road = std::max(1 - sstep(q.rd, 2.0f, 3.6f), (1 - sstep(q.td, 2.4f, 4.0f)) * 0.7f);
+        float wob = fbm(x * 0.45f, z * 0.45f, 3, 93) * 1.1f + fbm(x * 1.7f, z * 1.7f, 2, 94) * 0.35f;
+        float road = std::max(1 - sstep(q.rd + wob, 2.0f, 3.2f), (1 - sstep(q.td + wob, 2.4f, 3.6f)) * 0.7f);
         g_colors[(size_t)iz * GRID_N + ix] = c.packSrgb((uint8_t)std::lround(road * 255));
       }
   });
@@ -1051,7 +1092,8 @@ Color terrainColor(float x, float z, float h, float normalY) {
   float cliff = 1 - sstep(normalY, 0.42f, 0.66f);
   out = out.lerp(rk, std::min(1.0f, (slope * 0.6f + sstep(h, 130, 155) * 0.6f) * sstep(h, 85, 135) + cliff * (0.55f + 0.35f * sstep(fine, -0.3f, 0.5f))));
   out = out.lerp(scree, (1 - slope) * sstep(h, 85, 115) * sstep(fine, -0.2f, 0.6f) * 0.5f);
-  float tq = 1 - sstep(q.td, 2.4f, 4.2f);
+  float tdw = q.td + fbm(x * 0.45f, z * 0.45f, 3, 93) * 1.1f + fbm(x * 1.7f, z * 1.7f, 2, 94) * 0.35f;  // wavy, broken edge
+  float tq = 1 - sstep(tdw, 2.4f, 3.6f);
   if (tq > 0) {
     Color t = dirt.lerp(gravel, 0.45f).lerp(dirtDark, sstep(fine, 0.2f, 0.8f) * 0.4f);
     out = out.lerp(t, tq * 0.9f);

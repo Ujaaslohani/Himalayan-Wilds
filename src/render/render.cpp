@@ -1,3 +1,4 @@
+#include "../assets/assets.h"
 #include <cstdint>
 #include <vector>
 #include <cmath>
@@ -435,11 +436,22 @@ static void ptexEnsure() {
   glBindFramebuffer(GL_FRAMEBUFFER, prev);
   glDeleteFramebuffers(1, &fbo);
   // compress colour textures to DXT1 (0.5 byte/px); normal/cavity texture stays RGBA8 for clean bumps
+  // photo rock (CC0, ambientCG Rock030) replaces the generated albedo and normals when present
+  int rw = 0, rh = 0, nw = 0, nh = 0;
+  std::vector<uint8_t> rockCol = assets::loadImageRGBA("textures/rock_a_col.jpg", rw, rh);
+  std::vector<uint8_t> rockNrm = assets::loadImageRGBA("textures/rock_a_nrm.jpg", nw, nh);
+  if (!rockNrm.empty() && nw == N && nh == N) {
+    glBindTexture(GL_TEXTURE_2D, g_ptexN);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, N, N, GL_RGBA, GL_UNSIGNED_BYTE, rockNrm.data());
+    glGenerateMipmap(GL_TEXTURE_2D);
+  }
   auto squash = [&](GLuint& t) {
     if (!gfx::hasS3TC()) return;
     std::vector<uint8_t> px((size_t)N * N * 4);
     glBindTexture(GL_TEXTURE_2D, t);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    if (t == g_ptexA && !rockCol.empty() && rw == N && rh == N)
+      for (size_t i = 0; i < px.size(); i += 4) for (int c = 0; c < 3; c++) px[i + c] = (uint8_t)(rockCol[i + c] / 2);
     for (size_t i = 3; i < px.size(); i += 4) px[i] = 255;
     TexLevels L = prepareTexture(px.data(), N, N, true, true, false);
     if (!L.bc) return;
