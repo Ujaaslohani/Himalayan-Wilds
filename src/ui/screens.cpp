@@ -401,8 +401,9 @@ void drawRadar(float X, float Y, float size) {
   ring(cx, cy, R, 1.5f, C("#ffffff", 0.35f));
 }
 
+const float TOPBAR_K = 1.18f, COMPASS_K = 0.8f;
 void drawCompass(float W) {
-  float cw = std::min(520.0f, W * 0.6f), h = 38, x = (W - cw) / 2, y = 70;
+  float cw = std::min(520.0f, W * 0.6f), h = 38, x = (W - cw) / 2, y = 70.0f * TOPBAR_K / COMPASS_K;
   Rect r{x, y, cw, h};
   for (int k = 0; k <= 24; k++) {
     float tx = x + cw * k / 24.0f, edge = 1 - std::fabs(k / 12.0f - 1);
@@ -502,7 +503,7 @@ void drawHud(float W, float H) {
   float vig = std::max(0.0f, std::max(0.75f - (float)(t - g_knockT) / 0.9f, E.player.hp < 35 ? 0.3f + 0.15f * std::sin((float)t * 1000 / 180) : 0.0f));
   if (vig > 0.01f) radialVignette(C("#b91c1c", 0.65f * vig), 0.45f);
 
-  drawCompass(W);
+  { float b = ui::scale(); ui::setScale(b * COMPASS_K); drawCompass(W / COMPASS_K); ui::setScale(b); }
   drawRadar(18, H - 18 - 160, 160);
 
   float sc = E.bow.aiming ? 0.8f : 1;
@@ -571,7 +572,7 @@ void drawTopBar(float W) {
   int cap = app::capacity();
   if (W >= 900) {
     std::string a = std::to_string(A.score) + " renown";
-    std::string b = (W >= 1180 ? st.name + " · " : std::string()) + "Pop " + std::to_string(A.population) + "/" + std::to_string(cap);
+    std::string b = (W >= 1000 ? st.name + " · " : std::string()) + "Pop " + std::to_string(A.population) + "/" + std::to_string(cap);
     float w2 = std::max(textWidth(a, 10, SERIF), textWidth(b, 12, SERIF)) + 18;
     chip(ix, iy, w2, ih);
     text(a, ix + 9, iy + 11, 10, C("#a8a29e"));
@@ -608,7 +609,7 @@ void drawTopBar(float W) {
 
   struct TabDef { Tab t; const char* label; const char* key; };
   TabDef tabs[4] = {{Tab::Inventory, "Pouch", "Tab"}, {Tab::Quests, "Journal", "J"}, {Tab::Buildings, "Build", "B"}, {Tab::Map, "Map", "M"}};
-  bool labels = W >= 1280;
+  bool labels = W >= 1020;
   float rx = x + bw - 6;
   float mw = labels ? 92 : 66;
   rx -= mw;
@@ -1494,8 +1495,8 @@ std::string g_passGpu, g_passCpu;
 void drawStats(float W) {
   char b[256];
   std::snprintf(b, sizeof b, "%.0f fps  %.1f ms  |  CPU %.1f ms  GPU %.1f ms  |  scale %.0f%%  detail %.0f%%  |  %d draws  %dk tris  |  RAM %.0f MB  %s %.0f MB", g_fs.fps, g_fs.ms, g_fs.cpuMs, g_fs.gpuMs, g_fs.renderScale * 100, forest::detailLevel() * 100, g_fs.drawCalls, g_fs.tris / 1000, g_fs.ramMB, g_fs.vramExact == 1 ? "VRAM" : g_fs.vramExact == 2 ? "VRAM (all apps)" : "VRAM (est.)", g_fs.gpuMB);
-  char r[160];
-  std::snprintf(r, sizeof r, "%s", (const char*)glGetString(GL_RENDERER));
+  char r[200];
+  { const Vec3& P = E.player.pos; std::snprintf(r, sizeof r, "X %.1f  Y %.1f  Z %.1f   |   %s", P.x, P.y, P.z, (const char*)glGetString(GL_RENDERER)); }
   float w = textWidth(b, 11, SANS) + 16;
   rect({W - w - 8, 60, w, 22}, C("#000000", 0.6f), 6);
   text(b, W - w, 71, 11, C("#a7f3d0"), SANS);
@@ -1552,7 +1553,7 @@ void draw(float, bool cursorFree) {
   if (playing && !cut) {
     bool b = g_block;
     g_block = b || modalOpen;
-    drawTopBar(W);
+    { float b = ui::scale(); ui::setScale(b * TOPBAR_K); drawTopBar(W / TOPBAR_K); ui::setScale(b); }
     if (!modalOpen) drawNotification(W);
     setTextShadow(0);
     drawPlacement(W, H);

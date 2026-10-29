@@ -21,10 +21,13 @@ vec3 groundShade(vec3 sc, vec3 wp, float ny, float road){
 #ifndef GROUND_BAKE
   if (road > 0.01) {
     float sCam = 1.0 - smoothstep(20.0, 70.0, length(wp - u_camPos));
-    float sG1 = vnoise(wp.xz * 7.0);
-    float sG2 = vnoise(wp.xz * 2.3 + 17.0);
-    float sPeb = smoothstep(0.74, 0.84, vnoise(wp.xz * 6.5 + 3.0));
-    float sDk = smoothstep(0.74, 0.84, vnoise(wp.xz * 5.3 - 7.0));
+    vec2 rq = wp.xz + vec2(vnoise(wp.xz * 0.17), vnoise(wp.zx * 0.19 + 9.0)) * 4.0;  // warp breaks the lattice
+    mat2 rr = mat2(0.73, -0.68, 0.68, 0.73);
+    float sG1 = vnoise(rq * 7.0);
+    float sG2 = vnoise(rr * rq * 2.3 + 17.0);
+    float sSz = mix(0.6, 1.6, vnoise(rq * 0.09 + 2.0));  // stone size varies along the trail
+    float sPeb = smoothstep(0.74, 0.84, vnoise(rr * rq * 6.5 * sSz + 3.0));
+    float sDk = smoothstep(0.76, 0.86, vnoise(rr * rr * rq * 4.1 / sSz - 7.0)) * smoothstep(0.3, 0.6, vnoise(rq * 0.23 + 4.0));
     vec3 sGv = sc * (0.84 + 0.22 * sG1 + 0.12 * sG2);
     sGv = mix(sGv, sc * 1.25, sPeb * 0.45);
     sGv = mix(sGv, sc * 0.52, sDk * 0.55);
@@ -77,9 +80,10 @@ float mountainDetail(vec3 wp, float ny){
 vec3 groundBump(vec3 n, vec3 wp, float road){
   float sK = (0.42 + 0.35 * road) * (1.0 - smoothstep(25.0, 70.0, length(wp - u_camPos)));
   if (sK > 0.001) {
-    vec2 q = wp.xz;
-    vec2 g = vec2(cos(q.x * 1.9 + sin(q.y * 1.3) * 1.7), cos(q.y * 2.1 + sin(q.x * 1.1) * 1.5)) * 0.6
-      + vec2(cos(q.x * 5.3 + q.y * 0.8), cos(q.y * 4.9 - q.x * 1.2)) * 0.4;
+    // non-periodic bumps: one rotated value-noise octave, forward-difference gradient (3 fetches)
+    vec2 q = mat2(0.8, -0.6, 0.6, 0.8) * wp.xz * 1.3;
+    float e = 0.12, c0 = vnoise(q);
+    vec2 g = vec2(vnoise(q + vec2(e, 0.0)) - c0, vnoise(q + vec2(0.0, e)) - c0) * 5.0;
     n = normalize(n + vec3(-g.x * sK, 0.0, -g.y * sK));
   }
   return n;
@@ -169,6 +173,21 @@ float heightAt(vec2 g){
   if (f.x + f.y <= 1.0) return a + (b - a) * f.x + (cc - a) * f.y;
   return d + (cc - d) * (1.0 - f.x) + (b - d) * (1.0 - f.y);
 }
+// Catmull-Rom bicubic: curved surface through the grid points, no creases between 2.4 m cells
+vec4 crw(float t){ float t2 = t * t, t3 = t2 * t; return vec4(-0.5*t3 + t2 - 0.5*t, 1.5*t3 - 2.5*t2 + 1.0, -1.5*t3 + 2.0*t2 + 0.5*t, 0.5*t3 - 0.5*t2); }
+vec4 crd(float t){ float t2 = t * t; return vec4(-1.5*t2 + 2.0*t - 0.5, 4.5*t2 - 5.0*t, -4.5*t2 + 4.0*t + 0.5, 1.5*t2 - t); }
+// height + analytic gradient from one set of 16 texel fetches
+vec3 heightCubicD(vec2 g){
+  vec2 i = floor(g); vec2 f = g - i; ivec2 c = ivec2(i) - ivec2(1);
+  vec4 wx = crw(f.x), wz = crw(f.y), dx = crd(f.x), dz = crd(f.y);
+  vec3 r = vec3(0.0);
+  for (int z = 0; z < 4; z++) {
+    vec4 row = vec4(hAt(c + ivec2(0, z)), hAt(c + ivec2(1, z)), hAt(c + ivec2(2, z)), hAt(c + ivec2(3, z)));
+    float a = dot(row, wx);
+    r += vec3(a * wz[z], dot(row, dx) * wz[z], a * dz[z]);
+  }
+  return r;
+}
 void main(){
   float st = a_i0.z;
   int lvl = int(a_i0.w);
@@ -181,11 +200,17 @@ void main(){
   vec2 fr = fract(gp * 0.5) * 2.0;
   cell = a_i0.xy + (gp - fr * k) * st;
   w = u_grid.x + cell * u_grid.y;
-  float h = heightAt(cell);
+  bool fine = st < 0.99;
+  vec3 hc = fine ? heightCubicD(cell) : vec3(0.0);
+  float h = fine ? hc.x : heightAt(cell);
   if (a_grid.z > 0.5) h -= 1.5 + st * 1.2;
-  ivec2 ci = ivec2(floor(cell + 0.5));
-  float hl = hAt(ci - ivec2(1, 0)), hr = hAt(ci + ivec2(1, 0)), hd = hAt(ci - ivec2(0, 1)), hu = hAt(ci + ivec2(0, 1));
-  v_nrm = normalize(vec3(hl - hr, 2.0 * u_grid.y, hd - hu));
+  if (fine) {
+    v_nrm = normalize(vec3(-hc.y, u_grid.y, -hc.z));
+  } else {
+    ivec2 ci = ivec2(floor(cell + 0.5));
+    float hl = hAt(ci - ivec2(1, 0)), hr = hAt(ci + ivec2(1, 0)), hd = hAt(ci - ivec2(0, 1)), hu = hAt(ci + ivec2(0, 1));
+    v_nrm = normalize(vec3(hl - hr, 2.0 * u_grid.y, hd - hu));
+  }
   v_wpos = vec3(w.x, h, w.y);
   v_cell = cell;
   vec4 vp = u_view * vec4(v_wpos, 1.0);
@@ -222,7 +247,7 @@ void main(){
   // per-pixel normal from the filtered height field: smooth curved shading instead of triangle facets
   vec2 tc = (v_cell + 0.5) / u_grid.z, px = vec2(1.0 / u_grid.z, 0.0);
   float hl = texture(u_height, tc - px.xy).r, hr = texture(u_height, tc + px.xy).r, hd = texture(u_height, tc - px.yx).r, hu = texture(u_height, tc + px.yx).r;
-  vec3 n = normalize(mix(normalize(vec3(hl - hr, 2.0 * u_grid.y, hd - hu)), normalize(v_nrm), smoothstep(40.0, 85.0, fd)));
+  vec3 n = normalize(mix(normalize(vec3(hl - hr, 2.0 * u_grid.y, hd - hu)), normalize(v_nrm), max(smoothstep(40.0, 85.0, fd), 1.0 - smoothstep(70.0, 85.0, fd))));
   if (road > 0.01 && fd < 70.0) {
     vec4 t = texture(u_color, (v_cell + 0.5) / u_grid.z);
     sc = groundShade(srgbToLinear(t.rgb), v_wpos, n.y, t.a);
@@ -231,18 +256,18 @@ void main(){
   // snow surface: wind-carved ripples and soft blue shade in hollows
   {
     float lum = dot(sc, vec3(0.3, 0.59, 0.11));
-    float snowy = smoothstep(0.42, 0.62, lum) * (1.0 - smoothstep(0.06, 0.16, max(sc.r, max(sc.g, sc.b)) - min(sc.r, min(sc.g, sc.b)))) * (1.0 - smoothstep(55.0, 85.0, fd));
+    float snowy = smoothstep(0.42, 0.62, lum) * (1.0 - smoothstep(0.06, 0.16, max(sc.r, max(sc.g, sc.b)) - min(sc.r, min(sc.g, sc.b)))) * (1.0 - smoothstep(30.0, 50.0, fd));
     if (snowy > 0.01) {
       vec2 q = v_wpos.xz;
       float rip = vnoise(vec2(q.x * 0.35 + vnoise(q * 0.08) * 3.0, q.y * 1.4));
       float drift = vnoise(q * 0.05);
       float hol = clamp(rip * 0.6 + (1.0 - drift) * 0.4, 0.0, 1.0);
       sc = mix(sc, sc * mix(vec3(1.03, 1.03, 1.04), vec3(0.84, 0.9, 1.0), hol), snowy);
-      vec2 g = vec2(vnoise(vec2((q.x + 0.4) * 0.35, q.y * 1.4)) - vnoise(vec2((q.x - 0.4) * 0.35, q.y * 1.4)), vnoise(vec2(q.x * 0.35, (q.y + 0.3) * 1.4)) - vnoise(vec2(q.x * 0.35, (q.y - 0.3) * 1.4)));
+      vec2 g = vec2(vnoise(vec2((q.x + 0.4) * 0.35, q.y * 1.4)) - rip, vnoise(vec2(q.x * 0.35, (q.y + 0.3) * 1.4)) - rip) * 2.0;
       nb = normalize(nb + vec3(-g.x, 0.0, -g.y) * 0.35 * snowy);
     }
   }
-  float steepN = (1.0 - smoothstep(0.4, 0.82, n.y)) * (1.0 - smoothstep(55.0, 85.0, fd)) * mix(0.35, 1.0, max(smoothstep(70.0, 125.0, v_wpos.y), 1.0 - smoothstep(0.4, 0.62, n.y)));
+  float steepN = (1.0 - smoothstep(0.4, 0.82, n.y)) * (1.0 - smoothstep(35.0, 60.0, fd)) * mix(0.35, 1.0, max(smoothstep(70.0, 125.0, v_wpos.y), 1.0 - smoothstep(0.4, 0.62, n.y)));
   if (steepN > 0.01) {
     vec3 nr = nb;
     vec3 alb = ptexRock(v_wpos, nr, 0.16, 1.0);
@@ -322,7 +347,8 @@ size_t g_icap = 0;
 Mesh g_backdrop;
 std::vector<float> g_minH[LEVELS], g_maxH[LEVELS];
 int g_nodes[LEVELS];
-float g_range[LEVELS];
+float g_range[8];
+const float FINE_R[2] = {60.0f, 0.0f};  // radius of 1.2 m and 0.6 m terrain rings
 std::vector<float> g_inst;
 int g_lastCount = 0;
 
@@ -417,6 +443,25 @@ float boxDist(const Vec3& p, const Vec3& mn, const Vec3& mx) {
   return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
+// sub-grid patches: same 16x16 mesh at half / quarter cell spacing, height from the bicubic surface
+void selectFine(int f, float cx, float cz, float y0, float y1) {
+  float st = f == 0 ? 0.5f : 0.25f, span = 16 * st;
+  Vec3 mn(GRID_MIN + cx * GRID_STEP, -1e4f, GRID_MIN + cz * GRID_STEP);
+  Vec3 mx(mn.x + span * GRID_STEP, 1e4f, mn.z + span * GRID_STEP);
+  mn.y = y0; mx.y = y1;
+  if (!render::cam.box(mn, mx)) return;
+  Vec3 p = render::cam.pos; p.y = 0; mn.y = mx.y = 0;
+  float d = boxDist(p, mn, mx);
+  if (f == 0 && d < FINE_R[1]) {
+    for (int c = 0; c < 4; c++) selectFine(1, cx + (c & 1) * span * 0.5f, cz + (c >> 1) * span * 0.5f, y0, y1);
+    return;
+  }
+  g_inst.push_back(cx);
+  g_inst.push_back(cz);
+  g_inst.push_back(st);
+  g_inst.push_back((float)(6 + f));
+}
+
 void select(int L, int nx, int nz) {
   int n = g_nodes[L];
   if (nx < 0 || nz < 0 || nx >= n || nz >= n) return;
@@ -427,6 +472,10 @@ void select(int L, int nx, int nz) {
   if (mn.x >= GRID_MIN + TERRAIN_SEGMENTS * GRID_STEP || mn.z >= GRID_MIN + TERRAIN_SEGMENTS * GRID_STEP) return;
   if (!render::cam.box(mn, mx)) return;
   float d = boxDist(render::cam.pos, mn, mx);
+  if (L == 0 && d < FINE_R[0]) {
+    for (int c = 0; c < 4; c++) selectFine(0, (float)(nx * size + (c & 1) * 8), (float)(nz * size + (c >> 1) * 8), mn.y, mx.y);
+    return;
+  }
   if (L == 0 || d > g_range[L - 1]) {
     g_inst.push_back((float)(nx * size));
     g_inst.push_back((float)(nz * size));
@@ -546,7 +595,8 @@ void draw() {
     s.set1i("u_color", 2);
     s.set1i("u_bake", 4);
     s.set4f("u_grid", GRID_MIN, GRID_STEP, (float)GRID_N, 0);
-    glUniform1fv(s.loc("u_range"), LEVELS, g_range);
+    g_range[6] = FINE_R[0] / 0.92f; g_range[7] = FINE_R[1] / 0.92f;
+    glUniform1fv(s.loc("u_range"), 8, g_range);
     glActiveTexture(GL_TEXTURE4);
     glBindTexture(GL_TEXTURE_2D, g_bakeTex);
     glActiveTexture(GL_TEXTURE1);

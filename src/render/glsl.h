@@ -76,6 +76,9 @@ vec3 ptexWood(vec3 wp, inout vec3 n, float scale, float bumpK){
 vec3 ptexRock(vec3 wp, inout vec3 n, float scale, float bumpK){
   vec3 w = pow(abs(n), vec3(4.0)); w /= (w.x + w.y + w.z);
   vec2 ux = wp.zy * scale, uy = wp.xz * scale + 0.37, uz = wp.xy * scale + 0.71;
+  // cheap anti-tiling: warp the lookup with low-frequency noise (no extra texture fetches)
+  vec2 wv = vec2(vnoise(wp.xz * 0.05 + wp.y * 0.03), vnoise(wp.zx * 0.05 - wp.y * 0.03 + 7.0)) * 0.9;
+  ux += wv; uy += wv.yx; uz += wv;
   vec4 ax = texture(u_ptexA, ux), ay = texture(u_ptexA, uy), az = texture(u_ptexA, uz);
   vec4 bx = texture(u_ptexN, ux), by = texture(u_ptexN, uy), bz = texture(u_ptexN, uz);
   vec3 alb = (ax.rgb * w.x + ay.rgb * w.y + az.rgb * w.z) * 2.0;

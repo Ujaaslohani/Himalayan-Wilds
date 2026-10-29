@@ -321,6 +321,14 @@ void end() {
 }
 
 float scale() { return g_scale; }
+void setScale(float s) {
+  if (s == g_scale) return;
+  flush();
+  g_mouse.x *= g_scale / s;
+  g_mouse.y *= g_scale / s;
+  g_scale = s;
+  glUniform1f(g_locScale, s);
+}
 void setTextShadow(float k) { g_defShadow = k; }
 float width() { return g_w / g_scale; }
 float height() { return g_h / g_scale; }

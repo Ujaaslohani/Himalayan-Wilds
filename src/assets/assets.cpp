@@ -990,7 +990,7 @@ const SpecDef SPD[T_COUNT] = {
 struct Built { MeshData bark, leaves; };
 
 LeafImg makeSingleLeaf(TreeSp sp, int N);
-Built growTree(TreeSp sp, uint32_t seed) {
+Built growTree(TreeSp sp, uint32_t seed, bool indiv) {
   const SpecDef& S = SPD[sp];
   PRng R(seed);
   GeoB bark, leaf;
@@ -1024,7 +1024,7 @@ Built growTree(TreeSp sp, uint32_t seed) {
         float az = k * TAU / arms + w * 0.9f + R.r(-0.3f, 0.3f);
         Vec3 bd = Vec3(std::cos(az), -0.18f + 0.1f * t, std::sin(az)).normalized();
         Vec3 bdEnd;
-        Vec3 e = curvedTube(bark, at, bd, bl, 0.14f * (1.2f - t), 0.05f, 4, 4, R, 0.07f, 0.14f, &bdEnd);
+        Vec3 e = curvedTube(bark, at, bd, bl, 0.14f * (1.2f - t), 0.05f, 5, 4, R, 0.14f, 0.2f, &bdEnd);
         int nc = std::max(1, (int)(bl / 0.75f));
         for (int c = 0; c < nc; c++) tips.push_back({at + (e - at) * (0.35f + 0.65f * (c + 1) / nc), bdEnd});
       }
@@ -1079,7 +1079,7 @@ Built growTree(TreeSp sp, uint32_t seed) {
   // leaf cards: oriented by branch direction, normals from the crown centre (soft rounded shading)
   float crownR = 0.1f;
   for (auto& t : tips) crownR = std::max(crownR, (t.first - crownC).length());
-  if (sp != T_CEDAR) {
+  if (indiv && sp != T_CEDAR) {
     // individual leaves on thin twigs: every leaf is its own quad attached to a twig
     float leafL = sp == T_OAK ? 0.62f : sp == T_MAPLE ? 0.72f : sp == T_BIRCH ? 0.45f : 0.52f;
     int twigsPer = sp == T_OAK ? 6 : 5, leavesPer = sp == T_BIRCH ? 8 : sp == T_MAPLE ? 7 : 9;
@@ -1121,17 +1121,31 @@ Built growTree(TreeSp sp, uint32_t seed) {
     }
     return {bark.data(), leaf.data()};
   }
+  bool broad = sp != T_CEDAR;
   for (auto& t : tips) {
-    int n = (int)S.cardsPer;
-    if (R.f() < S.cardsPer - n) n++;
+    // broadleaf: more, smaller cluster cards, each turned to face outward from the crown so it is never seen edge-on
+    float per = broad ? S.cardsPer * 1.9f : S.cardsPer;
+    int n = (int)per;
+    if (R.f() < per - n) n++;
     for (int c = 0; c < n; c++) {
       Vec3 up = (t.second + Vec3(R.r(-0.5f, 0.5f), R.r(-0.2f, 0.6f), R.r(-0.5f, 0.5f))).normalized();
       if (sp == T_CEDAR) up = (Vec3(t.second.x, R.r(-0.35f, 0.15f), t.second.z) + Vec3(R.r(-0.4f, 0.4f), 0, R.r(-0.4f, 0.4f))).normalized();
+      float sz = S.cardSize * R.r(0.8f, 1.2f) * (broad ? 0.68f : 1.0f);
+      float spread = sp == T_CEDAR ? 0.3f : S.cardSize * 0.75f;
+      Vec3 off(R.r(-spread, spread), R.r(-spread * 0.7f, spread * 0.7f), R.r(-spread, spread));
       Vec3 side = anyPerp(up);
       side = rotAxis(side, up, R.r(0, TAU));
-      float sz = S.cardSize * R.r(0.8f, 1.2f);
-      float spread = sp == T_CEDAR ? 0.3f : S.cardSize * 0.9f;
-      Vec3 base = t.first + Vec3(R.r(-spread, spread), R.r(-spread * 0.7f, spread * 0.7f), R.r(-spread, spread)) - up * (sz * 0.15f);
+      if (broad) {
+        Vec3 radial = t.first + off - crownC;
+        radial.y *= 0.35f;
+        radial = radial.length() > 0.01f ? radial.normalized() : Vec3(1, 0, 0);
+        // twig base points inward/down, leafy end outward/up: like a real spray of leaves
+        up = (radial * 0.75f + Vec3(0, 0.75f, 0) + t.second * 0.3f + Vec3(R.r(-0.25f, 0.25f), R.r(-0.15f, 0.2f), R.r(-0.25f, 0.25f))).normalized();
+        side = up.cross(radial);
+        if (side.length() < 0.05f) side = anyPerp(up);
+        side = rotAxis(side.normalized(), up, R.r(-0.45f, 0.45f) + ((c % 2) ? 0.9f : 0.0f));  // every other card crossed for volume
+      }
+      Vec3 base = t.first + off - up * (sz * 0.15f);
       Vec3 nn = (base + up * sz * 0.5f - crownC);
       float dist = nn.length() / crownR;
       nn = (nn.normalized() + Vec3(0, 0.6f, 0)).normalized();
@@ -1143,6 +1157,31 @@ Built growTree(TreeSp sp, uint32_t seed) {
       leaf.vert(base + side * hw + up * sz, nn, 1, 0, ao);
       leaf.vert(base - side * hw + up * sz, nn, 0, 0, ao);
       leaf.idx.insert(leaf.idx.end(), {k, k + 1, k + 2, k, k + 2, k + 3});
+    }
+  }
+  if (broad) {
+    // underside canopy: near-horizontal cluster cards below each tip so the crown reads full from beneath
+    for (auto& t : tips) {
+      for (int c = 0; c < 2; c++) {
+        Vec3 radial = t.first - crownC;
+        radial.y = 0;
+        radial = radial.length() > 0.01f ? radial.normalized() : Vec3(1, 0, 0);
+        radial = rotAxis(radial, Vec3(0, 1, 0), R.r(-0.9f, 0.9f));
+        Vec3 up = (radial + Vec3(0, R.r(-0.25f, 0.1f), 0)).normalized();   // lies almost flat, leaf tips outward
+        Vec3 side = up.cross(Vec3(0, 1, 0)).normalized();
+        side = rotAxis(side, up, R.r(-0.35f, 0.35f));
+        float sz = S.cardSize * R.r(0.7f, 1.0f) * 0.75f;
+        Vec3 base = t.first + Vec3(R.r(-0.4f, 0.4f), -R.r(0.25f, 0.7f) * S.cardSize, R.r(-0.4f, 0.4f)) - up * (sz * 0.45f);
+        Vec3 nn = ((base - crownC).normalized() + Vec3(0, 0.6f, 0)).normalized();
+        float ao = 0.55f + 0.3f * std::min(1.0f, (base - crownC).length() / crownR);  // underside sits in shade
+        uint32_t k = (uint32_t)leaf.v.size();
+        float hw = sz * 0.5f;
+        leaf.vert(base - side * hw, nn, 0, 1, ao);
+        leaf.vert(base + side * hw, nn, 1, 1, ao);
+        leaf.vert(base + side * hw + up * sz, nn, 1, 0, ao);
+        leaf.vert(base - side * hw + up * sz, nn, 0, 0, ao);
+        leaf.idx.insert(leaf.idx.end(), {k, k + 1, k + 2, k, k + 2, k + 3});
+      }
     }
   }
   return {bark.data(), leaf.data()};
@@ -1552,6 +1591,70 @@ std::vector<uint8_t> loadImageRGBA(const std::string& rel, int& w, int& h) {
 std::vector<std::string> procOverrides() { return {"Bush.glb", "Bush with Flowers.glb", "Rock Medium.glb", "Mushroom Laetiporus.glb", "Fern.glb", "Plant.glb", "Plant Big.glb", "Plant-xH5gNlQxAZ.glb", "Flower Group.glb", "Flower Group-LqTljN6Wg2.glb", "Flower Single.glb", "Mushroom.glb", "Flower Petal.glb", "Flower Petal-LqvxG9OBOU.glb", "Flower Petal-eVE0j49ux9.glb", "Flower Petal-niuBUEJdvM.glb", "Flower Petal-tzG4JcqYWs.glb"}; }
 std::vector<std::string> procTreeFiles() { return {"ptree:oak", "ptree:maple", "ptree:birch", "ptree:Pine-cedar", "ptree:rhodo"}; }
 
+// Leaf-cluster card texture built from the single-leaf photo: a fan of twigs carrying many copies of the
+// photo leaf, back leaves darker. One card then reads as dozens of real leaves (the GTA-style illusion).
+static float halfToFloatA(uint16_t h) {
+  uint32_t s = (h >> 15) & 1, e = (h >> 10) & 31, m = h & 1023;
+  float f = e == 0 ? m / 1024.0f * std::pow(2.0f, -14.0f) : (1 + m / 1024.0f) * std::pow(2.0f, (float)e - 15);
+  return s ? -f : f;
+}
+std::vector<uint8_t> composeCluster(const std::vector<uint8_t>& ph, int pw, int phh, int N, TreeSp sp, uint32_t seed) {
+  std::vector<uint8_t> out((size_t)N * N * 4, 0);
+  PRng R(seed);
+  auto put = [&](int x, int y, float r, float g, float b) {
+    if (x < 0 || y < 0 || x >= N || y >= N) return;
+    uint8_t* o = &out[((size_t)y * N + x) * 4];
+    o[0] = (uint8_t)std::min(255.0f, r); o[1] = (uint8_t)std::min(255.0f, g); o[2] = (uint8_t)std::min(255.0f, b); o[3] = 255;
+  };
+  auto line = [&](float x0, float y0, float x1, float y1, float w0, float w1) {
+    int steps = (int)(std::hypot(x1 - x0, y1 - y0) * 2) + 1;
+    for (int i = 0; i <= steps; i++) {
+      float t = (float)i / steps, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t, w = w0 + (w1 - w0) * t;
+      for (int dy = (int)-w; dy <= (int)w; dy++) for (int dx = (int)-w; dx <= (int)w; dx++) if (dx * dx + dy * dy <= w * w) put((int)x + dx, (int)y + dy, 74, 54, 38);
+    }
+  };
+  struct LeafAt { float x, y, ang, sz; };
+  std::vector<LeafAt> leaves;
+  float bx = N * 0.5f, by = N * 0.97f;
+  int twigs = sp == T_BIRCH ? 6 : 7;
+  for (int w = 0; w < twigs; w++) {
+    float fan = -0.95f + 1.9f * w / (twigs - 1) + R.r(-0.1f, 0.1f);
+    float len = N * R.r(0.62f, 0.8f) * (1.0f - 0.25f * std::fabs(fan));
+    float ex = bx + std::sin(fan) * len, ey = by - std::cos(fan) * len;
+    line(bx, by, ex, ey, 3.5f, 1.2f);
+    int per = sp == T_BIRCH ? 9 : 8;
+    for (int l = 0; l < per; l++) {
+      float u = 0.25f + 0.75f * (l + 1) / per;
+      float x = bx + (ex - bx) * u, y = by + (ey - by) * u;
+      float sideSign = (l % 2) ? 1.0f : -1.0f;
+      float ang = fan + sideSign * R.r(0.6f, 1.0f);
+      if (l == per - 1) ang = fan;
+      leaves.push_back({x, y, ang, N * R.r(0.14f, 0.19f) * (sp == T_BIRCH ? 0.85f : 1.0f)});
+    }
+  }
+  // back-to-front: shuffle so overlaps vary, earlier leaves drawn darker (inner foliage)
+  for (size_t i = leaves.size(); i > 1; i--) std::swap(leaves[i - 1], leaves[(size_t)(R.f() * i) % i]);
+  for (size_t li = 0; li < leaves.size(); li++) {
+    const LeafAt& L = leaves[li];
+    float shade = 0.62f + 0.45f * li / leaves.size();
+    float ca = std::cos(L.ang), sa = std::sin(L.ang);
+    float hwid = L.sz * 0.5f, len = L.sz;
+    int r = (int)(len + 2);
+    for (int dy = -r; dy <= r; dy++)
+      for (int dx = -r; dx <= r; dx++) {
+        // leaf space: v along the leaf (0 at stem -> 1 at tip), u across
+        float lx = dx * ca + dy * sa, ly = -(-dx * sa + dy * ca);
+        float u = lx / hwid * 0.5f + 0.5f, v = ly / len;
+        if (u < 0 || u > 1 || v < 0 || v > 1) continue;
+        int px = std::min(pw - 1, (int)(u * pw)), py = std::min(phh - 1, (int)((1 - v) * phh));
+        const uint8_t* c = &ph[((size_t)py * pw + px) * 4];
+        if (c[3] < 128) continue;
+        put((int)L.x + dx, (int)L.y + dy, c[0] * shade, c[1] * shade, c[2] * shade);
+      }
+  }
+  return out;
+}
+
 void buildProcTrees() {
   const char* matLeaf[T_COUNT] = {"leaves_oak", "leaves_maple", "leaves_birch", "pine_needles_cedar", "leaves_rhodo"};
   auto files = procTreeFiles();
@@ -1565,11 +1668,29 @@ void buildProcTrees() {
     LeafImg L = photo.empty() ? (sp == T_CEDAR ? makeLeafCluster(sp, N) : makeSingleLeaf(sp, 256)) : LeafImg(2);
     std::vector<uint8_t> rgba = photo.empty() ? toRGBA(L) : photo;
     if (!photo.empty()) { L.N = pw; if (sp == T_CEDAR && pw != N) N = pw; }
+    std::vector<uint8_t> cluster;
+    int texW = 0;
+    if (sp != T_CEDAR) {
+      // atlas 1024x512: left = the single photo leaf (near trees, every leaf its own quad), right = leaf cluster (mid range)
+      int sw = photo.empty() ? L.N : pw, sh = photo.empty() ? L.N : ph;
+      cluster = composeCluster(rgba, sw, sh, 512, sp, 900 + s);
+      std::vector<uint8_t> atlas((size_t)1024 * 512 * 4, 0);
+      for (int y = 0; y < 512; y++)
+        for (int x = 0; x < 512; x++) {
+          const uint8_t* a = &rgba[(((size_t)(y * sh / 512)) * sw + x * sw / 512) * 4];
+          std::memcpy(&atlas[((size_t)y * 1024 + x) * 4], a, 4);
+          std::memcpy(&atlas[((size_t)y * 1024 + 512 + x) * 4], &cluster[((size_t)y * 512 + x) * 4], 4);
+        }
+      rgba = cluster;  // trimming alpha below reads the cluster half
+      N = 512;
+      texW = 1024;
+      g_procTex.push_back(std::make_unique<Texture>(uploadTextureRGBA(atlas.data(), 1024, 512, true, true, true, false)));
+    }
     if (const char* dumpDir = std::getenv("HW_DUMPLEAF")) {
       std::string fn = std::string(dumpDir) + "/leaf" + std::to_string(s) + ".ppm";
       if (FILE* f = std::fopen(fn.c_str(), "wb")) { std::fprintf(f, "P6 %d %d 255\n", N, N); for (size_t k = 0; k < (size_t)N * N; k++) { uint8_t c[3]; for (int q = 0; q < 3; q++) c[q] = rgba[k * 4 + 3] ? rgba[k * 4 + q] : 200; std::fwrite(c, 1, 3, f); } std::fclose(f); }
     }
-    g_procTex.push_back(std::make_unique<Texture>(uploadTextureRGBA(rgba.data(), L.N, L.N, true, true, true, false)));
+    if (!texW) g_procTex.push_back(std::make_unique<Texture>(uploadTextureRGBA(rgba.data(), L.N, L.N, true, true, true, false)));
     const Texture* leafTex = g_procTex.back().get();
     const char* barkPhoto[T_COUNT] = {"textures/bark_oak.jpg", "textures/bark_maple.jpg", "", "textures/bark_cedar.jpg", "textures/bark_rhodo.jpg"};
     int bw = 256, bh = 256;
@@ -1577,27 +1698,37 @@ void buildProcTrees() {
     if (brk.empty()) { brk = makeBark(sp, 256); bw = bh = 256; }
     g_procTex.push_back(std::make_unique<Texture>(uploadTextureRGBA(brk.data(), bw, bh, true, true, false, true)));
     const Texture* barkTex = g_procTex.back().get();
-    Built B = growTree(sp, 7771 + s * 131);
+    Built B = growTree(sp, 7771 + s * 131, false);
     // trim leaf cards to the visible leaf area (8-sided hulls) using a 256px alpha map
     std::vector<uint8_t> alpha(256 * 256);
     for (int y = 0; y < 256; y++)
       for (int x = 0; x < 256; x++) {
         int m = 0;
-        if (sp != T_CEDAR) continue;
         for (int dy = 0; dy < 2; dy++) for (int dx = 0; dx < 2; dx++) m = std::max(m, (int)rgba[(((size_t)(y * 2 + dy) * N) + x * 2 + dx) * 4 + 3]);
         alpha[(size_t)y * 256 + x] = (uint8_t)m;
       }
     MeshData lodSrc = B.leaves;
     int dropped = 0;
-    if (sp == T_CEDAR) trimCards(B.leaves, alpha, 256, 256, dropped);
+    trimCards(B.leaves, alpha, 256, 256, dropped);
+    if (texW) {
+      auto remap = [](MeshData& m, float sc, float off) {
+        for (int i = 0; i < m.vertexCount; i++) {
+          VtxGlb* v = reinterpret_cast<VtxGlb*>(m.verts.data()) + i;
+          v->uv[0] = floatToHalf(halfToFloatA(v->uv[0]) * sc + off);
+        }
+      };
+      remap(B.leaves, 0.5f, 0.5f);
+    }
     auto a = std::make_unique<Asset>();
     a->file = files[s];
     for (int part = 0; part < 2; part++) {
+      // broadleaf: near = individual leaves on twigs, mid = full leaf-cluster cards
       MeshData& md = part == 0 ? B.bark : B.leaves;
       if (md.idx.empty()) continue;
       AssetPart ap;
       ap.mesh = uploadMesh(md);
       MeshData ld = part == 0 ? makeLod(md, false, false) : makeLod(lodSrc, true, false);
+      if (texW && part == 1) { MeshData t = ld; for (int i = 0; i < t.vertexCount; i++) { VtxGlb* v = reinterpret_cast<VtxGlb*>(t.verts.data()) + i; v->uv[0] = floatToHalf(halfToFloatA(v->uv[0]) * 0.5f + 0.5f); } ld = t; }
       if (!ld.idx.empty()) ap.lod = uploadMesh(ld);
       ap.mat.name = part == 0 ? "bark_" + std::to_string(s) : matLeaf[s];
       ap.mat.cutout = part == 1;
@@ -1677,20 +1808,28 @@ void buildProcTrees() {
     addAsset("Plant.glb", {{buildLeafRosette(5, 9, 0.75f, 0.32f, 0.9f, 1.0f), pm("plant_broad", SeasonKind::Plant)}}, true, nullptr);
     addAsset("Plant Big.glb", {{buildLeafRosette(7, 8, 0.3f, 0.13f, 1.4f, 0.9f), pm("plant_low", SeasonKind::Plant)}}, true, nullptr);
     addAsset("Plant-xH5gNlQxAZ.glb", {{buildLeafRosette(9, 7, 0.28f, 0.12f, 1.5f, 0.85f), pm("plant_low2", SeasonKind::Plant)}}, true, nullptr);
-    addAsset("Flower Group.glb", {{buildFlowerPlant(41, 6, 2.0f, 13, 0.065f, 0.022f, 0.12f, Color::hex("f6f3f2"), Color::hex("f2bd25"), 0.022f, 2), pm("flower_daisy", SeasonKind::Flower)}}, true, nullptr);
-    addAsset("Flower Group-LqTljN6Wg2.glb", {{buildFlowerPlant(43, 7, 2.4f, 5, 0.06f, 0.045f, 0.45f, Color::hex("8a58d4"), Color::hex("f0d050"), 0.014f, 2), pm("flower_violet", SeasonKind::Flower)}}, true, nullptr);
-    addAsset("Flower Single.glb", {{buildFlowerPlant(47, 3, 2.0f, 5, 0.075f, 0.06f, 0.55f, Color::hex("e03a2c"), Color::hex("2a1a10"), 0.018f, 3), pm("flower_poppy", SeasonKind::Flower)}}, true, nullptr);
+    addAsset("Flower Group.glb", {{buildFlowerPlant(41, 6, 2.0f, 13, 0.115f, 0.038f, 0.12f, Color::hex("f6f3f2"), Color::hex("f2bd25"), 0.036f, 2), pm("flower_daisy", SeasonKind::Flower)}}, true, nullptr);
+    addAsset("Flower Group-LqTljN6Wg2.glb", {{buildFlowerPlant(43, 7, 2.4f, 5, 0.105f, 0.08f, 0.45f, Color::hex("8a58d4"), Color::hex("f0d050"), 0.024f, 2), pm("flower_violet", SeasonKind::Flower)}}, true, nullptr);
+    addAsset("Flower Single.glb", {{buildFlowerPlant(47, 3, 2.0f, 5, 0.13f, 0.105f, 0.55f, Color::hex("e03a2c"), Color::hex("2a1a10"), 0.03f, 3), pm("flower_poppy", SeasonKind::Flower)}}, true, nullptr);
     MeshData stem;
     MeshData cap = buildToadstool(17, 0.4f, Color::hex("b8422c"), stem);
     addAsset("Mushroom.glb", {{stem, plantMat("mushroom_stem", SeasonKind::Mush, nullptr)}, {cap, plantMat("mushroom_cap", SeasonKind::Mush, nullptr)}}, true, nullptr);
     const char* petalFiles[5] = {"Flower Petal.glb", "Flower Petal-LqvxG9OBOU.glb", "Flower Petal-eVE0j49ux9.glb", "Flower Petal-niuBUEJdvM.glb", "Flower Petal-tzG4JcqYWs.glb"};
     const char* petalCol[5] = {"f4c542", "e85d8a", "f2f0ea", "e8763a", "b46ad8"};
     for (int i = 0; i < 5; i++) {
+      // loose offering petals lying on the ground: 4 big petals, each two quads with the tip curling up
       PRng R(60 + i);
       PartsGeo P;
-      bool daisy = i == 2;
-      P.bloom(Vec3(0, 0.12f + 0.02f * i, 0), daisy ? 14 : 5 + (i % 3), daisy ? 0.14f : 0.13f, daisy ? 0.045f : 0.1f, daisy ? 0.12f : 0.4f, Color::hex(petalCol[i]), Color::hex(daisy ? "f0c020" : "6a3a18"), 0.035f, R);
-      for (int l = 0; l < 3; l++) { float a = l * 2.1f + R.r(0, 0.5f); P.leaf(Vec3(0, 0.02f, 0), Vec3(std::cos(a), 0, std::sin(a)), 0.2f, 0.08f, 1.2f, R, 0.9f); }
+      for (int k = 0; k < 4; k++) {
+        float a = R.r(0, TAU), r = R.r(0.1f, 0.55f), L = R.r(0.6f, 0.8f), W = L * R.r(0.55f, 0.7f);
+        Vec3 c(std::cos(a) * r, 0.015f + k * 0.004f, std::sin(a) * r);
+        float h = R.r(0, TAU);
+        Vec3 d(std::cos(h), 0, std::sin(h)), side(-d.z, 0, d.x);
+        uint32_t col = packCol(Color::hex(petalCol[(i + (k == 3)) % 5]), R.r(0.85f, 1.05f));
+        Vec3 tip = (d + Vec3(0, 0.45f, 0)).normalized();
+        P.quad(c, d, side, L * 0.55f, W, Vec3(0, 1, 0), 0.0f, 0.5f, 0.25f, 0.5f, col, col);
+        P.quad(c + d * L * 0.55f, tip, side, L * 0.45f, W, tip.cross(side).normalized().y < 0 ? tip.cross(side).normalized() * -1.0f : tip.cross(side).normalized(), 0.0f, 0.5f, 0.0f, 0.25f, col, col);
+      }
       addAsset(petalFiles[i], {{P.g.data(), pm("flower_petal", SeasonKind::Flower)}}, true, nullptr);
     }
   }

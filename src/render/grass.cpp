@@ -317,7 +317,7 @@ void init() {
 void draw() {
   float R = g_settings.fullMap ? 220.0f : std::max(40.0f, g_settings.grassRadius * 3.3f);
   R *= (0.5f + 0.5f * forest::detailLevel()) * (1.0f - 0.3f * season.snow);
-  float RF = std::max(R + 40.0f, 420.0f * std::min(1.5f, g_settings.drawDist() / 2.0f));
+  float RF = std::max(R + 40.0f, 300.0f * std::min(1.5f, g_settings.drawDist() / 2.0f));
   Ring rings[4] = {
       {0.17f, 0, std::min(26.0f, R * 0.25f), 6, 0.055f, 1.0f, 1.0f},
       {0.36f, std::min(26.0f, R * 0.25f), R * 0.55f, 6, 0.1f, 1.05f, 0.95f},

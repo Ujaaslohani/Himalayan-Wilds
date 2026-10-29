@@ -1,3 +1,5 @@
+#include <array>
+#include <unordered_map>
 #include "terrain.h"
 #include "../core/noise.h"
 #include <thread>
@@ -26,7 +28,7 @@ constexpr float STAIR_TREAD = 1.3f;
 constexpr float LIP = 4.5f;
 constexpr float PILLAR = 3.6f;
 constexpr float CHASM = 10.0f;
-constexpr float REACH = 12.0f;
+constexpr float REACH = 15.0f;
 constexpr float ROUTE_REACH = 34.0f;
 constexpr float RIVER_REACH = 46.0f;
 constexpr float CELL = 16.0f;
@@ -659,6 +661,21 @@ std::vector<P2> spiral(float turns, float side, float d1, int n) {
   return out;
 }
 
+// winding ascent: uneven pace around the peak and in/out lobes so no two climbs feel alike
+std::vector<P2> winding(float turns, float side, float d1, int n, float wob, float waves, float pace, float phase) {
+  std::vector<P2> out{{0, 99}};
+  float a = 0;
+  for (int i = 1; i <= n; i++) {
+    float t = (float)i / n;
+    // pace modulates how fast it wraps around (long traverses, then tighter bends)
+    float da = side * PI * 2 * turns / n * (1 + pace * std::sin(t * 9.0f + phase));
+    a += da;
+    float d = lerpf(92, d1, std::pow(t, 0.85f)) + wob * std::sin(t * waves * PI * 2 + phase) * (1 - t * 0.6f) * std::min(1.0f, t * 4);
+    out.push_back({a, d});
+  }
+  return out;
+}
+
 std::vector<P2> zigzag(float start, float end, int legs, float width, float d0, float d1, float sign) {
   std::vector<P2> out;
   for (int i = 0; i < legs; i++) {
@@ -679,7 +696,7 @@ float carve(float x, float z, float h) {
     float ox = x - G.x, oz = z - G.z;
     if (ox * ox + oz * oz > (G.hl + 12) * (G.hl + 12)) continue;
     float along = std::fabs(ox * G.dx + oz * G.dz), side = std::fabs(ox * G.dz - oz * G.dx);
-    float m = (1 - sstep(along, G.hl, G.hl + 1.0f)) * (1 - sstep(side, 3.2f, 5.8f));
+    float m = (1 - sstep(along, G.hl, G.hl + 1.0f)) * (1 - sstep(side, 7.5f, 10.0f));
     if (m > 0) h = lerpf(h, std::min(h, G.base - CHASM + valueNoise(x * 0.5f, z * 0.5f, 7) * 1.5f), m);
   }
   return h;
@@ -689,12 +706,20 @@ float baseHeight(float x, float z) {
   float h = naturalHeight(x, z);
   PathHit q = pathQuery(x, z);
   if (q.td < ROUTE_REACH) {
-    float cap = q.th + 1.2f + std::max(0.0f, q.td - 3.2f) * (1.45f + 0.3f * valueNoise(x * 0.05f, z * 0.05f, 79));
-    if (h > cap) h = cap + (h - cap) * 0.08f;
+    float cap = q.cap + std::max(0.0f, q.td - 7.0f) * 0.2f * (valueNoise(x * 0.05f, z * 0.05f, 79) - 0.5f);
+    float x = h - cap;  // soft knee so the cut bank is a smooth curve, not a crease that zig-zags across the grid
+    h = lerpf(h, cap + x * 0.08f, sstep(x, -10.0f, 16.0f));
   }
-  if (q.td < REACH) h = lerpf(h, q.th + valueNoise(x * 0.3f, z * 0.3f, 77) * 0.12f, 1 - sstep(q.td, 3.2f, 10.5f));
+  if (q.td < REACH) {
+    // between two switchback legs ramp from one level to the other instead of leaving a wall at the midline
+    float tgt = q.th;
+    if (q.td2 < 40) tgt = lerpf(q.th, q.th2, 0.5f * sstep(q.td / (q.td + q.td2), 0.22f, 0.5f));
+    float w = 1 - sstep(q.td, 6.5f, 14.5f);
+    if (q.td2 < 40) w = std::max(w, 1 - sstep(q.td + q.td2, 24.0f, 34.0f));
+    h = lerpf(h, tgt + valueNoise(x * 0.3f, z * 0.3f, 77) * 0.12f, w);
+  }
   if (q.rd < REACH && q.rd < q.td) h = lerpf(h, q.rh, 1 - sstep(q.rd, 2.8f, 8.5f));
-  if (q.td < 14) h = carve(x, z, h);
+  if (q.td < 17) h = carve(x, z, h);
   float r = hypot2(x, z);
   h = lerpf(h, 0.1f, 1 - sstep(r, SETTLEMENT_RADIUS, SETTLEMENT_RADIUS + 22));
   if (q.rd < 4) h -= (1 - sstep(q.rd, 1.2f, 3.2f)) * 0.1f;
@@ -740,6 +765,11 @@ PathHit pathQuery(float x, float z) {
   PathHit Q;
   int32_t a, b;
   if (!g_pathIndex.cell(x, z, a, b)) return Q;
+  float cd[48], ch[48], cs[48];
+  int ci[48];
+  float s1 = 0;
+  int r1 = -1;
+  int nc = 0;
   for (int32_t n = a; n < b; n++) {
     const PathSeg& S = g_pathSegs[g_pathIndex.items[n]];
     const std::vector<P2>& P = S.kind ? ROUTES[S.id].pts : ROADS[S.id].pts;
@@ -750,13 +780,22 @@ PathHit pathQuery(float x, float z) {
     float t = clampf(((x - ax) * vx + (z - az) * vz) / L2, 0, 1);
     float d = hypot2(x - ax - vx * t, z - az - vz * t);
     if (S.kind) {
-      if (d < Q.td) { const Route& r = ROUTES[S.id]; Q.td = d; Q.th = routeHeightAt(r, r.cum[S.i - 1] + std::sqrt(L2) * t); }
+      if (d < 40) {
+        const Route& r = ROUTES[S.id];
+        float sa = r.cum[S.i - 1] + std::sqrt(L2) * t;
+        float th = routeHeightAt(r, sa);
+        if (d < Q.td) { Q.td = d; Q.th = th; s1 = sa; r1 = S.id; }
+        Q.cap = std::min(Q.cap, th + 1.2f + std::max(0.0f, d - 7.0f) * 1.05f);  // lower envelope: no ridge left between switchbacks
+        if (nc < 48) { cd[nc] = d; ch[nc] = th; cs[nc] = sa; ci[nc] = S.id; nc++; }
+      }
     } else if (d < Q.rd) {
       const Road& r = ROADS[S.id];
       Q.rd = d;
       Q.rh = r.hs[S.i - 1] + (r.hs[S.i] - r.hs[S.i - 1]) * t;
     }
   }
+  for (int i = 0; i < nc; i++)
+    if ((ci[i] != r1 || std::fabs(cs[i] - s1) > 45.0f) && std::fabs(ch[i] - Q.th) > 0.8f && cd[i] < Q.td2) { Q.td2 = cd[i]; Q.th2 = ch[i]; }
   return Q;
 }
 
@@ -770,7 +809,7 @@ float routeHeightAt(const Route& r, float s) {
   for (const Feat& f : r.feats) {
     if (s <= f.s) break;
     flat += std::min(f.len, s - f.s);
-    if (f.kind == FeatKind::Stairs) extra += sstep(s, f.s + f.len - 1.1f, f.s + f.len) * f.rise;
+    if (f.kind == FeatKind::Stairs) extra += clampf((s - f.s - 0.6f) / (f.len - 0.6f), 0.0f, 1.0f) * (f.rise - 0.35f) + sstep(s, f.s + f.len - 0.4f, f.s + f.len) * 0.35f;  // ramp under the steps: no cliff for the terrain to overshoot
     else if (s >= f.s + f.len - LIP) extra += f.rise;
   }
   return r.h0 + r.g * (s - flat) + extra;
@@ -816,14 +855,14 @@ void generate() {
   ROADS.clear();
   for (auto& d : defs) ROADS.push_back(makeRoad(d.c, d.anchor));
 
-  auto zz0 = zigzag(0, 0, 5, 0.95f, 80, 24, 1);
-  std::vector<P2> c0 = {{{0, 99}}, {{0.05f, 90}}, {{0.02f, 84}}};
-  c0.insert(c0.end(), zz0.begin(), zz0.end());
-  c0.push_back({{0, 15}});
-  auto zz4 = zigzag(0, 0, 5, 0.8f, 86, 26, -1);
-  std::vector<P2> c4 = {{{0, 99}}, {{0, 92}}};
-  c4.insert(c4.end(), zz4.begin(), zz4.end());
-  c4.push_back({{0, 15}});
+  // spiral ascents: successive turns are ~45 m apart, so ledges never stack into walls
+  // Gauri: long traverses across the face with three broad hairpins (no spiral)
+  std::vector<P2> c0 = {{{0, 99}}, {{0.35f, 95}}, {{0.8f, 89}}, {{1.25f, 82}}, {{1.6f, 76}}, {{1.78f, 70}}, {{1.6f, 64}}, {{1.1f, 60}},
+    {{0.5f, 57}}, {{-0.1f, 54}}, {{-0.65f, 50}}, {{-1.05f, 45}}, {{-1.2f, 39}}, {{-0.95f, 34}}, {{-0.45f, 31}}, {{0.15f, 28}},
+    {{0.7f, 25}}, {{1.0f, 21}}, {{0.8f, 17}}, {{0.45f, 15}}};
+  // Shila Kot: sweeping S-curves across both faces with hairpins at the ends
+  std::vector<P2> c4 = {{{0, 99}}, {{-0.4f, 94}}, {{-0.9f, 89}}, {{-1.3f, 82}}, {{-1.2f, 74}}, {{-0.6f, 69}}, {{0.15f, 66}}, {{0.8f, 62}},
+    {{1.25f, 55}}, {{1.2f, 47}}, {{0.6f, 42}}, {{-0.1f, 38}}, {{-0.75f, 33}}, {{-1.0f, 27}}, {{-0.7f, 21}}, {{-0.25f, 17}}, {{0, 15}}};
   using FK = FeatKind;
   ROUTES.clear();
   ROUTES.push_back(makeRoute(0, c0, {
@@ -833,7 +872,10 @@ void generate() {
     {{-1.8f, 44}}, {{-1.35f, 37}}, {{-0.7f, 34}}, {{0, 32}}, {{0.65f, 29}}, {{0.95f, 24}}, {{0.65f, 19}}, {{0.25f, 16}}, {{0, 15}}}, {
     {FK::Stairs, 0.06f}, {FK::Gap, 0.15f, 5, 4.6f}, {FK::Stairs, 0.24f}, {FK::Stairs, 0.33f}, {FK::Gap, 0.43f, 5, 5.0f}, {FK::Stairs, 0.52f},
     {FK::Gap, 0.62f, 5, 5.2f}, {FK::Stairs, 0.72f}, {FK::Stairs, 0.84f}}, 0.45f));
-  ROUTES.push_back(makeRoute(2, spiral(1.2f, 1, 17, 12), {{FK::Gap, 0.52f, 5, 3.4f}}, 1.0f));
+  ROUTES.push_back(makeRoute(2, std::vector<P2>{{{0, 99}}, {{0.7f, 92}}, {{1.5f, 86}}, {{2.1f, 78}}, {{2.2f, 68}}, {{1.7f, 61}}, {{0.9f, 57}}, {{0.1f, 52}},
+    {{-0.6f, 46}}, {{-1.0f, 38}}, {{-0.8f, 30}}, {{-0.3f, 24}}, {{0.2f, 19}}, {{0.3f, 16}}}, {
+    {FK::Stairs, 0.08f}, {FK::Gap, 0.2f, 5, 4.4f}, {FK::Stairs, 0.32f}, {FK::Pillars, 0.45f, 3, 2.8f, 0.5f}, {FK::Stairs, 0.58f},
+    {FK::Gap, 0.7f, 5, 4.8f}, {FK::Stairs, 0.82f}}, 0.45f));
   ROUTES.push_back(makeRoute(3, {{{0, 99}}, {{0.4f, 93}}, {{0.9f, 88}}, {{1.5f, 84}}, {{2.1f, 80}}, {{2.7f, 75}}, {{3.2f, 68}}, {{3.65f, 60}}, {{4.0f, 52}}, {{4.25f, 44}},
     {{4.2f, 37}}, {{3.6f, 34}}, {{2.9f, 32}}, {{2.2f, 29}}, {{1.85f, 25}}, {{2.2f, 21}}, {{2.8f, 18}}, {{3.3f, 16}}, {{3.5f, 15}}}, {
     {FK::Stairs, 0.05f}, {FK::Pillars, 0.12f, 4, 2.6f, 0.5f}, {FK::Stairs, 0.23f, 10}, {FK::Stairs, 0.33f}, {FK::Gap, 0.43f, 5, 4.2f}, {FK::Stairs, 0.52f},
@@ -871,7 +913,19 @@ void generate() {
       if (f.kind == FeatKind::Stairs) {
         for (int k = 0; k < f.n; k++) {
           bool last = k == f.n - 1;
-          put(f.s + f.len - (f.n - k - 0.5f) * STAIR_TREAD + (last ? 1.3f : 0), STAIR_TREAD / 2 + (last ? 1.34f : 0.04f), 2.6f, base + (k + 1) * STAIR_RISER, base - 0.6f);
+          float sc = f.s + f.len - (f.n - k - 0.5f) * STAIR_TREAD + (last ? 1.3f : 0);
+          float top = base + (k + 1) * STAIR_RISER;
+          float x, z, dx, dz;
+          routePoint(r, sc, x, z, dx, dz);
+          // reach out to each side only while the ground is there: steps end where the slope drops away
+          float ext[2];
+          for (int sd = 0; sd < 2; sd++) {
+            float sg = sd ? 1.0f : -1.0f, e = 2.6f;
+            while (e < 7.2f && baseHeight(x + dz * sg * (e + 0.3f), z - dx * sg * (e + 0.3f)) > top - 0.9f) e += 0.3f;
+            ext[sd] = e;
+          }
+          float off = (ext[1] - ext[0]) * 0.5f, hw = (ext[0] + ext[1]) * 0.5f;
+          STEPS.push_back({x + dz * off, z - dx * off, dx, dz, STAIR_TREAD / 2 + (last ? 1.34f : 0.04f), hw, top, base - 0.6f});
         }
         continue;
       }
@@ -890,8 +944,8 @@ void generate() {
   g_stepCells.assign((size_t)NC * NC, {});
   for (size_t i = 0; i < STEPS.size(); i++) {
     const Step& S = STEPS[i];
-    for (int cz = (int)std::floor((S.z - 4 - GRID_MIN) / CELL); cz <= (int)std::floor((S.z + 4 - GRID_MIN) / CELL); cz++)
-      for (int cx = (int)std::floor((S.x - 4 - GRID_MIN) / CELL); cx <= (int)std::floor((S.x + 4 - GRID_MIN) / CELL); cx++)
+    for (int cz = (int)std::floor((S.z - 9 - GRID_MIN) / CELL); cz <= (int)std::floor((S.z + 9 - GRID_MIN) / CELL); cz++)
+      for (int cx = (int)std::floor((S.x - 9 - GRID_MIN) / CELL); cx <= (int)std::floor((S.x + 9 - GRID_MIN) / CELL); cx++)
         if (cx >= 0 && cz >= 0 && cx < NC && cz < NC) g_stepCells[(size_t)cz * NC + cx].push_back((int)i);
   }
 
@@ -921,14 +975,25 @@ void generate() {
       for (int ix = 0; ix < GRID_N; ix++) {
         float x = GRID_MIN + ix * GRID_STEP, z = GRID_MIN + iz * GRID_STEP;
         PathHit q = pathQuery(x, z);
-        float k = sstep(std::min(q.td, q.rd), 2.6f, 4.8f);  // keep the walking surface, soften the cut edges
+        float k = sstep(std::min(q.td, q.rd), 6.0f, 7.0f);  // keep only the walking surface
         for (const Shrine& sh : SHRINES) k = std::min(k, sstep(hypot2(x - sh.x, z - sh.z), 24.0f, 34.0f));
         k = std::min(k, sstep(nearRoute(x, z), 4.0f, 9.0f));
         keep[(size_t)iz * GRID_N + ix] = k;
       }
   });
+  std::vector<float> band((size_t)GRID_N * GRID_N, 0.0f);
+  for (size_t i = 0; i < band.size(); i++) band[i] = keep[i] > 0.99f ? 0.0f : 0.0f;
+  parallelFor(GRID_N, [&](int a, int b) {
+    for (int iz = a; iz < b; iz++)
+      for (int ix = 0; ix < GRID_N; ix++) {
+        PathHit q = pathQuery(GRID_MIN + ix * GRID_STEP, GRID_MIN + iz * GRID_STEP);
+        float d = std::min(q.td, q.rd);
+        band[(size_t)iz * GRID_N + ix] = sstep(d, 3.0f, 3.8f) * (1 - sstep(d, 10.0f, 16.0f));
+      }
+  });
   for (int pass = 0; pass < 3; pass++) {
     std::vector<float> src = g_grid;
+    bool extra = pass >= 3;  // later passes only round off the trail banks
     parallelFor(GRID_N, [&](int a, int b) {
       for (int iz = a; iz < b; iz++)
         for (int ix = 1; ix < GRID_N - 1; ix++) {
@@ -937,7 +1002,7 @@ void generate() {
           float c = S(ix, iz);
           float avg = (c * 4 + (S(ix - 1, iz) + S(ix + 1, iz) + S(ix, iz - 1) + S(ix, iz + 1)) * 2 + S(ix - 1, iz - 1) + S(ix + 1, iz - 1) + S(ix - 1, iz + 1) + S(ix + 1, iz + 1)) / 16.0f;
           float slope = (std::fabs(S(ix + 1, iz) - S(ix - 1, iz)) + std::fabs(S(ix, iz + 1) - S(ix, iz - 1))) / (2 * GRID_STEP);
-          float k = (0.45f + 0.55f * sstep(slope, 0.15f, 0.8f)) * keep[(size_t)iz * GRID_N + ix];
+          float k = extra ? band[(size_t)iz * GRID_N + ix] * keep[(size_t)iz * GRID_N + ix] : (0.45f + 0.55f * sstep(slope, 0.15f, 0.8f)) * keep[(size_t)iz * GRID_N + ix];
           g_grid[(size_t)iz * GRID_N + ix] = c + (avg - c) * k;
         }
     });
@@ -953,6 +1018,54 @@ void generate() {
         if (band > 0) g_grid[(size_t)iz * GRID_N + ix] += band * (fbm(x * 0.35f, z * 0.35f, 3, 91) * 0.5f + fbm(x * 1.1f, z * 1.1f, 2, 92) * 0.18f);
       }
   });
+  // trim stair steps against the finished ground (not the raw shape): end each step where the ground falls away
+  for (Step& S : STEPS) {
+    if (S.hw < 2.61f || S.hl > 2.2f) continue;  // gap lips keep their size
+    float cx = S.x, cz = S.z, px = S.dz, pz = -S.dx;
+    float ext[2];
+    for (int sd = 0; sd < 2; sd++) {
+      float sg = sd ? 1.0f : -1.0f, e = 2.6f;
+      while (e < 7.2f) {
+        float qx = cx + px * sg * (e + 0.3f), qz = cz + pz * sg * (e + 0.3f);
+        bool ok = true;
+        for (float a = -S.hl; a <= S.hl + 0.01f; a += S.hl) ok = ok && getTerrainHeight(qx + S.dx * a, qz + S.dz * a) > S.top - 1.2f;
+        if (!ok) break;
+        e += 0.3f;
+      }
+      ext[sd] = e;
+    }
+    // re-centre from the step's current centre, which may already be offset
+    float half = S.hw;
+    float l = std::min(ext[0], half * 2), r = std::min(ext[1], half * 2);
+    float off = (r - l) * 0.5f;
+    S.x += px * off; S.z += pz * off;
+    S.hw = (l + r) * 0.5f;
+  }
+  // nothing of the ground may poke through a step: each grid node near a staircase is capped by the NEAREST step only
+  {
+    std::unordered_map<size_t, std::array<float, 3>> cap;  // node -> (distance outside footprint, cap height, is stair)  // node -> (distance outside footprint, cap height)
+    for (const Step& S : STEPS) {
+      float R = std::max(S.hl, S.hw) + 3.0f;
+      int x0 = std::max(0, (int)((S.x - R - GRID_MIN) / GRID_STEP)), x1 = std::min(GRID_N - 1, (int)((S.x + R - GRID_MIN) / GRID_STEP) + 1);
+      int z0 = std::max(0, (int)((S.z - R - GRID_MIN) / GRID_STEP)), z1 = std::min(GRID_N - 1, (int)((S.z + R - GRID_MIN) / GRID_STEP) + 1);
+      for (int iz = z0; iz <= z1; iz++)
+        for (int ix = x0; ix <= x1; ix++) {
+          float ox = GRID_MIN + ix * GRID_STEP - S.x, oz = GRID_MIN + iz * GRID_STEP - S.z;
+          float along = std::fabs(ox * S.dx + oz * S.dz), side = std::fabs(ox * S.dz - oz * S.dx);
+          if (along > S.hl + 1.6f || side > S.hw + 2.6f) continue;
+          float d = std::max(0.0f, along - S.hl);
+          size_t k = (size_t)iz * GRID_N + ix;
+          auto it = cap.find(k);
+          if (it == cap.end() || d < (*it).second[0]) cap[k] = {d, S.top - 0.9f + d * 1.1f, (S.hw > 2.61f && S.hl < 2.2f) ? 1.0f : 0.0f};
+        }
+    }
+    for (auto& kv : cap) {
+      int ix = (int)(kv.first % GRID_N), iz = (int)(kv.first / GRID_N);
+      PathHit q = pathQuery(GRID_MIN + ix * GRID_STEP, GRID_MIN + iz * GRID_STEP);  // never dig below the trail's own surface
+      float floorH = (kv.second[2] > 0.5f && kv.second[0] > 0.01f && q.td < 4.0f) ? std::min(q.th - 0.6f, kv.second[1] + 2.0f) : -1e9f;
+      g_grid[kv.first] = std::min(g_grid[kv.first], std::max(kv.second[1], floorH));
+    }
+  }
   g_colors.assign((size_t)GRID_N * GRID_N, 0);
   parallelFor(GRID_N, [](int a, int b) {
     for (int iz = a; iz < b; iz++)
@@ -982,11 +1095,19 @@ float getTerrainHeight(float x, float z) {
   gz = clampf(gz, 0, GRID_N - 1.001f);
   int ix = (int)gx, iz = (int)gz;
   float fx = gx - ix, fz = gz - iz;
-  const float* row0 = &g_grid[(size_t)iz * GRID_N];
-  const float* row1 = row0 + GRID_N;
-  float a = row0[ix], b = row0[ix + 1], c = row1[ix], d = row1[ix + 1];
-  if (fx + fz <= 1) return a + (b - a) * fx + (c - a) * fz;
-  return d + (c - d) * (1 - fx) + (b - d) * (1 - fz);
+  // Catmull-Rom bicubic, identical to the near-terrain render so feet and collision match what is drawn
+  auto w = [](float t, float* o) { float t2 = t * t, t3 = t2 * t; o[0] = -0.5f*t3 + t2 - 0.5f*t; o[1] = 1.5f*t3 - 2.5f*t2 + 1; o[2] = -1.5f*t3 + 2*t2 + 0.5f*t; o[3] = 0.5f*t3 - 0.5f*t2; };
+  float wx[4], wz[4];
+  w(fx, wx); w(fz, wz);
+  float r = 0;
+  for (int j = 0; j < 4; j++) {
+    int zz = std::min(std::max(iz - 1 + j, 0), GRID_N - 1);
+    const float* row = &g_grid[(size_t)zz * GRID_N];
+    float acc = 0;
+    for (int i = 0; i < 4; i++) acc += row[std::min(std::max(ix - 1 + i, 0), GRID_N - 1)] * wx[i];
+    r += acc * wz[j];
+  }
+  return r;
 }
 
 float slopeAt(float x, float z) {
@@ -1021,7 +1142,7 @@ const Gap* gapAt(float x, float z, float feet) {
     float ox = x - G.x, oz = z - G.z;
     if (ox * ox + oz * oz > (G.hl + 14) * (G.hl + 14)) continue;
     float along = std::fabs(ox * G.dx + oz * G.dz), side = std::fabs(ox * G.dz - oz * G.dx);
-    if (along < G.hl + 1 && side < 5.5f && feet < G.base - 3 && feet > G.base - CHASM - 4) return &G;
+    if (along < G.hl + 1 && side < 9.5f && feet < G.base - 3 && feet > G.base - CHASM - 4) return &G;
   }
   return nullptr;
 }

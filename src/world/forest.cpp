@@ -347,8 +347,8 @@ const float IMP_BAND = 16;
 const float MID_BAND = 5, CANOPY_BAND = 30;
 std::atomic<float> g_budgetScale{1.0f};
 float effScale() { return std::min(g_settings.detailScale, g_budgetScale.load()); }
-float midNearS(float ds) { return clampf(15 * g_settings.drawDist(), 20, 55) * ds; }
-float impostorNearS(float ds) { return clampf(20 * g_settings.drawDist(), 30, 110) * (0.5f + 0.5f * ds); }
+float midNearS(float ds) { return clampf(11 * g_settings.drawDist(), 18, 40) * ds; }
+float impostorNearS(float ds) { return clampf(16 * g_settings.drawDist(), 28, 90) * (0.5f + 0.5f * ds); }
 float midNear() { return midNearS(effScale()); }
 float impostorNear() { return impostorNearS(effScale()); }
 float canopyNear() { return clampf(140 * g_settings.drawDist(), 200, 420); }

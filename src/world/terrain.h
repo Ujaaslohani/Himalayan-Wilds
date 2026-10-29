@@ -63,7 +63,7 @@ struct Step { float x, z, dx, dz, hl, hw, top, bottom; };
 struct Gap { float x, z, dx, dz, hl, base, rx, rz, yaw; bool pillars; };
 struct Shrine { std::string name; float x, z, y, yaw; };
 
-struct PathHit { float rd = 99, rh = 0, td = 99, th = 0; };
+struct PathHit { float rd = 99, rh = 0, td = 99, th = 0, td2 = 99, th2 = 0, cap = 1e9f; };
 
 namespace world {
 extern std::vector<Summit> SUMMITS;

@@ -24,6 +24,7 @@ void shutdown();
 void begin(int width, int height, float scale);
 void end();
 float scale();
+void setScale(float s);
 void setTextShadow(float k);
 float width();
 float height();
