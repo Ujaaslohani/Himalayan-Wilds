@@ -1,3 +1,4 @@
+#include <unordered_map>
 #include "buildings.h"
 #include "village.h"
 #include "fx.h"
@@ -39,7 +40,7 @@ PlacementCheck checkPlacement(const Building& b, float x, float z, float rot) {
   }
   float y = mn;
   auto res = [&](const std::string& reason) { return PlacementCheck{reason.empty(), reason, x, y, z, rot}; };
-  if (hypot2(x, z) > SETTLEMENT_LIMIT) return res("Too far from the village hearth");
+  if (hypot2(x, z) > settlementLimit()) return res("Too far from the village edge");
   if (world::riverMask(x, z) > 0.02f || y < -0.3f || world::lakeAt(x, z, 2) >= 0) return res("Too close to the water");
   if (mx - y > 1.5f) return res("Ground is too steep");
   for (auto& o : A.buildings) {
@@ -50,16 +51,39 @@ PlacementCheck checkPlacement(const Building& b, float x, float z, float rot) {
   return res("");
 }
 
-void resolveBuildingCollision(float& px, float& pz, float radius) {
+// collision lookup grid: buildings bucketed into 16 m cells, rebuilt only when the building list changes,
+// so each villager / player check touches only the few buildings nearby instead of looping over all of them
+struct BCircle { float x, z, r; };
+static std::unordered_map<int64_t, std::vector<BCircle>> g_bgrid;
+static double g_bsig = -1;
+static const float BCELL = 16;
+static int64_t bkey(int cx, int cz) { return ((int64_t)cx << 32) ^ (uint32_t)cz; }
+static void refreshBuildingGrid() {
+  double sg = (double)A.buildings.size();
+  for (auto& b : A.buildings) sg += (b.built ? 1 : 0) + b.pos[0] * 0.37 + b.pos[2] * 0.91 + b.type.size() * 0.013;
+  if (sg == g_bsig) return;
+  g_bsig = sg;
+  g_bgrid.clear();
   for (auto& b : A.buildings) {
     if (!b.built || b.type == "bridge") continue;
-    float r = footprint(b.type) * 0.85f + radius;
-    float dx = px - b.pos[0], dz = pz - b.pos[2];
+    BCircle c{b.pos[0], b.pos[2], footprint(b.type) * 0.85f};
+    for (int cx = (int)std::floor((c.x - c.r - 1) / BCELL); cx <= (int)std::floor((c.x + c.r + 1) / BCELL); cx++)
+      for (int cz = (int)std::floor((c.z - c.r - 1) / BCELL); cz <= (int)std::floor((c.z + c.r + 1) / BCELL); cz++) g_bgrid[bkey(cx, cz)].push_back(c);
+  }
+}
+
+void resolveBuildingCollision(float& px, float& pz, float radius) {
+  static unsigned s_frame = ~0u;
+  if (s_frame != (unsigned)render::frameNo) { s_frame = (unsigned)render::frameNo; refreshBuildingGrid(); }
+  auto it = g_bgrid.find(bkey((int)std::floor(px / BCELL), (int)std::floor(pz / BCELL)));
+  if (it != g_bgrid.end()) for (const BCircle& b : it->second) {
+    float r = b.r + radius;
+    float dx = px - b.x, dz = pz - b.z;
     float d2 = dx * dx + dz * dz;
     if (d2 < r * r && d2 > 1e-6f) {
       float d = std::sqrt(d2);
-      px = b.pos[0] + (dx / d) * r;
-      pz = b.pos[2] + (dz / d) * r;
+      px = b.x + (dx / d) * r;
+      pz = b.z + (dz / d) * r;
     }
   }
   resolveStructureCollision(px, pz, radius);
@@ -126,6 +150,17 @@ void drawShadow() { drawAll(); }
 void drawPreview() {
   auto& w = E.world;
   if (w.placing.empty()) return;
+  {
+    // build mode: a dotted ring of small lights marks how far out you can build
+    float R = settlementLimit();
+    const Vec3& p = E.player.pos;
+    int n = std::max(24, (int)(TAU * R / 5.0f));
+    for (int i = 0; i < n; i++) {
+      float a = i * TAU / n, x = std::cos(a) * R, z = std::sin(a) * R;
+      if (hypot2(x - p.x, z - p.z) > 70) continue;
+      fx::glow(x, world::getTerrainHeight(x, z) + 0.35f, z, 0.45f);
+    }
+  }
   Mat4 m = Mat4::compose(w.previewPos, Quat::axisAngle({0, 1, 0}, w.previewRot), {1, 1, 1});
   if (w.placeKind != SK_COUNT && w.hasPlaceLook) {
     const BuiltModel& bm = structureModel(w.placeKind, w.placeLook);
@@ -137,3 +172,19 @@ void drawPreview() {
 }
 
 }  // namespace buildings
+
+float settlementExtent() {
+  static double lastT = -1;
+  static float ext = 0;
+  if (lastT >= 0 && std::fabs(E.clock - lastT) < 0.5) return ext;  // cheap: recount twice a second
+  lastT = E.clock;
+  float e = 0;
+  for (auto& b : A.buildings)
+    if (b.built && b.type != "bridge") e = std::max(e, hypot2(b.pos[0], b.pos[2]));
+  for (auto& st : A.structures)
+    if (st.kind != SK_PATH) e = std::max(e, hypot2(st.x, st.z));
+  ext = e;
+  return ext;
+}
+float settlementLimit() { return std::min(220.0f, std::max(SETTLEMENT_LIMIT, settlementExtent() + 30.0f)); }
+float settlementSafe() { return std::min(170.0f, std::max(40.0f, settlementExtent() + 20.0f)); }

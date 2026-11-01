@@ -8,11 +8,13 @@ extern const Cost RECRUIT_COST_CARPENTER, RECRUIT_COST_HERBALIST, RECRUIT_COST_B
 namespace app {
 void init();
 void newGame();
-bool continueGame();
+bool continueGame(int slot = -1);
+int latestSlot();
 void quitToTitle();
 void update(float dt);
 void saveNow();
-bool readSaveSummary(std::string& summary);
+void finishSaves();
+bool readSaveSummary(std::string& summary, int slot = -1);
 bool has(const Cost& c);
 std::string shortfall(const Cost& c);
 void spend(const Cost& c);

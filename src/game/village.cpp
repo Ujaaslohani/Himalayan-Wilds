@@ -1,3 +1,4 @@
+#include "events.h"
 #include "../render/sky.h"
 #include "village.h"
 #include "buildings.h"
@@ -15,7 +16,7 @@
 #include <map>
 #include <set>
 
-const char* STAGE_NAMES[3] = {"Clearing", "Growing Village", "Established Settlement"};
+const char* STAGE_NAMES[5] = {"Clearing", "Growing Village", "Established Settlement", "Market Town", "Temple Town"};
 
 namespace {
 const float BOX[SK_COUNT][4] = {
@@ -40,11 +41,30 @@ struct Resident {
   std::string job;
   bool working;
   float dance;
+  float talkT = 0, lookT = 0, lookX = 0, lookZ = 0, stuckT = 0, lastX = 0, lastZ = 0, slow = 0;
+  int talkWith = -1;
+  bool deliver = false;
+  std::vector<P2> path;  // road waypoints toward the final target
+  size_t pathI = 0;
+  float occT = 0;
+  bool hidden = false;
+  float hunger = 0, tired = 0, lonely = 0;
+  float px = 0, py = 0, pz = 0, pyaw = 0, pphase = 0;
+  bool pv = false;  // needs 0..1 that steer what a villager does next
+  std::string autoJob;
+  int nodeId = -1;  // resource node being worked (tree, rock, herb patch)
+  int carry = -1;   // job index of the haul being carried home (-1 none)
+  float headYaw = 0;
 };
 enum { RM_WALK, RM_IDLE, RM_INSIDE };
 std::vector<Resident> g_res;
+float g_ralpha = 1;
 int g_nextResident = 1;
-const char* TINTS[10] = {"#4d5d3a", "#8b5a2b", "#9f1239", "#57534e", "#1e3a8a", "#7c2d12", "#166534", "#a16207", "#6b21a8", "#0f766e"};
+const char* TINTS[16] = {"#4d5d3a", "#8b5a2b", "#9f1239", "#57534e", "#1e3a8a", "#7c2d12", "#166534", "#a16207", "#6b21a8", "#0f766e",
+                         "#d6cfc2", "#b45309", "#334155", "#be185d", "#365314", "#78350f"};
+const char* CAPS[10] = {"#7f1d1d", "#1e3a8a", "#14532d", "#78350f", "#e7e5e4", "#831843", "#3f3f46", "#a16207", "#0e7490", "#57534e"};
+const char* PANTS[8] = {"#e3d8c2", "#44403c", "#57534e", "#d6cfc2", "#3f2a1c", "#1f2937", "#8a7f73", "#c2b59b"};
+uint32_t hashTint(const char* const* pal, int n, int id, int salt) { uint32_t h = (uint32_t)id * 2654435761u ^ (uint32_t)salt * 40503u; h ^= h >> 13; return rgbHex(pal[h % (uint32_t)n]); }
 const char* JOB_KEYS[4] = {"woodcutter", "quarry", "herbalist", "hunter"};
 int JOB_RES[4] = {RES_WOOD, RES_STONE, RES_HERB, -1};
 
@@ -93,17 +113,44 @@ bool workSpot(Resident& r, float& ox, float& oz) {
   int res = JOB_RES[ji];
   if (res >= 0) {
     const ResNode* n = resources::nearestOfType((ResType)res, r.x * 0.3f, r.z * 0.3f);
-    if (n && hypot2(n->x, n->z) < 85) {
+    if (n && hypot2(n->x, n->z) < settlementLimit() + 20) {
+      r.nodeId = n->id;
       float a = randf() * TAU;
       ox = n->x + std::cos(a) * 1.6f;
       oz = n->z + std::sin(a) * 1.6f;
       return true;
     }
   }
-  float a = randf() * TAU, d = res >= 0 ? 30 + randf() * 15 : 48 + randf() * 25;
+  r.nodeId = -1;
+  float a = randf() * TAU, d = res >= 0 ? 30 + randf() * 15 : settlementSafe() + 8 + randf() * 25;  // hunters go past the settlement edge
   ox = std::cos(a) * d;
   oz = std::sin(a) * d;
   return true;
+}
+
+// long walks follow the nearest road: join it, walk along its points, leave it near the target
+static void planRoute(Resident& r) {
+  r.path.clear(); r.pathI = 0;
+  float dist = hypot2(r.tx - r.x, r.tz - r.z);
+  if (dist < 22) return;
+  int best = -1; size_t ia = 0, ib = 0; float bestCost = 1e9f;
+  for (size_t ri = 0; ri < world::ROADS.size(); ri++) {
+    const auto& P = world::ROADS[ri].pts;
+    float da = 1e9f, db = 1e9f; size_t a = 0, b = 0;
+    for (size_t i = 0; i < P.size(); i += 2) {
+      float d1 = hypot2(P[i][0] - r.x, P[i][1] - r.z), d2 = hypot2(P[i][0] - r.tx, P[i][1] - r.tz);
+      if (d1 < da) { da = d1; a = i; }
+      if (d2 < db) { db = d2; b = i; }
+    }
+    if (da > 18 || db > 18) continue;
+    float cost = da + db;
+    if (cost < bestCost && cost < dist * 0.6f) { bestCost = cost; best = (int)ri; ia = a; ib = b; }
+  }
+  if (best < 0) return;
+  const auto& P = world::ROADS[best].pts;
+  int step = ib >= ia ? 3 : -3;
+  for (long i = (long)ia; step > 0 ? i < (long)ib : i > (long)ib; i += step) r.path.push_back(P[(size_t)i]);
+  r.path.push_back(P[ib]);
 }
 
 void pickTarget(Resident& r, bool night) {
@@ -120,6 +167,70 @@ void pickTarget(Resident& r, bool night) {
   if (E.raid.active && r.home) {
     float x, z;
     if (homeDoor(r.home, x, z)) { r.tx = x; r.tz = z; r.goingHome = true; return; }
+  }
+  // daily routines: a night watchman patrols the settlement edge with a torch; by day stall keepers mind the market
+  {
+    int idx = (int)(&r - g_res.data());
+    if (night && A.population >= 3 && idx == 0) {
+      float R = settlementSafe() * 0.65f;
+      r.dance += 0.45f;  // next point along the patrol ring
+      r.tx = std::cos(r.dance) * R; r.tz = std::sin(r.dance) * R;
+      r.goingHome = false;
+      return;
+    }
+    if (!night && E.daylight > 0.4f && A.population >= 4 && idx >= 1) {
+      int stall = 0;
+      for (auto& st : A.structures)
+        if (st.kind == SK_MARKET_STALL) {
+          if (++stall == idx) {
+            float c = std::cos(st.rot), sn = std::sin(st.rot);
+            r.tx = st.x - sn * 0.6f; r.tz = st.z - c * 0.6f;  // behind the counter
+            r.working = true;
+            return;
+          }
+        }
+    }
+  }
+  // needs: the most pressing one above its threshold decides the trip
+  if (r.hunger > 0.75f) {  // eat: food store or the village fire
+    float fx = 0, fz = 0;
+    for (auto& s : A.structures) if (s.kind == SK_FOOD_STORE) { fx = s.x; fz = s.z; break; }
+    float a = randf() * TAU; r.tx = fx + std::cos(a) * 2.5f; r.tz = fz + std::sin(a) * 2.5f; r.hunger = 0; return;
+  }
+  if (r.tired > 0.85f && r.home) {
+    float x, z;
+    if (homeDoor(r.home, x, z)) { r.tx = x; r.tz = z; r.goingHome = true; r.tired = 0; return; }
+  }
+  if (r.lonely > 0.7f) {
+    auto sp = gatherSpots();
+    if (!sp.empty()) { auto& s = sp[(size_t)(randf() * sp.size()) % sp.size()]; r.tx = s.first + (randf() - 0.5f) * 2.5f; r.tz = s.second + (randf() - 0.5f) * 2.5f; return; }
+  }
+  // rain: head home (or to the nearest gathering roof) instead of wandering
+  if ((sky::rainAmount() > 0.4f || sky::blizzard() > 0.4f) && r.home) {
+    float x, z;
+    if (homeDoor(r.home, x, z)) { r.tx = x; r.tz = z; r.goingHome = true; return; }
+  }
+  // a worker who just finished a stint carries the haul back to the village centre
+  if (r.deliver) {
+    r.deliver = false;
+    // the stint is done: the tree / rock / herb patch actually loses a harvest (it disappears when spent and regrows later)
+    int ji = -1;
+    for (int k = 0; k < 4; k++) if (r.job == JOB_KEYS[k]) ji = k;
+    if (r.nodeId >= 0) {
+      if (ResNode* n = resources::byId(r.nodeId)) if (n->left > 0) resources::harvest(*n);
+      r.nodeId = -1;
+    }
+    r.carry = ji == 3 ? (randf() < 0.6f ? 3 : -1) : ji;  // hunters don't always make a kill
+    float a = randf() * TAU;
+    r.tx = std::cos(a) * 3.0f; r.tz = std::sin(a) * 3.0f;
+    return;
+  }
+  // dusk: most villagers drift toward the fire and gathering spots
+  bool dusk = E.daylight > 0.15f && E.daylight < 0.45f;
+  if (dusk && roll < 0.7f) {
+    auto sp = gatherSpots();
+    if (!sp.empty() && randf() < 0.5f) { auto& s = sp[(size_t)(randf() * sp.size()) % sp.size()]; r.tx = s.first + (randf() - 0.5f) * 3; r.tz = s.second + (randf() - 0.5f) * 3; return; }
+    float a = randf() * TAU; r.tx = std::cos(a) * (3.2f + randf() * 1.5f); r.tz = std::sin(a) * (3.2f + randf() * 1.5f); return;
   }
   if (!night && !r.job.empty() && E.daylight > 0.45f && roll < 0.75f) {
     float x, z;
@@ -256,7 +367,7 @@ SpotCheck checkStructureSpot(StructureKind kind, float x, float z, float rot, in
   }
   float y = info.group == KG_DECOR ? world::getTerrainHeight(x, z) : mn;
   auto res = [&](const std::string& reason) { return SpotCheck{reason.empty(), reason, x, y, z, rot}; };
-  if (hypot2(x, z) > 85) return res("Too far from the village hearth");
+  if (hypot2(x, z) > settlementLimit()) return res("Too far from the village edge");
   if (world::riverMask(x, z) > 0.02f || y < -0.3f || world::lakeAt(x, z, 2) >= 0) return res("Too close to the water");
   if (info.group != KG_DECOR && mx - y > 1.6f) return res("Ground is too steep");
   bool isDecor = info.group == KG_DECOR;
@@ -276,6 +387,15 @@ SpotCheck checkStructureSpot(StructureKind kind, float x, float z, float rot, in
 }
 
 void resolveStructureCollision(float& px, float& pz, float radius) {
+  // quick reject: skip the whole list when far outside the village's structure bounds (cached per frame)
+  static unsigned fr = ~0u;
+  static float bx0, bx1, bz0, bz1;
+  if (fr != (unsigned)render::frameNo) {
+    fr = (unsigned)render::frameNo;
+    bx0 = bz0 = 1e9f; bx1 = bz1 = -1e9f;
+    for (auto& s : A.structures) { bx0 = std::min(bx0, s.x); bx1 = std::max(bx1, s.x); bz0 = std::min(bz0, s.z); bz1 = std::max(bz1, s.z); }
+  }
+  if (px < bx0 - 10 || px > bx1 + 10 || pz < bz0 - 10 || pz > bz1 + 10) return;
   for (auto& s : A.structures) {
     const float* b = BOX[s.kind];
     if (b[1] - b[0] < 0.01f) continue;
@@ -296,6 +416,20 @@ void resolveStructureCollision(float& px, float& pz, float radius) {
     pz = s.z - nx * sn + nz * c;
   }
 }
+
+// is (x, z) under the roof of a home, hall, store or stall? (rotated footprint box, slightly shrunk)
+bool roofAt(float x, float z) {
+  for (auto& st : A.structures) {
+    if (KINDS[st.kind].group == KG_DECOR || st.kind == SK_FENCE || st.kind == SK_PATH) continue;
+    const float* b = BOX[st.kind];
+    float dx = x - st.x, dz = z - st.z, c = std::cos(st.rot), sn = std::sin(st.rot);
+    float lx = dx * c - dz * sn, lz = dx * sn + dz * c;
+    if (lx > b[0] * 0.85f && lx < b[1] * 0.85f && lz > b[2] * 0.85f && lz < b[3] * 0.85f) return true;
+  }
+  return false;
+}
+
+float tierBonus() { return 1.0f + 0.08f * A.stage; }
 
 StageInfo computeStage() {
   auto count = [](StructureKind k) { int n = 0; for (auto& s : A.structures) if (s.kind == k) n++; return n; };
@@ -320,7 +454,20 @@ StageInfo computeStage() {
   auto missing = [](const std::vector<std::pair<bool, std::string>>& v) { std::vector<std::string> o; for (auto& c : v) if (!c.first) o.push_back(c.second); return o; };
   if (!all(one)) return {0, STAGE_NAMES[0], missing(one)};
   if (!all(two)) return {1, STAGE_NAMES[1], missing(two)};
-  return {2, STAGE_NAMES[2], {}};
+  int stores = count(SK_FOOD_STORE), lamps = count(SK_LAMP_POST);
+  int quests = 0;
+  for (auto& q : A.quests) if (q.completed) quests++;
+  bool tower = false;
+  for (auto& b : A.buildings) if (b.built && b.type == "watchtower") tower = true;
+  std::vector<std::pair<bool, std::string>> three = {
+      {homes >= 10, fmt(homes, 10, "homes")}, {A.population >= 20, fmt(A.population, 20, "residents")}, {stalls >= 3, fmt(stalls, 3, "market stalls")},
+      {stores >= 2, fmt(stores, 2, "food stores")}, {lamps >= 4, fmt(lamps, 4, "lamp posts")}, {workshops >= 3, fmt(workshops, 3, "workshops")}};
+  if (!all(three)) return {2, STAGE_NAMES[2], missing(three)};
+  std::vector<std::pair<bool, std::string>> four = {
+      {homes >= 14, fmt(homes, 14, "homes")}, {A.population >= 30, fmt(A.population, 30, "residents")}, {hall >= 2, fmt(hall, 2, "community halls")},
+      {tower, std::string(tower ? "1/1" : "0/1") + " watchtower"}, {quests >= 6, fmt(quests, 6, "chapters complete")}, {(int)decorKinds.size() >= 4, fmt((int)decorKinds.size(), 4, "kinds of decoration")}};
+  if (!all(four)) return {3, STAGE_NAMES[3], missing(four)};
+  return {4, STAGE_NAMES[4], {}};
 }
 
 namespace village {
@@ -336,7 +483,7 @@ void syncResidents() {
     r.yaw = 0; r.speed = 0; r.phase = randf() * 6;
     r.tx = x; r.tz = z;
     r.mode = RM_IDLE; r.goingHome = false; r.t = 0.5f;
-    r.tint = rgbHex(TINTS[g_nextResident % 10]);
+    r.tint = hashTint(TINTS, 16, g_nextResident, 1);
     r.home = 0; r.working = false; r.dance = randf() * TAU;
     g_res.push_back(r);
   }
@@ -346,20 +493,87 @@ void syncResidents() {
 
 void resetResidents() { g_res.clear(); }
 
+// villagers with no job set by the player pick whatever the village is shortest of (timber, slate, herbs, food)
+void refreshAutoJobs() {
+  const char* keys[4] = {"wood", "stone", "herb", "food"};
+  int stock[4];
+  for (int k = 0; k < 4; k++) { auto it = A.inv.find(keys[k]); stock[k] = it == A.inv.end() ? 0 : it->second; }
+  int planned[4] = {0, 0, 0, 0};
+  for (auto& r : g_res) {
+    if (!r.autoJob.empty() && r.job == r.autoJob) r.job.clear();  // re-decide auto jobs each tick
+    r.autoJob.clear();
+    if (!r.job.empty()) continue;
+    int best = 0; float bs = 1e9f;
+    for (int k = 0; k < 4; k++) { float sc = stock[k] + planned[k] * 15.0f; if (sc < bs) { bs = sc; best = k; } }
+    planned[best]++;
+    r.autoJob = JOB_KEYS[best];
+    r.job = r.autoJob;
+  }
+}
+int autoJobCount(int j) { int n = 0; for (auto& r : g_res) if (r.autoJob == JOB_KEYS[j]) n++; return n; }
+
 void assignJobs() {
   std::vector<std::string> list;
   for (int k = 0; k < 4; k++)
     for (int i = 0; i < A.jobs[k]; i++) list.push_back(JOB_KEYS[k]);
   for (size_t i = 0; i < g_res.size(); i++) g_res[i].job = i < list.size() ? list[i] : "";
+  refreshAutoJobs();
 }
 
 int residentCount() { return (int)g_res.size(); }
+void snapshotResidents() { for (auto& r : g_res) { r.px = r.x; r.py = r.y; r.pz = r.z; r.pyaw = r.yaw; r.pphase = r.phase; r.pv = true; } }
+void setResidentAlpha(float a) { g_ralpha = clampf(a, 0, 1); }
+int nearPositions(float x, float z, float r, float* out, int maxN) {
+  int n = 0;
+  for (auto& v : g_res) {
+    if (n >= maxN) break;
+    if (v.mode == RM_INSIDE) continue;
+    float dx = v.x - x, dz = v.z - z;
+    if (dx * dx + dz * dz < r * r) { out[n * 3] = v.x; out[n * 3 + 1] = v.z; out[n * 3 + 2] = 0.8f; n++; }
+  }
+  return n;
+}
 
 void updateResidents(float dt) {
   bool night = E.daylight < 0.25f;
   bool fest = E.festival.t > 0;
   if (fest) E.festival.t = std::max(0.0f, E.festival.t - dt);
-  for (auto& r : g_res) {
+  const Vec3& pp = E.player.pos;
+  for (size_t ri = 0; ri < g_res.size(); ri++) {
+    Resident& r = g_res[ri];
+    // far from the player: think 4x per second instead of every frame (same result, less CPU)
+    float pd2 = (r.x - pp.x) * (r.x - pp.x) + (r.z - pp.z) * (r.z - pp.z);
+    float rdt = dt;
+    if (pd2 > 140 * 140) { r.slow += dt; if (r.slow < 0.25f) continue; rdt = r.slow; r.slow = 0; }
+    float dt = rdt;
+    r.talkT = std::max(0.0f, r.talkT - dt);
+    // needs drift over time: hunger always, tiredness while working, loneliness while alone
+    r.hunger = std::min(1.0f, r.hunger + dt / 420.0f);
+    r.tired = r.mode == RM_INSIDE ? std::max(0.0f, r.tired - dt / 60.0f) : std::min(1.0f, r.tired + dt / (r.working ? 300.0f : 700.0f));
+    r.lonely = r.talkT > 0 ? std::max(0.0f, r.lonely - dt / 20.0f) : std::min(1.0f, r.lonely + dt / 500.0f);
+    r.lookT = std::max(0.0f, r.lookT - dt);
+    if (r.mode != RM_INSIDE && !fest) {
+      // greet the player: stop briefly and turn to look when they walk up close
+      if (pd2 < 3.5f * 3.5f && !r.working && r.mode == RM_WALK && r.lookT <= 0 && randf() < dt * 1.5f) { r.mode = RM_IDLE; r.t = 2.5f + randf() * 2; }
+      if (pd2 < 6 * 6) { r.lookT = 0.5f; r.lookX = pp.x; r.lookZ = pp.z; }
+      // chat: two idle villagers close together face each other and talk for a while
+      if (r.mode == RM_IDLE && !r.working && r.talkT <= 0 && randf() < dt * 0.4f) {
+        for (size_t oi = 0; oi < g_res.size(); oi++) {
+          Resident& o = g_res[oi];
+          if (oi == ri || o.mode != RM_IDLE || o.working || o.talkT > 0) continue;
+          if (hypot2(o.x - r.x, o.z - r.z) > 3.2f) continue;
+          float T = 6 + randf() * 8;
+          r.talkT = o.talkT = T; r.t = std::max(r.t, T); o.t = std::max(o.t, T);
+          r.talkWith = (int)oi; o.talkWith = (int)ri;
+          break;
+        }
+      }
+      if (r.talkT > 0 && r.talkWith >= 0 && r.talkWith < (int)g_res.size()) {
+        Resident& o = g_res[r.talkWith];
+        r.yaw = turnToward(r.yaw, std::atan2(o.x - r.x, o.z - r.z), dt * 3);
+        if (pd2 >= 6 * 6) { r.lookT = 0.3f; r.lookX = o.x; r.lookZ = o.z; }
+      }
+    }
     if (r.mode == RM_INSIDE) {
       r.t -= dt;
       if ((!night || fest) && !E.raid.active && r.t <= 0) { r.mode = RM_IDLE; r.t = 1; }
@@ -381,21 +595,47 @@ void updateResidents(float dt) {
       r.speed = std::max(0.0f, r.speed - dt * 4);
       r.t -= dt;
       if (r.working && r.speed < 0.1f) r.phase += dt * 5;
-      if (r.t <= 0 || (E.raid.active && !r.goingHome) || (fest && hypot2(r.x, r.z) > 8)) { pickTarget(r, night); r.mode = RM_WALK; r.t = 40; }
+      if (r.t <= 0 || (E.raid.active && !r.goingHome) || (fest && hypot2(r.x, r.z) > 8)) { pickTarget(r, night); if (!fest) planRoute(r); r.mode = RM_WALK; r.t = 40 + r.path.size() * 3.0f; }
     } else {
-      float dx = r.tx - r.x, dz = r.tz - r.z;
+      // current steering target: next road waypoint, or the final destination
+      float gx = r.tx, gz = r.tz;
+      if (r.pathI < r.path.size()) {
+        gx = r.path[r.pathI][0]; gz = r.path[r.pathI][1];
+        if (hypot2(gx - r.x, gz - r.z) < 1.5f) { r.pathI++; continue; }
+      }
+      float dx = gx - r.x, dz = gz - r.z;
+      if (r.pathI < r.path.size()) { r.speed += (1.25f - r.speed) * std::min(1.0f, dt * 3); r.yaw = turnToward(r.yaw, std::atan2(dx, dz), dt * 3.5f); r.t -= dt; goto moveStep; }
+      dx = r.tx - r.x; dz = r.tz - r.z;
       float d = hypot2(dx, dz);
       r.speed += (1.25f - r.speed) * std::min(1.0f, dt * 3);
       r.yaw = turnToward(r.yaw, std::atan2(dx, dz), dt * 3.5f);
       r.t -= dt;
       if (d < 0.6f || r.t <= 0) {
         if (r.goingHome && night) { r.mode = RM_INSIDE; r.t = 5 + randf() * 20; }
+        else if (r.goingHome && !E.raid.active && sky::rainAmount() < 0.4f) { r.mode = RM_INSIDE; r.t = 15 + randf() * 25; }  // daytime rest
         else if (r.goingHome && E.raid.active) { r.mode = RM_INSIDE; r.t = 20; }
-        else { r.mode = RM_IDLE; r.t = r.working ? 14 + randf() * 16 : 4 + randf() * 9; }
+        else { r.mode = RM_IDLE; r.t = r.working ? 14 + randf() * 16 : 4 + randf() * 9; if (r.working) r.deliver = true; else r.carry = -1; }  // haul dropped at the centre
       }
     }
+  moveStep:
     r.x += std::sin(r.yaw) * r.speed * dt;
     r.z += std::cos(r.yaw) * r.speed * dt;
+    // keep personal space: walkers sidestep each other instead of overlapping
+    if (r.speed > 0.2f) {
+      for (auto& o : g_res) {
+        if (&o == &r || o.mode == RM_INSIDE) continue;
+        float ox = r.x - o.x, oz = r.z - o.z, d2 = ox * ox + oz * oz;
+        if (d2 < 0.8f * 0.8f && d2 > 1e-6f) { float d = std::sqrt(d2), push = (0.8f - d) * 0.5f; r.x += ox / d * push; r.z += oz / d * push; }
+      }
+    }
+    // stuck against a wall or tree: give up on this target and pick another
+    if (r.mode == RM_WALK) {
+      r.stuckT += dt;
+      if (r.stuckT > 1.5f) {
+        if (hypot2(r.x - r.lastX, r.z - r.lastZ) < 0.4f) { r.mode = RM_IDLE; r.t = 0.3f; }
+        r.stuckT = 0; r.lastX = r.x; r.lastZ = r.z;
+      }
+    }
     forest::resolveTreeCollision(r.x, r.z, 0.3f);
     resolveBuildingCollision(r.x, r.z, 0.3f);
     r.y = world::getTerrainHeight(r.x, r.z);
@@ -466,6 +706,7 @@ void initRender() {
   glBindVertexArray(0);
 }
 
+static Mesh g_merged;
 static void rebuildStructures() {
   sky::invalidateStaticShadow();
   g_structDirty = false;
@@ -494,16 +735,67 @@ static void rebuildStructures() {
     }
   }
   for (auto& b : g_structBatches) b->batch.upload();
+  // merge every placed structure into one static mesh: one draw call for the whole village instead of one per style
+  g_merged.destroy();
+  MeshData md;
+  md.fmt = VFmt::P3C4;
+  for (auto& s : A.structures) {
+    const BuiltModel& m = structureModel(s.kind, s.look);
+    if (!m.data || m.data->fmt != VFmt::P3C4) { md.verts.clear(); break; }
+    const MeshData& src = *m.data;
+    uint32_t base = (uint32_t)md.vertexCount;
+    size_t off = md.verts.size();
+    md.verts.insert(md.verts.end(), src.verts.begin(), src.verts.end());
+    float c = std::cos(s.rot), sn = std::sin(s.rot);
+    for (int i = 0; i < src.vertexCount; i++) {
+      VtxP3C4* v = (VtxP3C4*)(md.verts.data() + off) + i;
+      float lx = v->p[0], lz = v->p[2];
+      v->p[0] = s.x + lx * c + lz * sn;
+      v->p[1] += s.y;
+      v->p[2] = s.z - lx * sn + lz * c;
+      md.bmin = {std::min(md.bmin.x, v->p[0]), std::min(md.bmin.y, v->p[1]), std::min(md.bmin.z, v->p[2])};
+      md.bmax = {std::max(md.bmax.x, v->p[0]), std::max(md.bmax.y, v->p[1]), std::max(md.bmax.z, v->p[2])};
+    }
+    for (uint32_t ix : src.idx) md.idx.push_back(ix + base);
+    md.vertexCount += src.vertexCount;
+  }
+  if (!md.verts.empty() && md.vertexCount > 0) g_merged = uploadMesh(md);
 }
 
 void drawStructures() {
   if (g_structDirty) rebuildStructures();
   glEnable(GL_CULL_FACE);
+  if (g_merged.valid()) {
+    Shader& s = render::object(VFmt::P3C4, IM_NONE, SeasonKind::Build, OF_WIND);
+    render::setModel(s, Mat4());
+    g_merged.draw();
+    return;
+  }
   render::object(VFmt::P3C4, IM_FULL, SeasonKind::Build, OF_WIND);
   for (auto& b : g_structBatches) b->batch.draw();
 }
 
+static void fillResidentsInner(bool shadow);
 static void fillResidents(bool shadow) {
+  // draw residents between their last two simulated steps (smooth motion at any frame rate)
+  struct S { float x, y, z, yaw, phase; };
+  static std::vector<S> sv;
+  sv.resize(g_res.size());
+  for (size_t i = 0; i < g_res.size(); i++) {
+    Resident& r = g_res[i];
+    sv[i] = {r.x, r.y, r.z, r.yaw, r.phase};
+    if (!r.pv || std::fabs(r.x - r.px) + std::fabs(r.z - r.pz) > 4) continue;
+    float t = g_ralpha, dy = r.yaw - r.pyaw;
+    while (dy > PI) dy -= TAU;
+    while (dy < -PI) dy += TAU;
+    r.x = r.px + (r.x - r.px) * t; r.y = r.py + (r.y - r.py) * t; r.z = r.pz + (r.z - r.pz) * t; r.yaw = r.pyaw + dy * t; r.phase = r.pphase + (r.phase - r.pphase) * t;
+  }
+  fillResidentsInner(shadow);
+  for (size_t i = 0; i < g_res.size(); i++) { Resident& r = g_res[i]; r.x = sv[i].x; r.y = sv[i].y; r.z = sv[i].z; r.yaw = sv[i].yaw; r.phase = sv[i].phase; }
+}
+static float g_headDt = 0;
+static void fillResidentsInner(bool shadow) {
+  if (!shadow) { static float last = -1; g_headDt = last < 0 ? 0 : clampf(E.clock - last, 0, 0.1f); last = E.clock; }
   const Vec3& p = E.player.pos;
   DynBatch* T = shadow ? g_sTorsos : g_torsos;
   DynBatch* H = shadow ? g_sHeads : g_heads;
@@ -518,6 +810,26 @@ static void fillResidents(bool shadow) {
     if (dx * dx + dz * dz > 95 * 95) continue;
     if (shadow && dx * dx + dz * dz > 46 * 46) continue;
     if (!shadow && !render::cam.sphere({r.x, r.y + 1, r.z}, 1.5f)) continue;
+    if (!shadow && dx * dx + dz * dz > 40 * 40) {
+      // hidden behind a hill or ridge? (ray-march the height field; cached briefly)
+      if (E.clock - r.occT > 0.4f) {
+        r.occT = E.clock;
+        const Vec3& c = render::cam.pos;
+        float L = std::sqrt(dx * dx + dz * dz);
+        int n = (int)clampf(L / 6, 6, 24);
+        r.hidden = true;
+        for (float hy : {1.7f, 0.4f}) {
+          bool blocked = false;
+          for (int k = 1; k < n && !blocked; k++) {
+            float t = (float)k / n;
+            float x = c.x + (r.x - c.x) * t, z = c.z + (r.z - c.z) * t, y = c.y + (r.y + hy - c.y) * t;
+            if (world::getTerrainHeight(x, z) > y + 0.5f) blocked = true;
+          }
+          if (!blocked) { r.hidden = false; break; }
+        }
+      }
+      if (r.hidden) continue;
+    }
     int v = r.id % 3;
     if (T[v].items.size() >= 48) continue;
     float bob = std::fabs(std::sin(r.phase)) * std::min(0.05f, r.speed * 0.02f);
@@ -525,15 +837,27 @@ static void fillResidents(bool shadow) {
     Mat4 base = Mat4::compose({r.x, r.y + bob, r.z}, Quat::axisAngle({0, 1, 0}, r.yaw), {sc, sc, sc});
     T[v].add(base, r.tint);
     float look = r.speed < 0.1f ? std::sin(E.clock * 0.7f + r.id) * 0.5f : 0;
-    H[v].add(base * Mat4::compose({0, PIV_HEAD.y, 0}, Quat::axisAngle({0, 1, 0}, look), {1, 1, 1}));
+    if (r.lookT > 0) { float rel = std::atan2(r.lookX - r.x, r.lookZ - r.z) - r.yaw; while (rel > PI) rel -= TAU; while (rel < -PI) rel += TAU; look = clampf(rel, -1.0f, 1.0f); }
+    // ease the head toward where they want to look, same pace as the story characters (no snapping)
+    if (!shadow) r.headYaw += (look - r.headYaw) * std::min(1.0f, g_headDt * 4);
+    look = r.headYaw;
+    H[v].add(base * Mat4::compose({0, PIV_HEAD.y, 0}, Quat::axisAngle({0, 1, 0}, look), {1, 1, 1}), hashTint(CAPS, 10, r.id, 2));
+    if (r.carry >= 0 && r.speed > 0.1f && T[v].items.size() < 48) {
+      // haul across the shoulders: log bundle, stone sack, herb basket, or a deer carcass
+      static const uint32_t HAUL[4] = {rgbHex("#6b4423"), rgbHex("#8a8580"), rgbHex("#4d7c0f"), rgbHex("#8b6a4a")};
+      Vec3 sz = r.carry == 3 ? Vec3{0.75f, 0.45f, 1.1f} : r.carry == 0 ? Vec3{1.5f, 0.3f, 0.4f} : Vec3{0.6f, 0.4f, 0.55f};
+      T[v].add(base * Mat4::compose({0, PIV_ARM.y - 0.62f, -0.22f}, Quat::axisAngle({0, 0, 1}, 0), sz), HAUL[r.carry]);
+    }
     float swing = std::sin(r.phase) * std::min(0.7f, r.speed * 0.35f);
     bool chop = r.working && r.mode == RM_IDLE && r.speed < 0.1f;
     float idle = chop ? -1.2f + std::sin(E.clock * 5 + r.id) * 0.9f : r.speed < 0.1f ? std::sin(E.clock * 1.6f + r.id) * 0.05f : 0;
+    bool talking = r.talkT > 0 && r.speed < 0.1f;
     for (int k = 0; k < 2; k++) {
       float side = k == 0 ? 1.0f : -1.0f;
       float ang = side * -swing + (!chop && E.festival.t > 0 && hypot2(r.x, r.z) < 8 ? -2.4f + std::sin(E.clock * 7 + r.id + k) * 0.4f : idle);
+      if (talking && k == (r.id & 1)) ang = -0.5f + std::sin(E.clock * 3.1f + r.id) * 0.35f;  // gesturing hand
       AR.add(base * Mat4::compose({side * PIV_ARM.x, PIV_ARM.y, 0}, Quat::axisAngle({1, 0, 0}, ang), {1, 1, 1}), r.tint);
-      LG.add(base * Mat4::compose({side * PIV_LEG.x, PIV_LEG.y, 0}, Quat::axisAngle({1, 0, 0}, side * swing), {1, 1, 1}));
+      LG.add(base * Mat4::compose({side * PIV_LEG.x, PIV_LEG.y, 0}, Quat::axisAngle({1, 0, 0}, side * swing), {1, 1, 1}), hashTint(PANTS, 8, r.id, 3));
     }
   }
   for (int v = 0; v < 3; v++) { T[v].upload(); H[v].upload(); }
@@ -552,6 +876,12 @@ void drawResidents() {
 
 void drawShadowStatic() {
   if (g_structDirty) rebuildStructures();
+  if (g_merged.valid()) {
+    Shader& s = render::object(VFmt::P3C4, IM_NONE, SeasonKind::Build, OF_WIND);
+    render::setModel(s, Mat4());
+    g_merged.draw();
+    return;
+  }
   render::object(VFmt::P3C4, IM_FULL, SeasonKind::Build, OF_WIND);
   for (auto& b : g_structBatches) b->batch.draw();
 }
@@ -568,12 +898,35 @@ void addLights() {
   if (g_structDirty) rebuildStructures();
   const Vec3& p = E.player.pos;
   auto spot = [&](const Vec3& s, float size, float poolR) {
-    if (size > 0) fx::glow(s.x, s.y, s.z, size);
-    if (poolR > 0 && hypot2(s.x - p.x, s.z - p.z) < 450) fx::pool(s.x, world::getTerrainHeight(s.x, s.z) + 0.06f, s.z, poolR);
+    // flame flicker: every light breathes on its own rhythm
+    float ph = s.x * 1.7f + s.z * 2.3f;
+    float fl = 1.0f;  // steady light (flicker removed)
+    (void)ph;
+    if (size > 0) fx::glow(s.x, s.y, s.z, size * fl);
+    if (poolR > 0 && hypot2(s.x - p.x, s.z - p.z) < 450) fx::pool(s.x, world::getTerrainHeight(s.x, s.z) + 0.06f, s.z, poolR * (0.94f + 0.06f * fl));
   };
-  for (auto& l : g_staticLights) spot(l, 1.1f, 3.2f);
+  // lamps are lit at dusk and put out at dawn
+  if (E.daylight < 0.55f) for (auto& l : g_staticLights) spot(l, 1.1f, 3.2f);
+  // seasonal festivals: Losar rings the hearth with butter lamps, the harvest festival hangs marigold-glow garlands
+  if (int fk = events::festival()) {
+    int n = fk == 1 ? 18 : 12;
+    float R = fk == 1 ? 5.6f : 7.5f;
+    for (int i = 0; i < n; i++) {
+      float a = i * TAU / n, x = std::cos(a) * R, z = std::sin(a) * R;
+      float y = world::getTerrainHeight(x, z) + (fk == 1 ? 0.25f : 2.2f + 0.3f * std::sin(a * 3));
+      spot({x, y, z}, fk == 1 ? 0.55f : 0.7f, fk == 1 ? 1.4f : 0.0f);
+    }
+  }
+  // the night watchman's torch
+  if (E.daylight < 0.25f && A.population >= 3 && !g_res.empty() && g_res[0].mode != RM_INSIDE)
+    spot({g_res[0].x + std::sin(g_res[0].yaw) * 0.3f, g_res[0].y + 1.9f, g_res[0].z + std::cos(g_res[0].yaw) * 0.3f}, 0.6f, 4.5f);
+  // hand lantern: a warm pool around the player after dark
+  if (invCount("lantern") > 0 && E.daylight < 0.45f) {
+    Vec3 f = render::cam.forward();
+    spot({p.x + f.x * 0.5f + 0.25f, p.y - 0.55f, p.z + f.z * 0.5f}, 0.35f, 6.5f);
+  }
   static std::vector<Vec3> templeSpots = temple::lightSpots();
-  for (auto& l : templeSpots) spot(l, 1.3f, 0);
+  for (auto& l : templeSpots) spot(l, 1.3f, 2.4f);  // butter lamps cast warm pools
   std::vector<Vec3> win;
   for (auto& b : A.buildings) {
     if (!b.built) continue;
@@ -582,7 +935,15 @@ void addLights() {
     for (auto& w : win) {
       bool fire = b.type == "campfire";
       Vec3 s(b.pos[0] + w.x * c + w.z * sn, b.pos[1] + w.y, b.pos[2] - w.x * sn + w.z * c);
-      spot(s, fire ? 0 : 1.1f, fire ? 7 : 3.4f);
+      spot(s, fire ? 0 : 1.1f, fire ? 7 : 0);
+      if (!fire) {
+        // warm window light spilling out onto the ground in front of the wall
+        Vec3 out(s.x - b.pos[0], 0, s.z - b.pos[2]);
+        float L = std::sqrt(out.x * out.x + out.z * out.z);
+        if (L > 0.01f) { out.x /= L; out.z /= L; }
+        float wx = s.x + out.x * 1.6f, wz = s.z + out.z * 1.6f;
+        if (hypot2(wx - p.x, wz - p.z) < 450) fx::pool(wx, world::getTerrainHeight(wx, wz) + 0.06f, wz, 3.0f);
+      }
     }
   }
   npcs::forEach([&](const NpcRt& n) { spot({n.x + std::cos(n.yaw) * 0.32f, n.y + 0.95f, n.z - std::sin(n.yaw) * 0.32f}, 0.7f, 2.6f); });

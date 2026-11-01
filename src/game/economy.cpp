@@ -20,9 +20,21 @@ const Trade TRADES[9] = {
     {"t9", {{"bone", 4}, {"sinew", 2}}, {{"arrow", 20}}},
 };
 
-const GearDef GEAR[2] = {
+// the travelling caravan's rare goods: trophies and gear materials you'd otherwise have to hunt dangerous animals for
+const Trade CARAVAN[4] = {
+    {"c1", {{"wood", 30}, {"stone", 10}}, {{"wolf_fur", 1}}},
+    {"c2", {{"food", 30}, {"fiber", 10}}, {{"bear_hide", 1}}},
+    {"c3", {{"deer_pelt", 2}, {"herb", 6}}, {{"goral_horn", 2}}},
+    {"c4", {{"stone", 20}, {"bone", 4}}, {{"sinew", 4}, {"arrow", 40}}},
+};
+
+const GearDef GEAR[GEAR_COUNT] = {
     {"fur_coat", "Fur Coat", "Keeps you warm on winter nights outside the village. Without it the cold slowly drains your health.", {{"wolf_fur", 2}, {"sinew", 2}, {"fiber", 4}}},
     {"leather_armour", "Leather Armour", "Takes 40% less damage from predators.", {{"bear_hide", 1}, {"boar_hide", 2}, {"sinew", 4}}},
+    {"recurve_bow", "Recurve Bow", "Horn-backed bow: every arrow hits 30% harder.", {{"goral_horn", 2}, {"sinew", 3}, {"wood", 6}}},
+    {"quiver", "Hunter's Quiver", "Fletch 15 arrows per timber instead of 10 (40 per bundle).", {{"deer_pelt", 2}, {"fiber", 4}, {"bone", 2}}},
+    {"snowshoes", "Snowshoes", "Walk over deep snow without slowing down.", {{"wood", 4}, {"sinew", 2}, {"fiber", 4}}},
+    {"lantern", "Hand Lantern", "Lights the ground around you after dark.", {{"stone", 2}, {"bone", 2}, {"fiber", 2}, {"herb", 2}}},
 };
 
 const Production* production(const std::string& id) {

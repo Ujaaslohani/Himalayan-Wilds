@@ -136,6 +136,8 @@ const ResNode* nearestOfType(ResType t, float x, float z) {
   return best;
 }
 
+ResNode* byId(int id) { for (auto& n : g_nodes) if (n.id == id) return &n; return nullptr; }
+
 HarvestResult harvest(ResNode& n) {
   const ResInfo& info = RES_INFO[n.type];
   auto& b = E.world.bonus;
@@ -222,7 +224,8 @@ static void cull() {
       float x = it.r0[3], y = it.r1[3], z = it.r2[3];
       float d = hypot2(x - cam.pos.x, z - cam.pos.z);
       if (d > R) continue;
-      if (d < R_SHADOW) L.shadowV.push_back(it);
+      // small things (herb and fibre patches) only cast shadows close up, where they cover more than a few pixels
+      if (d < (L.type == RES_HERB || L.type == RES_FIBER ? std::min(R_SHADOW, 14.0f) : R_SHADOW)) L.shadowV.push_back(it);
       if (d > 6 && !cam.box({x - 3, y - 1, z - 3}, {x + 3, y + 4, z + 3})) continue;
       bool nr = L.type == RES_WOOD || d < R_MID + R_BAND + R_MARGIN, fr = L.type != RES_WOOD && d > R_MID - R_MARGIN;
       if (nr) L.nearV.push_back(it);

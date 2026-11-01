@@ -273,7 +273,7 @@ void defineLayers() {
                     0.75f, 1.2f, [] { return g_settings.fullMap ? 140.0f : g_settings.grassRadius; }, 12, 0.2f, 0.45f});
   LAYERS.push_back({L_UNDER, 202,
                     {{"Fern.glb", 0.22f}, {"Plant.glb", 0.14f}, {"Plant Big.glb", 0.1f}, {"Plant-xH5gNlQxAZ.glb", 0.06f}, {"Bush.glb", 0.1f}, {"Bush with Flowers.glb", 0.08f},
-                     {"Flower Group.glb", 0.1f}, {"Flower Group-LqTljN6Wg2.glb", 0.05f}, {"Flower Single.glb", 0.07f}, {"Mushroom.glb", 0.015f}, {"Mushroom Laetiporus.glb", 0.01f}},
+                     {"Flower Group.glb", 0.1f}, {"Flower Group-LqTljN6Wg2.glb", 0.05f}, {"Flower Single.glb", 0.07f}},
                     5,
                     [](float x, float z, float h) -> float {
                       if (h < -0.5f || h > 88 || world::pathDistance(x, z) < 2 || world::nearRoute(x, z) < 3.6f || hypot2(x, z) < SETTLEMENT_RADIUS || world::slopeAt(x, z) > 0.8f) return 0;
@@ -344,14 +344,14 @@ void gardenSpots(std::vector<std::array<float, 6>>& out) {
 
 std::atomic<bool> g_impReady{false};
 const float IMP_BAND = 16;
-const float MID_BAND = 5, CANOPY_BAND = 30;
+const float MID_BAND = 2.5f, CANOPY_BAND = 30;  // shorter crossfade: near and mid versions overlap less
 std::atomic<float> g_budgetScale{1.0f};
 float effScale() { return std::min(g_settings.detailScale, g_budgetScale.load()); }
 float midNearS(float ds) { return clampf(11 * g_settings.drawDist(), 18, 40) * ds; }
 float impostorNearS(float ds) { return clampf(16 * g_settings.drawDist(), 28, 90) * (0.5f + 0.5f * ds); }
 float midNear() { return midNearS(effScale()); }
 float impostorNear() { return impostorNearS(effScale()); }
-float canopyNear() { return clampf(140 * g_settings.drawDist(), 200, 420); }
+float canopyNear() { return clampf(140 * g_settings.drawDist(), 200, 420) * (1.0f - 0.25f * sky::rainAmount()); }  // rain: far canopy ends sooner (hidden in the fog)
 float impostorOuter() { return canopyNear() + CANOPY_BAND; }
 
 struct LodCfg { float mid, imp, outer; bool canopy; };
@@ -432,12 +432,13 @@ void compute(BuildJob& J) {
             if (slot->hasLod) {
               if (d > midD - M && d < nearD + IMP_BAND + M) J.mid[si].push_back(inst);
               if (d > midD + MID_BAND + M) {
-                if (caster && d < 46) J.shadow[si].push_back(inst);
+                if (caster && d < 46 && (layer.id == L_TREE || inst.s > 0.55f || d < 18)) J.shadow[si].push_back(inst);
                 continue;
               }
             } else if (d > nearD + IMP_BAND + M) continue;
           }
-          if (caster && d < 46) J.shadow[si].push_back(inst);
+          // tiny rocks far off cover a few shadow-map texels at most: skip them as casters
+          if (caster && d < 46 && (layer.id == L_TREE || inst.s > 0.55f || d < 18)) J.shadow[si].push_back(inst);
           if (caster && d < 85 && J.casts.size() < 700) {
             bool tree = layer.id == L_TREE;
             J.casts.push_back(castInstance(it.x, it.y, it.z, tree ? 2.3f * inst.s : 1.0f * inst.s, tree ? 8 * inst.s : 0.8f * inst.s));
@@ -567,7 +568,7 @@ bool chunkVisible(const FileSlot::Range& r) {
   if (!cam.box(r.mn, r.mx)) return false;
   float cx = (r.mn.x + r.mx.x) * 0.5f, cz = (r.mn.z + r.mx.z) * 0.5f;
   float dist = hypot2(cx - cam.pos.x, cz - cam.pos.z);
-  if (dist < 90) return true;
+  if (dist < 45) return true;
   int key = chunkKey(cx, cz);
   auto it = g_occ.find(key);
   if (it != g_occ.end()) return it->second != 0;
@@ -579,7 +580,7 @@ bool chunkVisible(const FileSlot::Range& r) {
     for (int k = 1; k < steps && !blocked; k++) {
       float t = (float)k / steps;
       float x = cam.pos.x + (q.x - cam.pos.x) * t, y = cam.pos.y + (q.y - cam.pos.y) * t, z = cam.pos.z + (q.z - cam.pos.z) * t;
-      if (world::getTerrainHeight(x, z) > y + 4.0f) blocked = true;
+      if (world::getTerrainHeight(x, z) > y + 2.5f) blocked = true;
     }
     if (!blocked) { vis = true; break; }
   }
@@ -609,6 +610,13 @@ bool gatherVisible(const std::vector<InstLite>& items, const std::vector<FileSlo
   if (h == sig) return false;
   sig = h;
   out.clear();
+  // emit chunks nearest first (cheap: a few hundred chunks, not thousands of trees), so far impostor
+  // forests also draw roughly front to back and hidden quads behind them fail the depth test early
+  std::sort(vis.begin(), vis.end(), [&](uint32_t a, uint32_t b) {
+    const auto &A = ranges[a], &B = ranges[b];
+    float ax = (A.mn.x + A.mx.x) * 0.5f - cp.x, az = (A.mn.z + A.mx.z) * 0.5f - cp.z, bx = (B.mn.x + B.mx.x) * 0.5f - cp.x, bz = (B.mn.z + B.mx.z) * 0.5f - cp.z;
+    return ax * ax + az * az < bx * bx + bz * bz;
+  });
   float lo2 = minD > 2 ? (minD - 2) * (minD - 2) : 0, hi2 = maxD < 1e8f ? (maxD + 2) * (maxD + 2) : 1e18f;
   for (uint32_t i : vis)
     for (size_t k = ranges[i].start; k < ranges[i].start + ranges[i].count; k++) {
@@ -616,7 +624,7 @@ bool gatherVisible(const std::vector<InstLite>& items, const std::vector<FileSlo
       float dx = it.x - cp.x, dz = it.z - cp.z, d2 = dx * dx + dz * dz;
       if (d2 >= lo2 && d2 <= hi2) out.push_back(it);
     }
-  if (minD <= 0 && out.size() > 1 && out.size() < 20000) {
+  if ((minD <= 0 || maxD < 1e8f) && out.size() > 1 && out.size() < 20000) {  // near and mid trees front to back: nearer crowns hide farther ones before they are shaded
     std::sort(out.begin(), out.end(), [&](const InstLite& a, const InstLite& b) {
       float da = (a.x - cp.x) * (a.x - cp.x) + (a.z - cp.z) * (a.z - cp.z), db = (b.x - cp.x) * (b.x - cp.x) + (b.z - cp.z) * (b.z - cp.z);
       return da < db;
@@ -758,23 +766,34 @@ uniform sampler2D u_nrm;
 uniform int u_dbg;
 out vec4 fragColor;
 void main(){
-  vec4 t0 = texture(u_atlas, v_uv0), t1 = texture(u_atlas, v_uv1);
   float dh = FADE_NOISE_STATIC();
-  vec4 t = mix(t0, t1, v_blend);
+  if (dh < v_fade.x || dh >= v_fade.y) discard;  // dithered fade first: skip the atlas reads for faded-out pixels
+  // beyond 200 m use the nearest viewing angle only: half the atlas reads, the blend is invisible that far
+  bool farI = v_depth > 200.0;
+  vec2 uvA = farI && v_blend > 0.5 ? v_uv1 : v_uv0;
+  vec4 t0 = texture(u_atlas, uvA), t1 = farI ? t0 : texture(u_atlas, v_uv1);
+  vec4 t = farI ? t0 : mix(t0, t1, v_blend);
   if (t.a < 0.5) {
     // fill pinholes inside the crown from a blurrier mip so sky doesn't speckle through
     vec4 c = mix(texture(u_atlas, v_uv0, 2.0), texture(u_atlas, v_uv1, 2.0), v_blend);
     if (c.a < 0.62) discard;
     t = vec4((c.rgb - vec3(0.42, 0.38, 0.26) * (1.0 - c.a)) / c.a, 1.0);
   }
-  if (dh < v_fade.x || dh >= v_fade.y) discard;
   if (u_dbg == 1) { fragColor = vec4(1.0, 0.0, 1.0, 1.0); return; }
-  vec3 nl = mix(texture(u_nrm, v_uv0).xyz, texture(u_nrm, v_uv1).xyz, v_blend) * 2.0 - 1.0;
+  vec3 nl = (farI ? texture(u_nrm, uvA).xyz : mix(texture(u_nrm, v_uv0).xyz, texture(u_nrm, v_uv1).xyz, v_blend)) * 2.0 - 1.0;
+  float shT = farI ? 1.0 : shadowAt(v_wpos, vec3(0.0, 1.0, 0.0));  // shadow map does not reach that far anyway
   vec3 n = normalize(vec3(v_rot.x * nl.x + v_rot.y * nl.z, nl.y, -v_rot.y * nl.x + v_rot.x * nl.z));
   n = normalize(mix(n, vec3(0.0, 1.0, 0.0), 0.75));
   vec3 alb = t.rgb * t.rgb;
-  float sh = mix(mix(0.42, 0.9, shadowAt(v_wpos, n)) * mix(0.75, 1.0, smoothstep(0.08, 0.45, u_sunDir.y)), 0.62, 0.85);
-  vec3 c = outColor(lambert(alb, n, sh));
+  float sh = mix(mix(0.42, 0.9, shT) * mix(0.75, 1.0, smoothstep(0.08, 0.45, u_sunDir.y)), 0.62, 0.85);
+  vec3 lit = lambert(alb, n, sh);
+  {
+    // distant trees glow at the edges when backlit, like the near leaves
+    vec3 V = normalize(u_camPos - v_wpos);
+    float through = pow(max(dot(-V, u_sunDir.xyz), 0.0), 4.0) * smoothstep(-0.02, 0.15, u_sunDir.y);
+    lit += alb * vec3(1.05, 1.15, 0.6) * u_sunCol.rgb * through * 0.35;
+  }
+  vec3 c = outColor(lit);
   c = mix(c, fogTint(v_wpos), mix(fogObject(v_wpos, v_depth), fogGround(v_wpos, v_depth), smoothstep(60.0, 160.0, v_depth)));
   fragColor = vec4(c, 1.0);
 }
@@ -796,6 +815,25 @@ void rebuildImpostorMerge(int layer) {
       if (yaw < 0) yaw += 6.2831853f;
       g_impTmp.push_back({q.x, q.y + s->impBase * q.s, q.z, s->impW * q.s, yaw + 6.2831853f * (float)s->imp});
     }
+  }
+  {
+    // all tree types together, bucketed nearest first (counting sort by 10 m rings, O(n)): near impostors
+    // fill the depth buffer first so the many overlapping quads behind them are rejected before shading
+    static std::vector<InstLite> sorted;
+    static std::vector<uint8_t> key;
+    const int NBK = 64;
+    int cnt[NBK + 1] = {};
+    const Vec3& cp = render::cam.pos;
+    key.resize(g_impTmp.size());
+    for (size_t i = 0; i < g_impTmp.size(); i++) {
+      int k = std::min(NBK - 1, (int)(hypot2(g_impTmp[i].x - cp.x, g_impTmp[i].z - cp.z) * 0.1f));
+      key[i] = (uint8_t)k;
+      cnt[k + 1]++;
+    }
+    for (int k = 0; k < NBK; k++) cnt[k + 1] += cnt[k];
+    sorted.resize(g_impTmp.size());
+    for (size_t i = 0; i < g_impTmp.size(); i++) sorted[cnt[key[i]]++] = g_impTmp[i];
+    g_impTmp.swap(sorted);
   }
   if (!g_impAll[layer].vao) g_impAll[layer].create(&g_impQuad, InstKind::Lite);
   g_impAll[layer].upload(g_impTmp.data(), g_impTmp.size());
@@ -867,6 +905,7 @@ void captureImpostors(int only = -1, bool mips = true, int vFrom = 0, int vTo = 
   render::frame.season2[3] = 0;
   int t = 0;
   for (auto& sp : g_slots) {
+    if (only < 0) platform::pumpLoad();
     if (sp->layer == L_GRASS || sp->parts.empty() || t >= g_impRows) continue;
     if (only >= 0 && t != only) { t++; continue; }
     Vec3 mn{1e9f, 1e9f, 1e9f}, mx{-1e9f, -1e9f, -1e9f};
@@ -990,7 +1029,7 @@ void main(){
   float snowP = smoothstep(0.35, 0.75, fract(sin(dot(floor(v_wpos.xz * 0.6), vec2(17.1, 93.7))) * 3758.5));
   alb = mix(alb, vec3(0.8, 0.83, 0.88), u_snow * smoothstep(0.55, 0.95, n.y) * mix(0.15, 0.45, snowP) * (1.0 - 0.5 * pine));
   alb *= (0.62 + 0.3 * n1);
-  vec3 c = outColor(lambert(alb, n, 1.0) * mix(0.7, 1.0, cov));
+  vec3 c = outColor(lambert(alb, n, 1.0) * mix(0.7, 1.0, cov));  // cloud shadows reach the far forest too
   c = mix(c, fogTint(v_wpos), fogGround(v_wpos, v_depth));
   fragColor = vec4(c, 1.0);
 }
@@ -1189,16 +1228,27 @@ void setBlockers(const std::vector<Blocker>& b) {
 
 void markDirty() { g_dirty = true; }
 
+static bool g_jumped = false;
+void seasonJumped() { g_jumped = true; }
+
 void update(const Vec3& cam, const Vec3& fwd) {
+  if (g_jumped && g_impSig >= 0) {
+    g_jumped = false;
+    g_capNext = -1;
+    captureImpostors();  // full capture in one go: no orange autumn pictures after loading a summer save
+    g_impSig = g_capSig = seasonSig();
+  }
   if (g_impSig < 0) {
     captureImpostors();
     if (g_impFbo) { g_impReady = true; g_dirty = true; }
   } else if (g_capNext >= 0) {
-    int type = g_capNext / 4, part = g_capNext % 4;
-    bool last = type + 1 >= g_impTypes && part == 3;
-    captureImpostors(type, last, part * 4, part * 4 + 4);
-    g_capNext++;
-    if (last) { g_impSig = g_capSig; g_capNext = -1; }
+    if ((render::frameNo % 3) == 0) {  // season impostor recapture: one slice every 3rd frame (never restart mid-way)
+      int type = g_capNext / 4, part = g_capNext % 4;
+      bool last = type + 1 >= g_impTypes && part == 3;
+      captureImpostors(type, last, part * 4, part * 4 + 4);
+      g_capNext++;
+      if (last) { g_impSig = g_capSig; g_capNext = -1; }
+    }
   } else if (std::fabs(seasonSig() - g_impSig) > 0.5f) {
     g_capSig = seasonSig();
     g_capNext = 0;
@@ -1228,7 +1278,7 @@ void update(const Vec3& cam, const Vec3& fwd) {
     apply(J);
     lk.lock();
   }
-  if (!g_jobPending && (g_dirty || moved > 4)) {
+  if (!g_jobPending && (g_dirty || moved > 9)) {  // rebuild visible cells every ~9 m of travel (fade bands cover the gap)
     g_dirty = false;
     g_lastPos = cam;
     g_lastYaw = yaw;
@@ -1308,9 +1358,13 @@ void drawOpaque() {
   glDisable(GL_CULL_FACE);
   bool imp = g_impReady;
   g_tuner.begin();
-  bool pre = false;  // depth prepass caused speckles on NVIDIA (prepass/colour depth mismatch)
+  // leaf depth prepass: kills overdraw of stacked cards. The prepass depth is pushed back a hair (polygon offset)
+  // so the colour pass always passes LEQUAL on the same surface: that mismatch was the old speckle source.
+  // The tuner times frames with and without it and keeps whichever is faster on this GPU.
+  bool pre = std::getenv("HW_PRE") != nullptr;  // off: still speckles on NVIDIA even with offset
   int pD = profOpen ? profOpen("forest.depthPre") : -1;
   glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+  if (pre) { glEnable(GL_POLYGON_OFFSET_FILL); glPolygonOffset(1.5f, 12.0f); }
   for (auto& s : g_slots) {
     if (!pre) break;
     if (s->layer == L_GRASS) continue;
@@ -1325,6 +1379,7 @@ void drawOpaque() {
       else drawPart(p, p.batch, OF_DEPTH, lc.imp, lc.imp + IMP_BAND, 0, 0, packed);
     }
   }
+  glDisable(GL_POLYGON_OFFSET_FILL);
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
   glDepthFunc(GL_LEQUAL);
   if (profClose) profClose(pD);

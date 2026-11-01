@@ -50,16 +50,16 @@ void patternRing(Shape& t, float y, float r, int n, const std::vector<const char
 }
 
 void torsoMale(Shape& t, const Outfit& o) {
-  t.tube(o.coat, {0, 0.67f, 0}, 0.255f, 0.355f, 0.34f, 12)
-      .tube(o.trim, {0, 0.505f, 0}, 0.358f, 0.358f, 0.025f, 12)
-      .tube(o.stripe, {0, 0.535f, 0}, 0.352f, 0.352f, 0.018f, 12)
-      .tube(o.coat, {0, 0.98f, 0}, 0.235f, 0.252f, 0.34f, 12)
+  t.tube(o.coat, {0, 0.67f, 0}, 0.255f, 0.355f, 0.34f, 18)
+      .tube(o.trim, {0, 0.505f, 0}, 0.358f, 0.358f, 0.025f, 18)
+      .tube(o.stripe, {0, 0.535f, 0}, 0.352f, 0.352f, 0.018f, 18)
+      .tube(o.coat, {0, 0.98f, 0}, 0.235f, 0.252f, 0.34f, 18)
       .ball(o.coat, {0, 1.13f, 0.0f}, {0.255f, 0.2f, 0.185f}, Z0, 1)
-      .tube(o.vest, {0, 1.04f, -0.005f}, 0.248f, 0.262f, 0.4f, 12)
+      .tube(o.vest, {0, 1.04f, -0.005f}, 0.248f, 0.262f, 0.4f, 18)
       .box(o.coat, {0, 1.05f, 0.236f}, {0.1f, 0.4f, 0.02f})
       .box(o.trim, {0.055f, 1.05f, 0.242f}, {0.014f, 0.4f, 0.012f})
       .box(o.trim, {-0.055f, 1.05f, 0.242f}, {0.014f, 0.4f, 0.012f})
-      .tube(o.sash, {0, 0.83f, 0}, 0.262f, 0.268f, 0.085f, 12)
+      .tube(o.sash, {0, 0.83f, 0}, 0.262f, 0.268f, 0.085f, 18)
       .ball(o.sash, {0.13f, 0.82f, 0.23f}, {0.05f, 0.04f, 0.03f}, Z0, 0)
       .box(o.sash, {0.15f, 0.73f, 0.235f}, {0.05f, 0.15f, 0.02f}, {0, 0, 0.12f})
       .box(o.sash, {0.11f, 0.735f, 0.24f}, {0.045f, 0.13f, 0.02f}, {0, 0, -0.18f});
@@ -68,14 +68,14 @@ void torsoMale(Shape& t, const Outfit& o) {
 }
 
 void torsoFemale(Shape& t, const Outfit& o, const char* hem) {
-  t.tube(o.coat, {0, 0.47f, 0}, 0.255f, 0.43f, 0.66f, 14)
-      .tube(hem, {0, 0.16f, 0}, 0.433f, 0.436f, 0.05f, 14)
-      .tube(o.band[0], {0, 0.205f, 0}, 0.425f, 0.427f, 0.025f, 14)
-      .tube(o.coat, {0, 1.0f, 0}, 0.215f, 0.245f, 0.42f, 12)
+  t.tube(o.coat, {0, 0.47f, 0}, 0.255f, 0.43f, 0.66f, 22)
+      .tube(hem, {0, 0.16f, 0}, 0.433f, 0.436f, 0.05f, 22)
+      .tube(o.band[0], {0, 0.205f, 0}, 0.425f, 0.427f, 0.025f, 22)
+      .tube(o.coat, {0, 1.0f, 0}, 0.215f, 0.245f, 0.42f, 18)
       .ball(o.coat, {0, 1.13f, 0.02f}, {0.225f, 0.17f, 0.18f}, Z0, 1)
-      .tube(o.vest, {0, 1.03f, -0.004f}, 0.228f, 0.25f, 0.32f, 12)
+      .tube(o.vest, {0, 1.03f, -0.004f}, 0.228f, 0.25f, 0.32f, 18)
       .box(o.coat, {0, 1.04f, 0.226f}, {0.08f, 0.32f, 0.02f})
-      .tube(o.sash, {0, 0.8f, 0}, 0.252f, 0.258f, 0.08f, 12)
+      .tube(o.sash, {0, 0.8f, 0}, 0.252f, 0.258f, 0.08f, 18)
       .box(o.sash, {0.12f, 0.66f, 0.26f}, {0.06f, 0.24f, 0.025f}, {0.12f, 0, 0.1f})
       .box(o.band[1], {0.12f, 0.55f, 0.275f}, {0.065f, 0.03f, 0.026f}, {0.12f, 0, 0.1f});
   patternRing(t, 0.245f, 0.418f, 26, {o.band[1], o.band[2], hem}, 0.03f);
@@ -83,9 +83,9 @@ void torsoFemale(Shape& t, const Outfit& o, const char* hem) {
 }
 
 void shawl(Shape& t, const Outfit& o) {
-  t.tube(o.shawl, {0, 1.26f, 0}, 0.19f, 0.272f, 0.15f, 12)
-      .tube(o.stripe, {0, 1.185f, 0}, 0.276f, 0.28f, 0.022f, 12)
-      .tube(o.band[1], {0, 1.212f, 0}, 0.27f, 0.272f, 0.01f, 12)
+  t.tube(o.shawl, {0, 1.26f, 0}, 0.19f, 0.272f, 0.15f, 18)
+      .tube(o.stripe, {0, 1.185f, 0}, 0.276f, 0.28f, 0.022f, 18)
+      .tube(o.band[1], {0, 1.212f, 0}, 0.27f, 0.272f, 0.01f, 18)
       .box(o.shawl, {-0.03f, 1.05f, 0.205f}, {0.13f, 0.44f, 0.035f}, {0, 0, -0.55f})
       .box(o.stripe, {-0.115f, 0.875f, 0.22f}, {0.13f, 0.025f, 0.035f}, {0, 0, -0.55f})
       .ball(o.shawl, {0.2f, 1.28f, 0}, {0.105f, 0.075f, 0.115f}, Z0, 1)
@@ -248,10 +248,10 @@ void hand(Shape& s, const char* skin, float y, float z) {
 Shape sleeve(const char* main, const char* cuff, const char* skin, const Outfit* o = nullptr) {
   Shape s;
   s.ball(main, {0, -0.01f, 0}, {0.078f, 0.078f, 0.078f}, Z0, 0)
-      .rod(main, {0, 0.02f, 0}, {0, -0.29f, 0.015f}, 0.068f, 0.058f, 9)
+      .rod(main, {0, 0.02f, 0}, {0, -0.29f, 0.015f}, 0.068f, 0.058f, 13)
       .ball(main, {0, -0.29f, 0.015f}, {0.058f, 0.058f, 0.058f}, Z0, 0)
-      .rod(main, {0, -0.29f, 0.015f}, {0, -0.49f, 0.06f}, 0.057f, 0.05f, 9)
-      .tube(cuff, {0, -0.495f, 0.06f}, 0.053f, 0.053f, 0.04f, 9);
+      .rod(main, {0, -0.29f, 0.015f}, {0, -0.49f, 0.06f}, 0.057f, 0.05f, 13)
+      .tube(cuff, {0, -0.495f, 0.06f}, 0.053f, 0.053f, 0.04f, 13);
   if (o) {
     s.tube(o->stripe, {0, -0.455f, 0.052f}, 0.056f, 0.056f, 0.03f, 12);
     for (int i = 0; i < 12; i++) {
@@ -265,15 +265,15 @@ Shape sleeve(const char* main, const char* cuff, const char* skin, const Outfit*
 
 Shape legGeo(const char* trousers, const char* shoe, const char* wrap, bool tall = false, const Outfit* o = nullptr) {
   Shape s;
-  s.rod(trousers, {0, 0.02f, 0}, {0, -0.29f, 0.01f}, 0.085f, 0.064f, 9)
+  s.rod(trousers, {0, 0.02f, 0}, {0, -0.29f, 0.01f}, 0.085f, 0.064f, 13)
       .ball(trousers, {0, -0.29f, 0.01f}, {0.064f, 0.064f, 0.064f}, Z0, 0)
-      .rod(trousers, {0, -0.29f, 0.01f}, {0, -0.48f, 0}, 0.062f, 0.047f, 9);
-  for (int k = 0; k < 3; k++) s.tube(trousers, {0, -0.36f - k * 0.04f, 0.004f}, 0.06f - k * 0.004f, 0.062f - k * 0.004f, 0.012f, 9);
-  s.tube(wrap, {0, -0.47f, 0}, 0.052f, 0.052f, 0.035f, 9)
-      .rod(shoe, {0, -0.475f, 0}, {0, -0.575f, 0.012f}, 0.054f, 0.06f, 9)
+      .rod(trousers, {0, -0.29f, 0.01f}, {0, -0.48f, 0}, 0.062f, 0.047f, 13);
+  for (int k = 0; k < 3; k++) s.tube(trousers, {0, -0.36f - k * 0.04f, 0.004f}, 0.06f - k * 0.004f, 0.062f - k * 0.004f, 0.012f, 13);
+  s.tube(wrap, {0, -0.47f, 0}, 0.052f, 0.052f, 0.035f, 13)
+      .rod(shoe, {0, -0.475f, 0}, {0, -0.575f, 0.012f}, 0.054f, 0.06f, 13)
       .ball(shoe, {0, -0.588f, 0.05f}, {0.062f, 0.034f, 0.112f}, Z0, 1)
       .cone(shoe, {0, -0.572f, 0.168f}, 0.022f, 0.07f, 6, {PI / 2 - 0.75f, 0, 0})
-      .tube("#c9a96e", {0, -0.6f, 0.05f}, 0.06f, 0.064f, 0.012f, 9);
+      .tube("#c9a96e", {0, -0.6f, 0.05f}, 0.06f, 0.064f, 0.012f, 13);
   if (tall) {
     s.rod(shoe, {0, -0.27f, 0.006f}, {0, -0.5f, 0.004f}, 0.066f, 0.058f, 12)
         .tube(shoe, {0, -0.27f, 0.006f}, 0.068f, 0.068f, 0.03f, 12);
@@ -369,8 +369,26 @@ void shapeLeg(Shape& s) {
   });
 }
 
+// baked shading on the vertex colours: soft occlusion on downward-facing folds (under the chin, shawl edge, hem,
+// sash) and a faint woven variation in the fabric, so the clothes read as cloth instead of flat plastic
+void bakeShading(Shape& s) {
+  for (auto& v : s.verts) {
+    uint32_t c = v.c;
+    if ((c & 0xffffffu) == 0xffffffu) continue;  // white = tint slot: shaded by the instance colour instead
+    float r = (c & 255) / 255.0f, g = ((c >> 8) & 255) / 255.0f, b = ((c >> 16) & 255) / 255.0f;
+    float ny = v.n.y;
+    float ao = 0.72f + 0.28f * smf(-0.75f, 0.35f, ny);
+    float weave = 0.94f + 0.06f * (0.5f + 0.5f * std::sin(v.p.x * 140.0f) * std::sin(v.p.y * 160.0f + v.p.z * 90.0f));
+    float grain = 0.97f + 0.06f * (0.5f + 0.5f * std::sin(v.p.y * 23.0f + v.p.x * 17.0f) * std::cos(v.p.z * 29.0f));
+    float k = ao * weave * grain;
+    auto q = [&](float x) { return (uint32_t)std::lround(clampf(x * k, 0, 1) * 255); };
+    v.c = q(r) | (q(g) << 8) | (q(b) << 16) | (c & 0xff000000u);
+  }
+}
+
 Mesh finish(Shape& s, void (*fn)(Shape&)) {
   fn(s);
+  bakeShading(s);
   return uploadMesh(s.build(true));
 }
 
@@ -417,9 +435,9 @@ const PersonModel& person(const std::string& role) {
 const ResidentKit& residentKit() {
   if (g_kit) return *g_kit;
   const char* W = "#ffffff";
-  Outfit man{W, "#3f2a1c", "#efe6d4", "#7f1d1d", "#d8ccb4", "#9a3412", "#5b5f66", {"#15803d", "#facc15", "#b91c1c"}, "#c98f68", "#1c120c", "#e3d8c2", "#3b2a20", false, nullptr};
-  Outfit woman{W, "#1e3a5f", "#f5e9d3", "#a16207", "#efe3cb", "#be123c", "#b91c1c", {"#facc15", "#1d4ed8", "#15803d"}, "#d6a585", "#120c09", "#7c2d12", "#5a3d2b", true, nullptr};
-  Outfit elder{W, "#44403c", "#e7e0d0", "#57534e", "#8a7f73", "#1e3a8a", "#3f3f46", {"#7f1d1d", "#f59e0b", "#1e40af"}, "#b98262", "#d6d3cd", "#d8cfbf", "#2f241c", false, "#e7e5e0"};
+  Outfit man{W, "#3f2a1c", "#efe6d4", "#7f1d1d", "#d8ccb4", "#9a3412", W, {"#15803d", "#facc15", "#b91c1c"}, "#c98f68", "#1c120c", "#e3d8c2", "#3b2a20", false, nullptr};
+  Outfit woman{W, "#1e3a5f", "#f5e9d3", "#a16207", "#efe3cb", "#be123c", W, {"#facc15", "#1d4ed8", "#15803d"}, "#d6a585", "#120c09", "#7c2d12", "#5a3d2b", true, nullptr};
+  Outfit elder{W, "#44403c", "#e7e0d0", "#57534e", "#8a7f73", "#1e3a8a", W, {"#7f1d1d", "#f59e0b", "#1e40af"}, "#b98262", "#d6d3cd", "#d8cfbf", "#2f241c", false, "#e7e5e0"};
   Shape t0; torsoMale(t0, man); shawl(t0, man); neck(t0, man);
   Shape t1; torsoFemale(t1, woman, "#be123c"); shawl(t1, woman); neck(t1, woman); necklace(t1);
   t1.box("#b08850", {0.27f, 0.72f, 0.1f}, {0.12f, 0.14f, 0.16f}).ball("#e11d48", {0.27f, 0.8f, 0.1f}, {0.05f, 0.03f, 0.06f}, Z0, 0);
@@ -437,7 +455,7 @@ const ResidentKit& residentKit() {
   g_kit->heads[2] = finish(h2, shapeHead);
   Shape arm = sleeve(W, "#efe6d4", "#c99a74");
   g_kit->arm = finish(arm, shapeArm);
-  Shape leg = legGeo("#e3d8c2", "#3b2a20", "#7f1d1d");
+  Shape leg = legGeo(W, "#3b2a20", "#7f1d1d");
   g_kit->leg = finish(leg, shapeLeg);
   return *g_kit;
 }

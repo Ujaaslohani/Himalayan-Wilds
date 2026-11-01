@@ -86,6 +86,8 @@ enum class Tab { None, Inventory, Quests, Buildings, Map };
 
 struct Engine {
   bool playing = false;
+  bool photo = false;  // photo mode: free camera, frozen world, no HUD
+  bool photoStart = false;
   bool uiOpen = false;
   float time = 7.5f;
   bool isNight = false;
@@ -145,7 +147,8 @@ struct App {
   std::vector<Structure> structures;
   int population = 0;
   int jobs[4] = {0, 0, 0, 0};
-  int hungerDays = 0;
+  int hungerDays = 0, coldDays = 0;
+  int saveSlot = 0;
   int uid = 1;
   int stage = 0;
   std::map<int, Look> drafts;

@@ -1062,7 +1062,8 @@ void generate() {
     for (auto& kv : cap) {
       int ix = (int)(kv.first % GRID_N), iz = (int)(kv.first / GRID_N);
       PathHit q = pathQuery(GRID_MIN + ix * GRID_STEP, GRID_MIN + iz * GRID_STEP);  // never dig below the trail's own surface
-      float floorH = (kv.second[2] > 0.5f && kv.second[0] > 0.01f && q.td < 4.0f) ? std::min(q.th - 0.6f, kv.second[1] + 2.0f) : -1e9f;
+      float stepTop = kv.second[1] + 0.9f - kv.second[0] * 1.1f;
+      float floorH = (kv.second[2] > 0.5f && q.td < 4.0f && q.th > stepTop && q.th < stepTop + 2.5f) ? q.th - 0.6f : -1e9f;  // past the top step the trail keeps climbing: never sink below it
       g_grid[kv.first] = std::min(g_grid[kv.first], std::max(kv.second[1], floorH));
     }
   }
@@ -1265,13 +1266,21 @@ MeshData buildBackdrop() {
       float crag = ridged(x * 0.011f - 2, z * 0.011f + 7, 4, 13);
       float env = std::sin(std::min(1.0f, t * 1.25f) * PI);
       float y = 140 + env * (80 + std::pow(ridge, 1.7f) * 420 + crag * 55 * sstep(ridge, 0.25f, 0.7f)) + (1 - t) * 70;
+      // erosion: gullies running down the faces (radial stripes in polar space) and a little scree at their feet
+      float gul = ridged(a * 26.0f + valueNoise(x * 0.004f, z * 0.004f, 5) * 3.0f, rr * 0.0035f, 3, 211);
+      float steepish = sstep(ridge, 0.2f, 0.65f) * env;
+      y -= (1.0f - gul) * 34.0f * steepish * sstep(y, 160, 260);
       if (t > 0.92f) y *= 1 - (t - 0.92f) / 0.08f * 0.6f;
       float edge = getTerrainHeight(std::cos(a) * r0, std::sin(a) * r0) - 0.6f;
       y = lerpf(edge, std::max(y, edge), sstep(t, 0, 0.1f));
       size_t k = (size_t)j * (A + 1) + i;
       pos[k] = {x, y, z};
       float sn = sstep(y, 250 + ridge * 50, 340) * (0.55f + 0.45f * sstep(ridge, 0.2f, 0.6f));
-      Color c = forest.lerp(rockDark, sstep(y, 100, 150)).lerp(rock, sstep(y, 140, 200) * 0.7f).lerp(rockWarm, sstep(ridge, 0.3f, 0.7f) * 0.3f).lerp(snow, sn);
+      // rock strata: horizontal bands of darker and warmer stone across the faces
+      float band = 0.5f + 0.5f * std::sin(y * 0.11f + valueNoise(x * 0.006f, z * 0.006f, 17) * 4.0f);
+      Color rk = rock.lerp(rockDark, sstep(band, 0.65f, 0.9f) * 0.55f).lerp(rockWarm, sstep(band, 0.0f, 0.2f) * 0.35f);
+      sn *= 0.75f + 0.25f * gul;  // snow lingers in the gullies, thinner on the ribs between
+      Color c = forest.lerp(rockDark, sstep(y, 100, 150)).lerp(rk, sstep(y, 140, 200) * 0.7f).lerp(rockWarm, sstep(ridge, 0.3f, 0.7f) * 0.3f).lerp(snow, sn);
       col[k] = c.packSrgb();
     }
   }

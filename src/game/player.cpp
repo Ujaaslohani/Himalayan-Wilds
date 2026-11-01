@@ -1,3 +1,5 @@
+#include "../ui/screens.h"
+#include "events.h"
 #include "player.h"
 #include "engine.h"
 #include "archery.h"
@@ -153,6 +155,7 @@ std::string promptText() {
     if (ox * ox + oz * oz < 30) return G.pillars ? "Stepping pillars ahead: jump from one to the next [Space]" : "Gap ahead: sprint [Shift] and jump [Space] at the edge";
   }
   if (wildlife::findCarcass(p.x, p.z, 3.2f)) return "[E] Harvest";
+  { float tx, ty, tz, tw; if (events::traderPos(tx, ty, tz, tw) && hypot2(tx - p.x, tz - p.z) < 3.2f) return "[E] Trade with the caravan"; }
   NpcRt* npc = npcs::find(p.x, p.z, 3.6f);
   ResNode* node = resources::find(p.x, p.z, 3.0f);
   if (node && !(npc && hypot2(npc->x - p.x, npc->z - p.z) < hypot2(node->x - p.x, node->z - p.z) + 0.8f))
@@ -214,6 +217,7 @@ void interact() {
   const Vec3& p = E.player.pos;
   const Shrine* sh = temple::nearShrine(p.x, p.z, 12);
   if (sh && p.y > sh->y) { startSync(*sh); return; }
+  { float tx, ty, tz, tw; if (events::traderPos(tx, ty, tz, tw) && hypot2(tx - p.x, tz - p.z) < 3.2f) { screens::openMarket(); audio::coinPickup(); return; } }
   if (Animal* carcass = wildlife::findCarcass(p.x, p.z, 3.2f)) {
     CarcassYield r = wildlife::harvestCarcass(carcass);
     actions::addItems(r.yields);
@@ -262,6 +266,12 @@ void onKeyPressed(int key) {
   if (key == K_B) { actions::openTab(Tab::Buildings); return; }
   if (key == K_M) { actions::openTab(Tab::Map); return; }
   if (E.uiOpen) return;
+  if (key == K_P && w.placing.empty()) {
+    E.photo = !E.photo;
+    E.photoStart = E.photo;
+    return;
+  }
+  if (E.photo) return;
   if (!w.placing.empty()) {
     if (key == K_Q) w.previewRot -= PI / 8;
     if (key == K_E || key == K_R) w.previewRot += PI / 8;
@@ -317,6 +327,35 @@ void update(float dt) {
     }
     return;
   }
+  if (E.photo) {
+    // photo mode: world frozen, free-flying camera; arrows change time of day / field of view
+    static Vec3 cp;
+    static float yaw = 0, pitch = 0, fov = 70;
+    static bool init = false;
+    if (!init || E.photoStart) { cp = E.player.pos; yaw = E.player.yaw; pitch = E.player.pitch; fov = g_settings.fov; init = true; E.photoStart = false; }
+    if (in.captured) { yaw -= in.dx * g_settings.mouseSensitivity; pitch = clampf(pitch - in.dy * g_settings.mouseSensitivity, -1.5f, 1.5f); }
+    Quat q = Quat::fromEulerYXZ(pitch, yaw, 0);
+    Vec3 f = q.rotate({0, 0, -1}), rt = q.rotate({1, 0, 0});
+    float sp = (in.down[K_SHIFT] ? 22.0f : 6.0f) * dt;
+    if (in.down[K_W]) cp = cp + f * sp;
+    if (in.down[K_S]) cp = cp - f * sp;
+    if (in.down[K_D]) cp = cp + rt * sp;
+    if (in.down[K_A]) cp = cp - rt * sp;
+    if (in.down[K_E] || in.down[K_SPACE]) cp.y += sp;
+    if (in.down[K_Q] || in.down[K_CTRL]) cp.y -= sp;
+    cp.y = std::max(cp.y, world::getTerrainHeight(cp.x, cp.z) + 0.4f);
+    Vec3 d = cp - E.player.pos;  // stay within 120 m of where you stood
+    float dl = hypot2(d.x, d.z);
+    if (dl > 120) { cp.x = E.player.pos.x + d.x / dl * 120; cp.z = E.player.pos.z + d.z / dl * 120; }
+    if (in.down[K_RIGHT]) E.time = std::fmod(E.time + dt * 2.0f, 24.0f);
+    if (in.down[K_LEFT]) E.time = std::fmod(E.time - dt * 2.0f + 24.0f, 24.0f);
+    if (in.down[K_UP]) fov = std::max(20.0f, fov - dt * 25);
+    if (in.down[K_DOWN]) fov = std::min(100.0f, fov + dt * 25);
+    g_fov = fov;
+    g_camWorld = Mat4::compose(cp, q, {1, 1, 1});
+    g_fwd = f;
+    return;
+  }
   E.clock += dt;
   auto& P = E.player;
   auto& B = E.bow;
@@ -357,6 +396,8 @@ void update(float dt) {
   float speed = g_settings.playerSpeed;
   if (P.sprinting) speed *= g_settings.sprintMultiplier;
   if (P.crouching) speed *= 0.45f;
+  if (season.snow > 0.45f && world::getTerrainHeight(P.pos.x, P.pos.z) > -0.3f && invCount("snowshoes") <= 0 && world::pathMask(P.pos.x, P.pos.z) < 0.4f)
+    speed *= 1.0f - 0.25f * std::min(1.0f, (season.snow - 0.45f) * 3);  // deep snow drags without snowshoes (trails are trodden down)
   if (B.drawing || B.aiming) speed *= 0.6f;
   float ground0 = walkHeight(P.pos.x, P.pos.z);
   if (ground0 < world::waterHeightAt(P.pos.x, P.pos.z) - 0.2f) speed *= 0.6f;
@@ -379,7 +420,7 @@ void update(float dt) {
   if (!P.onGround && !onTerrain && ground > g_feetY && ground - g_feetY <= 0.4f) {
     g_feetY = ground;
     if (P.velY > 0) P.velY = 0;
-  } else if (ground > g_feetY + (P.onGround ? 0.45f : 0.06f) || (!P.onGround && onTerrain && ground > g_feetY - 0.25f && grade > 1.3f) || (P.onGround && onTerrain && grade > 0.95f)) {
+  } else if (ground > g_feetY + (P.onGround ? 0.45f : 0.06f) || (!P.onGround && onTerrain && ground > g_feetY - 0.25f && grade > 1.3f) || (P.onGround && onTerrain && grade > (world::nearRoute(P.pos.x, P.pos.z) < 7.0f ? 1.35f : 0.95f))) {
     P.pos.x = px0;
     P.pos.z = pz0;
     if (P.onGround) g_vel *= 0.6f;
@@ -387,12 +428,13 @@ void update(float dt) {
   }
   if (P.onGround && ground <= world::getTerrainHeight(P.pos.x, P.pos.z) + 0.02f) {
     float sl = world::localSlope(P.pos.x, P.pos.z);
-    if (sl > 0.95f) {
+    float slMax = world::nearRoute(P.pos.x, P.pos.z) < 7.0f ? 1.35f : 0.95f;  // trails may be steeper than open slopes
+    if (sl > slMax) {
       float gx = world::getTerrainHeight(P.pos.x + 0.6f, P.pos.z) - world::getTerrainHeight(P.pos.x - 0.6f, P.pos.z);
       float gz = world::getTerrainHeight(P.pos.x, P.pos.z + 0.6f) - world::getTerrainHeight(P.pos.x, P.pos.z - 0.6f);
       float gl = hypot2(gx, gz);
       if (gl < 1e-6f) gl = 1;
-      float push = std::min(7.0f, (sl - 0.95f) * 6 + 2.5f) * dt;
+      float push = std::min(7.0f, (sl - slMax) * 6 + 2.5f) * dt;
       P.pos.x -= (gx / gl) * push;
       P.pos.z -= (gz / gl) * push;
       ground = walkHeight(P.pos.x, P.pos.z);
@@ -426,11 +468,23 @@ void update(float dt) {
     g_footT += dt * (P.sprinting ? 3.3f : P.crouching ? 1.2f : 2.0f);
     if (g_footT >= 1) {
       g_footT = 0;
-      if (ground < world::waterHeightAt(P.pos.x, P.pos.z) + 0.2f || ground > 60) audio::footstepStone();
-      else if (!P.crouching) audio::footstepWood();
+      // the surface underfoot picks the sound
+      float terr = world::getTerrainHeight(P.pos.x, P.pos.z);
+      bool onFloor = ground > terr + 0.12f;  // floors, decks, bridges, stairs
+      if (ground < world::waterHeightAt(P.pos.x, P.pos.z) + 0.2f && !onFloor) audio::footstepWater();
+      else if (onFloor) audio::footstepWood();
+      else if (season.snow > 0.45f) audio::footstepSnow();
+      else if (ground > 60 || world::pathMask(P.pos.x, P.pos.z) > 0.4f) audio::footstepStone();
+      else if (!P.crouching) audio::footstepGrass();
     }
   }
 
+  {
+    static float indoor = 0;
+    float want = roofAt(P.pos.x, P.pos.z) ? 1.0f : 0.0f;
+    indoor += (want - indoor) * std::min(1.0f, dt * 3);
+    audio::setIndoor(indoor);
+  }
   Quat q = Quat::fromEulerYXZ(P.pitch, P.yaw, 0);
   g_camWorld = Mat4::compose(P.pos, q, {1, 1, 1});
   g_fwd = q.rotate({0, 0, -1});
@@ -457,9 +511,27 @@ void update(float dt) {
   }
 
   archery::update(dt);
-  { int pi_ = forest::profOpen ? forest::profOpen("wildlife.update") : -1; wildlife::update(dt); if (forest::profClose) forest::profClose(pi_); }
+  {
+    // animal and villager AI run at a fixed 30 Hz; drawing blends between the last two steps
+    static float acc = 0;
+    const float STEP = 1.0f / 30.0f;
+    acc += dt;
+    int steps = 0;
+    int pi_ = forest::profOpen ? forest::profOpen("wildlife.update") : -1;
+    while (acc >= STEP && steps < 4) {
+      wildlife::snapshot();
+      village::snapshotResidents();
+      wildlife::update(STEP);
+      village::updateResidents(STEP);
+      acc -= STEP;
+      steps++;
+    }
+    if (steps == 4) acc = 0;  // fell far behind (hitch): drop the backlog instead of spiralling
+    if (forest::profClose) forest::profClose(pi_);
+    wildlife::setAlpha(acc / STEP);
+    village::setResidentAlpha(acc / STEP);
+  }
   { int pi_ = forest::profOpen ? forest::profOpen("npcs.update") : -1; npcs::update(dt); if (forest::profClose) forest::profClose(pi_); }
-  { int pi_ = forest::profOpen ? forest::profOpen("village.residents") : -1; village::updateResidents(dt); if (forest::profClose) forest::profClose(pi_); }
   props::checkSummits();
 
   g_slowT += dt;

@@ -57,21 +57,33 @@ void main(){
   col = mix(col, vec3(0.22, 0.36, 0.30), smoothstep(0.0, 0.25, depth) * (1.0 - smoothstep(0.25, 0.6, depth)) * 0.35);
   vec3 R = reflect(-V, wn);
   vec3 sky = mix(u_fogCol.rgb, u_misc.rgb, pow(clamp(R.y, 0.0, 1.0), 0.55));
+  // reflected surroundings: low reflection angles mirror the dark banks, trees and ridges, not open sky
+  vec3 land = mix(vec3(0.07, 0.1, 0.07), vec3(0.16, 0.18, 0.2), smoothstep(-0.1, 0.5, u_sunDir.y)) * (0.4 + 0.6 * u_daylight);
+  float shore = 1.0 - smoothstep(0.02, 0.22 + 0.25 * vnoise(v_wpos.xz * 0.05), R.y);
+  sky = mix(sky, land, shore * 0.85 * (1.0 - u_lake * 0.3));
   col = mix(col, sky, clamp(fres, 0.0, 0.85));
   col += vec3(0.85, 0.95, 1.0) * smoothstep(0.62, 0.9, n1 * 0.55 + n2 * 0.45) * (0.16 + rapid * 0.2) * (1.0 - u_lake * 0.6);
   float bank = 1.0 - smoothstep(0.02, 0.18, depth);
-  float foam = bank * smoothstep(0.35, 0.75, n3);
+  float foamLines = smoothstep(0.55, 0.8, vnoise(vec2(fp.x * 1.3, fp.y * 6.0 + n1 * 2.0)));
+  float foam = bank * max(smoothstep(0.35, 0.75, n3), foamLines * 0.8);
   foam = max(foam, rapid * smoothstep(0.45 - rapid * 0.25, 0.85, n1 * 0.5 + n3 * 0.5));
   col = mix(col, vec3(0.94, 0.97, 0.98), foam * 0.85);
   vec3 H = normalize(u_sunDir.xyz + V);
   float spec = pow(max(dot(wn, H), 0.0), 220.0) * 3.0 + pow(max(n2, 0.0), 9.0) * 0.6;
+  // sun glitter: sparkling points on the ripples toward the sun
+  spec += step(0.985, vnoise(fp * 9.0 + vec2(t * 2.0, -t))) * pow(max(dot(R, u_sunDir.xyz), 0.0), 8.0) * 4.0;
   col += u_sunCol.rgb * spec * 0.35 * u_daylight;
-  float ice = u_ice * (0.55 + 0.45 * smoothstep(0.35, 0.0, depth)) * (0.85 + 0.15 * n1) * (1.0 - rapid * 0.7);
+  float ice = u_ice * (0.55 + 0.45 * (1.0 - smoothstep(0.0, 0.35, depth))) * (0.85 + 0.15 * n1) * (1.0 - rapid * 0.7);
   col = mix(col, vec3(0.8, 0.88, 0.93), ice);
   float lightK = clamp(0.16 + 0.84 * u_daylight, 0.0, 1.0);
   col *= lightK;
   float alpha = mix(smoothstep(0.0, 0.05, depth) * 0.9, 0.97, max(ice, foam * 0.6));
   alpha = max(alpha, fres * 0.6 * smoothstep(0.0, 0.03, depth));
+  // dawn mist: a pale veil drifting low over the water in the early hours
+  float dawn = smoothstep(0.02, 0.2, u_daylight) * (1.0 - smoothstep(0.35, 0.6, u_daylight)) * (u_sunDir.x > 0.0 ? 1.0 : 0.3);
+  float veil = dawn * (0.35 + 0.4 * vnoise(v_wpos.xz * 0.08 + vec2(t * 0.05, 0.0))) * smoothstep(4.0, 25.0, v_depth);
+  col = mix(col, fogTint(v_wpos) * 1.05 + vec3(0.04), veil);
+  alpha = max(alpha, veil * 0.8);
   col = mix(col, fogTint(v_wpos), fogObject(v_wpos, v_depth));
   fragColor = vec4(col, alpha);
 }
@@ -132,6 +144,7 @@ in vec3 a_pos;
 uniform vec3 u_origin;
 uniform vec3 u_dir;
 out float v_a;
+out float v_sun;
 void main(){
   vec3 sd = a_pos;
   float t = fract(sd.x + u_clock * (0.18 + sd.y * 0.22));
@@ -140,6 +153,8 @@ void main(){
   vec3 p = u_origin + side * (sd.y - 0.5) * 11.0 * (0.4 + t) + vec3(0.0, t * mix(3.0, 8.0, big), 0.0) + u_dir * (2.0 + (sd.z - 0.5) * 6.0 + t * 2.0);
   v_a = (1.0 - t) * mix(0.55, 0.28, big) * clamp(0.25 + u_daylight, 0.0, 1.0);
   vec4 vp = u_view * vec4(p, 1.0);
+  // spray lights up when the sun is behind it (forward scattering)
+  v_sun = pow(max(dot(normalize(p - u_camPos), u_sunDir.xyz), 0.0), 6.0) * u_daylight;
   gl_Position = u_proj * vp;
   gl_PointSize = min(mix(120.0, 900.0, big) * (0.5 + t) / max(-vp.z, 0.5) * (u_viewH / 900.0), 256.0);
 }
@@ -147,12 +162,14 @@ void main(){
 
 const char* SPRAY_FS = R"(
 in float v_a;
+in float v_sun;
 out vec4 fragColor;
 void main(){
   float d = length(gl_PointCoord - 0.5) * 2.0;
   if (d > 1.0) discard;
   float a = (1.0 - d) * 0.75;
-  fragColor = vec4(vec3(1.0), a * v_a);
+  vec3 c = mix(vec3(0.82, 0.86, 0.9), vec3(1.25, 1.15, 0.95), v_sun) * (0.45 + 0.55 * u_daylight);
+  fragColor = vec4(c, a * v_a * (1.0 + v_sun));
 }
 )";
 

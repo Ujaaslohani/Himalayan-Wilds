@@ -1,3 +1,4 @@
+#include "../render/sky.h"
 #include "archery.h"
 #include "engine.h"
 #include "wildlife.h"
@@ -37,6 +38,7 @@ void reset() {
 }
 
 void fire(const Vec3& camPos, const Vec3& camDir, float power, bool aimed) {
+  sky::scareBirds(camPos);  // the twang of the bow flushes birds from nearby trees
   Arrow* slot = nullptr;
   for (auto& a : g_pool)
     if (a.state == 0) { slot = &a; break; }
@@ -78,7 +80,7 @@ void update(float dt) {
     a.quat = Quat::fromUnitVectors(FWD, a.vel.normalized());
     ArrowHit hit;
     if (wildlife::arrowHitTest(a.prev, a.pos, hit)) {
-      float dmg = (28 + 62 * a.power) * (a.aimed ? 1.15f : 1);
+      float dmg = (28 + 62 * a.power) * (a.aimed ? 1.15f : 1) * (invCount("recurve_bow") > 0 ? 1.3f : 1.0f);
       wildlife::damage(hit.animal, dmg, hit.headshot);
       audio::meleePunch();
       a.state = 0;

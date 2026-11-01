@@ -1,3 +1,12 @@
+#include "sky.h"
+#include <atomic>
+#include <thread>
+#include <unordered_set>
+#include <deque>
+#include <condition_variable>
+#include <mutex>
+#include "../game/wildlife.h"
+#include "../game/village.h"
 #include "grass.h"
 #include "render.h"
 #include "terrain_render.h"
@@ -22,6 +31,7 @@ uniform sampler2D u_bake;
 uniform vec4 u_grid;
 uniform vec4 u_ring;
 uniform vec4 u_blade;
+uniform vec4 u_tramp[8];
 out vec3 v_col;
 void kill(){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); v_col = vec3(0.0); }
 void main(){
@@ -45,12 +55,23 @@ void main(){
   float W = u_blade.x * mix(0.8, 1.25, h.z) * (0.4 + 0.6 * grow);
   float t = a_pos.y;
   float gust = u_windS * (0.6 + 0.4 * sin(u_windT * 1.1 + p.x * 0.05 + p.y * 0.04));
+  // gust waves rolling across the meadow along the wind
+  float wave = sin(dot(p, u_windDir) * 0.085 - u_windT * 1.8 + vnoise(p * 0.02) * 3.0);
+  wave = max(wave, 0.0); wave *= wave;
+  gust *= 0.55 + 1.1 * wave;
   float sway = (0.35 + 0.65 * sin(u_windT * 2.3 + p.x * 0.35 + p.y * 0.27 + h.w * 6.0)) * gust;
   vec2 lean = face * (0.15 + 0.25 * fract(h.y * 9.1)) + u_windDir * sway * 0.55;
   // bend away from the player
   vec2 away = p - u_camPos.xz;
   float pd = length(away);
   if (pd < 1.3 && abs(u_camPos.y - 1.7 - base) < 1.5) lean += away / max(pd, 0.05) * (1.0 - pd / 1.3) * 1.4;
+  // flattened where animals and villagers walk
+  for (int i = 0; i < 8; i++) {
+    if (u_tramp[i].z <= 0.0) break;
+    vec2 aw = p - u_tramp[i].xy;
+    float ad = length(aw);
+    if (ad < u_tramp[i].z) lean += aw / max(ad, 0.05) * (1.0 - ad / u_tramp[i].z) * 1.6;
+  }
   vec2 xz = p + side * a_pos.x * W * (1.0 - t * 0.85) + lean * H * t * t;
   float y = base + H * t * (1.0 - 0.18 * t * length(lean));
   vec3 wpos = vec3(xz.x, y, xz.y);
@@ -67,9 +88,10 @@ void main(){
   float dryTip = step(0.82, fract(h.x * 13.1 + h.y * 5.3)) * smoothstep(0.7, 1.0, t);
   tip = mix(tip, vec3(0.6, 0.52, 0.28) * (gc.g * 4.0 + 0.3), dryTip * 0.6);
   vec3 alb = mix(gc * 0.62, tip, smoothstep(0.0, 1.0, t)) * (0.85 + 0.3 * h.z) * mix(0.9, 1.08, clump);
+  alb *= 1.0 + 0.16 * wave * t * u_windS;  // silvery sheen on the bent crest of each wave
   alb = mix(gc * 0.9, alb, smoothstep(0.0, 0.6, grow));  // fade into the ground colour at the ring edge
   vec3 n = normalize(vec3(0.0, 1.0, 0.0) + (u_sunDir.xyz * vec3(1.0, 0.0, 1.0)) * 0.35);
-  float sh = shadowAt(t > 0.5 ? wpos : vec3(p.x, base + 0.3, p.y), vec3(0.0, 1.0, 0.0));
+  float sh = u_blade.w > 1.5 ? 1.0 : shadowAt(t > 0.5 ? wpos : vec3(p.x, base + 0.3, p.y), vec3(0.0, 1.0, 0.0));  // outer rings skip the shadow map
   vec3 c = outColor(lambert(alb, n, sh) * (0.7 + 0.3 * t));
   v_col = mix(c, fogTint(wpos), fogGround(wpos, -vp.z));
   gl_Position = u_proj * vp;
@@ -141,6 +163,7 @@ in vec3 v_wpos;
 in float v_depth;
 in vec2 v_uv;
 in vec4 v_h;
+uniform float u_leafAut;
 out vec4 fragColor;
 // leaf silhouette in local coords: q.y along leaf (-1 stem .. 1 tip), q.x across. returns signed inside (>0 inside)
 float leafShape(vec2 q, float kind){
@@ -169,6 +192,8 @@ void main(){
   float k = fract(v_h.z * 17.3 + v_h.y * 3.1);
   vec3 c0 = vec3(0.62, 0.16, 0.03), c1 = vec3(0.8, 0.38, 0.05), c2 = vec3(0.74, 0.56, 0.1), c3 = vec3(0.34, 0.18, 0.07), c4 = vec3(0.22, 0.13, 0.06);
   vec3 alb = k < 0.25 ? c0 : k < 0.5 ? c1 : k < 0.68 ? c2 : k < 0.86 ? c3 : c4;
+  // outside autumn the litter is last year's leaves and needles: browns and greys, not fresh orange
+  alb = mix(alb, mix(vec3(0.3, 0.21, 0.12), vec3(0.42, 0.33, 0.2), fract(v_h.w * 7.7)), 1.0 - u_leafAut);
   // decay: brown spots and drier edges on older leaves
   float spot = smoothstep(0.62, 0.7, vnoise(v_wpos.xz * 40.0 + v_h.xy * 9.0));
   alb = mix(alb, c4, spot * 0.6);
@@ -221,14 +246,21 @@ void hash4(float px, float py, float o[4]) {
 }
 
 int g_newTiles = 0;
-GTile* tileFor(int ring, float s, int tx, int tz, bool prewarm = false) {
-  uint64_t key = ((uint64_t)ring << 56) ^ ((uint64_t)(uint32_t)(tx + 100000) << 28) ^ (uint64_t)(uint32_t)(tz + 100000);
-  auto it = g_tiles.find(key);
-  if (it != g_tiles.end()) { it->second.used = g_frame; return &it->second; }
-  if (prewarm && g_newTiles >= 3) return nullptr;
-  g_newTiles++;
-  GTile& t = g_tiles[key];
-  t.used = g_frame;
+bool g_noCap = false;  // loading screen: build every tile around the player at once
+
+// grass tile blade lists are built on a worker thread (terrain height lookups per blade are the expensive part);
+// the main thread only uploads finished lists, so walking into new ground no longer costs frame time
+struct TileJob { uint64_t key; int ring; float s; int tx, tz; };
+struct TileDone { uint64_t key; std::vector<float> v; };
+std::mutex g_tq;
+std::condition_variable g_tcv;
+std::deque<TileJob> g_jobs;
+std::vector<TileDone> g_done;
+std::unordered_set<uint64_t> g_pending;
+std::thread g_tileWorker;
+std::atomic<bool> g_tileStop{false};
+
+std::vector<float> buildTileData(float s, int tx, int tz) {
   std::vector<float> v;
   v.reserve(GT * GT * 8);
   for (int j = 0; j < GT; j++)
@@ -244,6 +276,28 @@ GTile* tileFor(int ring, float s, int tx, int tz, bool prewarm = false) {
       float b[8] = {x, y, z, dn, h[0], h[1], h[2], h[3]};
       v.insert(v.end(), b, b + 8);
     }
+  return v;
+}
+
+void tileWorkerLoop() {
+  while (!g_tileStop) {
+    TileJob j;
+    {
+      std::unique_lock<std::mutex> lk(g_tq);
+      g_tcv.wait(lk, [] { return g_tileStop || !g_jobs.empty(); });
+      if (g_tileStop) return;
+      j = g_jobs.front();
+      g_jobs.pop_front();
+    }
+    std::vector<float> v = buildTileData(j.s, j.tx, j.tz);
+    std::lock_guard<std::mutex> lk(g_tq);
+    g_done.push_back({j.key, std::move(v)});
+  }
+}
+
+GTile& storeTile(uint64_t key, const std::vector<float>& v) {
+  GTile& t = g_tiles[key];
+  t.used = g_frame;
   t.n = (int)(v.size() / 8);
   t.bytes = v.size() * 4;
   glGenBuffers(1, &t.vbo);
@@ -251,7 +305,30 @@ GTile* tileFor(int ring, float s, int tx, int tz, bool prewarm = false) {
   glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)std::max<size_t>(t.bytes, 4), v.empty() ? nullptr : v.data(), GL_STATIC_DRAW);
   g_tileBytes += t.bytes;
   gfx::addBufferBytes((long long)t.bytes);
-  return &t;
+  return t;
+}
+
+void drainTiles() {
+  std::vector<TileDone> done;
+  { std::lock_guard<std::mutex> lk(g_tq); done.swap(g_done); }
+  for (auto& d : done) {
+    g_pending.erase(d.key);
+    if (!g_tiles.count(d.key)) storeTile(d.key, d.v);
+  }
+}
+
+GTile* tileFor(int ring, float s, int tx, int tz, bool prewarm = false) {
+  uint64_t key = ((uint64_t)ring << 56) ^ ((uint64_t)(uint32_t)(tx + 100000) << 28) ^ (uint64_t)(uint32_t)(tz + 100000);
+  auto it = g_tiles.find(key);
+  if (it != g_tiles.end()) { it->second.used = g_frame; return &it->second; }
+  if (g_noCap || !g_tileWorker.joinable()) { g_newTiles++; return &storeTile(key, buildTileData(s, tx, tz)); }  // loading: synchronous
+  if (g_pending.insert(key).second) {
+    std::lock_guard<std::mutex> lk(g_tq);
+    if (prewarm) g_jobs.push_back({key, ring, s, tx, tz});
+    else g_jobs.push_front({key, ring, s, tx, tz});  // visible tiles jump the queue
+    g_tcv.notify_one();
+  }
+  return nullptr;
 }
 
 void evictTiles() {
@@ -273,9 +350,15 @@ void evictTiles() {
 }  // namespace
 
 namespace grass {
+void setPreload(bool on) {
+  g_noCap = on;
+  if (!on && !g_tileWorker.joinable()) g_tileWorker = std::thread(tileWorkerLoop);  // loading done: build on the worker from now on
+}
 
 void init() {
-  const float V[] = {-0.5f, 0, 0.5f, 0, -0.42f, 0.3f, 0.42f, 0.3f, -0.28f, 0.62f, 0.28f, 0.62f, 0, 1};
+  const float V[] = {-0.5f, 0, 0.5f, 0, -0.42f, 0.3f, 0.42f, 0.3f, -0.28f, 0.62f, 0.28f, 0.62f, 0, 1,
+                     -0.5f, 0, 0.5f, 0, -0.34f, 0.5f, 0.34f, 0.5f, 0, 1,
+                     -0.5f, 0, 0.5f, 0, 0, 1};  // 7-, 5- and 3-vertex blades
   glGenVertexArrays(1, &g_vao);
   glBindVertexArray(g_vao);
   glGenBuffers(1, &g_vbo);
@@ -315,14 +398,15 @@ void init() {
 }
 
 void draw() {
+  drainTiles();
   float R = g_settings.fullMap ? 220.0f : std::max(40.0f, g_settings.grassRadius * 3.3f);
-  R *= (0.5f + 0.5f * forest::detailLevel()) * (1.0f - 0.3f * season.snow);
+  R *= (0.5f + 0.5f * forest::detailLevel()) * g_settings.grassAuto * (1.0f - 0.3f * season.snow) * (1.0f - 0.3f * sky::rainAmount());
   float RF = std::max(R + 40.0f, 300.0f * std::min(1.5f, g_settings.drawDist() / 2.0f));
   Ring rings[4] = {
       {0.17f, 0, std::min(26.0f, R * 0.25f), 6, 0.055f, 1.0f, 1.0f},
       {0.36f, std::min(26.0f, R * 0.25f), R * 0.55f, 6, 0.1f, 1.05f, 0.95f},
       {1.15f, R * 0.55f, R, 14, 0.34f, 1.1f, 0.9f},
-      {3.0f, R, RF, 40, 1.1f, 1.25f, 0.85f},  // sparse wide blades out to the horizon
+      {3.0f, R, RF, 40, 0.75f, 1.25f, 0.85f},  // narrower so far blades read as grass, not triangles  // sparse wide blades out to the horizon
   };
   static const std::string vs = std::string(terrain_render::groundCommon()) + GRASS_VS;
   Shader& s = render::program("grassgpu", vs.c_str(), GRASS_FS);
@@ -340,7 +424,17 @@ void draw() {
   for (int ri = 0; ri < 4; ri++) {
     const Ring& r = rings[ri];
     s.set4f("u_ring", r.spacing, r.rIn, r.rOut, r.fade);
-    s.set4f("u_blade", r.width, r.height, r.density * snowK, 0);
+    s.set4f("u_blade", r.width, r.height, r.density * snowK, (float)ri);
+    if (ri > 0) { float z[32] = {}; glUniform4fv(s.loc("u_tramp"), 8, z); }  // far rings: no per-blade trample loop
+    if (ri == 0) {
+      float tr[24 * 3] = {};
+      const Vec3& cp = render::cam.pos;
+      int n = wildlife::nearPositions(cp.x, cp.z, 30, tr, 8);
+      n += village::nearPositions(cp.x, cp.z, 30, tr + n * 3, 8 - n);
+      float u[32] = {};
+      for (int i = 0; i < n && i < 8; i++) { u[i * 4] = tr[i * 3]; u[i * 4 + 1] = tr[i * 3 + 1]; u[i * 4 + 2] = tr[i * 3 + 2]; }
+      glUniform4fv(s.loc("u_tramp"), 8, u);
+    }
     float ts = GT * r.spacing;
     int tx0 = (int)std::floor((cam.pos.x - r.rOut) / ts), tx1 = (int)std::floor((cam.pos.x + r.rOut) / ts);
     int tz0 = (int)std::floor((cam.pos.z - r.rOut) / ts), tz1 = (int)std::floor((cam.pos.z + r.rOut) / ts);
@@ -359,12 +453,13 @@ void draw() {
             h0 = std::min(h0, h), h1 = std::max(h1, h);
           }
         if (!cam.box({x0, h0 - 4, z0}, {x1, h1 + 6, z1})) continue;
-        GTile& t = *tileFor(ri, r.spacing, tx, tz);
-        if (t.n <= 0) continue;
+        GTile* tp = tileFor(ri, r.spacing, tx, tz);
+        if (!tp || tp->n <= 0) continue;
+        GTile& t = *tp;
         glBindBuffer(GL_ARRAY_BUFFER, t.vbo);
         glVertexAttribPointer(6, 4, GL_FLOAT, GL_FALSE, 32, (void*)0);
         glVertexAttribPointer(7, 4, GL_FLOAT, GL_FALSE, 32, (void*)16);
-        glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 7, t.n);
+        glDrawArraysInstanced(GL_TRIANGLE_STRIP, ri == 0 ? 0 : 7, ri == 0 ? 7 : 5, t.n);  // all outer rings: tapered 5-vertex blades (3-vertex read as flat triangles)
         gfx::drawCalls++;
         g_lastBlades += t.n;
       }
@@ -374,8 +469,8 @@ void draw() {
     float ts = GT * r.spacing, R2 = r.rOut + ts;
     int tx0 = (int)std::floor((cam.pos.x - R2) / ts), tx1 = (int)std::floor((cam.pos.x + R2) / ts);
     int tz0 = (int)std::floor((cam.pos.z - R2) / ts), tz1 = (int)std::floor((cam.pos.z + R2) / ts);
-    for (int tz = tz0; tz <= tz1 && g_newTiles < 3; tz++)
-      for (int tx = tx0; tx <= tx1 && g_newTiles < 3; tx++) {
+    for (int tz = tz0; tz <= tz1; tz++)
+      for (int tx = tx0; tx <= tx1; tx++) {
         float x0 = tx * ts, z0 = tz * ts;
         float nx = clampf(cam.pos.x, x0, x0 + ts) - cam.pos.x, nz = clampf(cam.pos.z, z0, z0 + ts) - cam.pos.z;
         if (nx * nx + nz * nz > R2 * R2) continue;
@@ -385,7 +480,8 @@ void draw() {
   g_newTiles = 0;
   evictTiles();
   glBindVertexArray(0);
-  float amt = clampf(season.autumn * 1.1f + season.fall * 0.5f - season.spring * 0.6f - season.dry * 0.4f, 0, 1);
+  float autK = clampf(season.autumn * 1.1f + season.fall * 0.5f - season.spring * 0.6f - season.dry * 0.4f, 0, 1);
+  float amt = std::max(autK, 0.3f * (1 - season.snow));  // a thin brown carpet under trees all year, thick orange in autumn
   if (amt > 0.03f) {
     Shader& l = render::program("leaflitter", LEAF_VS, LEAF_FS);
     l.set1i("u_height", 1);
@@ -394,6 +490,7 @@ void draw() {
     const float sp = 0.24f, RL = 26;
     int n = (int)std::ceil(2 * RL / sp) + 2;
     l.set4f("u_leaf", sp, RL, amt * 0.75f, 0);
+    l.set1f("u_leafAut", autK);
     l.set1i("u_n", n);
     glBindVertexArray(g_leafVao);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, n * n);
@@ -405,6 +502,7 @@ void draw() {
 int bladeCount() { return g_lastBlades; }
 
 void shutdown() {
+  if (g_tileWorker.joinable()) { { std::lock_guard<std::mutex> lk(g_tq); g_tileStop = true; } g_tcv.notify_all(); g_tileWorker.join(); }
   if (g_vbo) glDeleteBuffers(1, &g_vbo);
   if (g_vao) glDeleteVertexArrays(1, &g_vao);
   g_density.destroy();

@@ -14,6 +14,7 @@ void init();
 float grassDensity(float x, float z);
 void setBlockers(const std::vector<Blocker>& b);
 void update(const Vec3& camPos, const Vec3& camFwd);
+void seasonJumped();  // season changed abruptly (save loaded / new game): recapture distant tree pictures at once
 void markDirty();
 void drawOpaque();
 void drawShadow();

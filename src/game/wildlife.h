@@ -20,6 +20,9 @@ struct Animal {
   float leap, rear, hunger, lunge;
   bool raid;
   float gaitT, gaitV;
+  // fixed-step interpolation: state at the previous simulation step
+  float px = 0, py = 0, pz = 0, pyaw = 0, pphase = 0;
+  bool pv = false;
 };
 
 struct ArrowHit { Animal* animal; bool headshot; };
@@ -40,4 +43,7 @@ void draw();
 void drawShadow();
 void drawBlobs();
 int animalCount();
+void snapshot();          // remember positions before a fixed simulation step
+void setAlpha(float a);   // 0..1 blend between previous and current step for drawing
+int nearPositions(float x, float z, float r, float* out, int maxN);  // (x, z, radius) triples
 }

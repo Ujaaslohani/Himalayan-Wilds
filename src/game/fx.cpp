@@ -284,7 +284,7 @@ void beginFrame() {
 }
 
 void blob(float x, float y, float z, float yaw, float sx, float sz) { g_blobs.push_back({x, y, z, 0, yaw, sx, sz, 0}); }
-void campfire(float x, float y, float z, float s) { g_fires.push_back({x, y, z, s}); }
+void campfire(float x, float y, float z, float s) { if (render::sphereVisible({x, y + s, z}, s * 2 + 1)) g_fires.push_back({x, y, z, s}); }
 void glow(float x, float y, float z, float size) { if (render::sphereVisible({x, y, z}, std::fabs(size) * 1.5f + 1)) g_glows.insert(g_glows.end(), {x, y, z, size}); }
 void pool(float x, float y, float z, float r) { if (render::sphereVisible({x, y, z}, r + 1)) g_pools.insert(g_pools.end(), {x, y, z, r}); }
 void ghost(const Mesh* mesh, const Mat4& m, bool ok, bool custom) { g_ghosts.push_back({mesh, m, ok, custom}); }

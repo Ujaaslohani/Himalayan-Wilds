@@ -21,6 +21,7 @@ struct KindInfo {
 
 struct BuiltModel {
   const Mesh* mesh = nullptr;
+  const MeshData* data = nullptr;
   std::vector<Vec3> lights;
   Vec3 door;
 };

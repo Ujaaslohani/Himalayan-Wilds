@@ -93,6 +93,8 @@ void beginShadowPass(const Mat4& lightVP, int size, int target = 0);
 void endShadowPass();
 void bindShadow();
 void drawFullscreen();
+// pre-baked tileable fbm (r = 4 octaves, g = 3 octaves; 32 noise units per repeat): one read instead of 3-4
+GLuint fbmTexture();
 bool sphereVisible(const Vec3& c, float r);
 std::string commonHeader();
 GLuint quadVao();

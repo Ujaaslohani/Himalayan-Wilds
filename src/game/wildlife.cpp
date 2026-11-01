@@ -1,3 +1,7 @@
+#include "village.h"
+#include "../render/sky.h"
+#include "buildings.h"
+#include <unordered_map>
 #include "wildlife.h"
 #include "economy.h"
 #include "season.h"
@@ -32,7 +36,7 @@ const PredDef PREDS[3] = {
     {24, 1.8f, 16, 1.0f, 0.3f, 9, 450, 110},
 };
 const PredDef* PRED(Species sp) { return sp >= SP_WOLF ? &PREDS[sp - SP_WOLF] : nullptr; }
-const float VILLAGE_SAFE = 40;
+#define VILLAGE_SAFE settlementSafe()  // grows as the settlement expands
 
 }  // namespace
 
@@ -44,14 +48,30 @@ struct Herd {
   float respawnT = 0, calmT = 0;
   float tx = 0, tz = 0, migT = 0;
   bool migrating = false;
+  float slow = 0;  // far-herd update throttle
 };
 
 namespace {
 
 std::vector<std::unique_ptr<Herd>> herds;
+// danger memory: places where the player hunted. Prey herds avoid them for a few in-game hours (game clock seconds)
+struct Danger { float x, z, until; };
+std::vector<Danger> g_danger;
+void markDanger(float x, float z) {
+  for (auto& d : g_danger) if (hypot2(d.x - x, d.z - z) < 25) { d.until = E.clock + 420; return; }
+  g_danger.push_back({x, z, E.clock + 420});
+}
+float dangerAt(float x, float z) {
+  float s = 0;
+  for (auto& d : g_danger) if (d.until > E.clock) { float r = hypot2(d.x - x, d.z - z); if (r < 70) s += 1 - r / 70; }
+  return s;
+}
 std::vector<std::unique_ptr<Animal>> animals;
 int nextId = 1;
 bool raidRepelled = false;
+int raidStartN = 0;
+void spotted() { if (audio::dangerSting()) popup("SPOTTED!", rgbHex("#ef4444")); }
+bool hasWatchtower() { for (auto& b : A.buildings) if (b.built && b.type == "watchtower") return true; return false; }
 std::vector<Animal*> raidPack;
 float lastHour = -1, coldWarned = 0;
 
@@ -96,6 +116,7 @@ Animal* makeAnimal(Species sp, Herd* herd, float x, float z, Rng* rnd) {
   A0.tx = x;
   A0.tz = z;
   A0.phase = r() * 6;
+  A0.pv = false;
   A0.pitch = SPEC[sp].grazePitch;
   A0.aware = 0; A0.fall = 0; A0.downT = 0;
   A0.steerYaw = A0.yaw;
@@ -412,7 +433,7 @@ void updatePredator(Animal* a, float dt) {
       a->pitch += (-0.35f - a->pitch) * std::min(1.0f, dt * 5);
       a->t -= dt;
       if (a->t <= 0) {
-        if (!safe && d < sight * 0.95f) { a->state = S_CHASE; a->t = 12; actions::notify("A " + lowerName(a->sp) + " is charging! Shoot or get back to the village."); }
+        if (!safe && d < sight * 0.95f) { a->state = S_CHASE; a->t = 12; spotted(); actions::notify("A " + lowerName(a->sp) + " is charging! Shoot or get back to the village."); }
         else { a->state = S_WALK; a->t = 12; a->tx = a->herd->ax; a->tz = a->herd->az; }
       }
       break;
@@ -514,7 +535,7 @@ void updatePredator(Animal* a, float dt) {
       a->speed = std::max(0.0f, a->speed - dt * 6);
       a->pitch += (0.95f - a->pitch) * std::min(1.0f, dt * 3);
       a->t -= dt;
-      if (noticed) { a->state = a->sp == SP_BEAR ? S_ALERT : S_CHASE; a->t = a->sp == SP_BEAR ? 1.2f : 12; growl(a); if (a->sp == SP_WOLF) alertPack(a, S_CHASE); }
+      if (noticed) { a->state = a->sp == SP_BEAR ? S_ALERT : S_CHASE; a->t = a->sp == SP_BEAR ? 1.2f : 12; growl(a); spotted(); if (a->sp == SP_WOLF) alertPack(a, S_CHASE); }
       else if (a->t <= 0) { a->state = S_WALK; a->t = 12; a->tx = a->herd->ax; a->tz = a->herd->az; }
       break;
     }
@@ -523,9 +544,9 @@ void updatePredator(Animal* a, float dt) {
       float td = hypot2(a->tx - a->x, a->tz - a->z);
       if (td > 3.5f) moveToward(a, a->tx, a->tz, td > 25 ? S.run * 0.7f : S.walk * 1.6f, dt, 3);
       else { a->speed = std::max(0.0f, a->speed - dt * 6); a->t -= dt; a->pitch = 0.8f; }
-      if (raidRepelled && hypot2(a->x, a->z) < 58) { endRaid(false); break; }
+      if (raidRepelled && hypot2(a->x, a->z) < VILLAGE_SAFE + 18) { endRaid(false); break; }
       if (a->t <= 0) { endRaid(true); break; }
-      if (noticed && d < sight * 0.8f) { a->state = S_CHASE; a->t = 14; growl(a); }
+      if (noticed && d < sight * 0.8f) { a->state = S_CHASE; a->t = 14; growl(a); spotted(); }
       E.raid.x = a->x; E.raid.z = a->z;
       break;
     }
@@ -589,18 +610,31 @@ void startRaid() {
   raidTarget(tx, tz);
   raidPack.clear();
   for (Animal* m : best->members) if (m->state != S_DOWNED) raidPack.push_back(m);
-  float sx = (best->ax >= 0 ? 1 : -1) * 70.0f, sz = (best->az >= 0 ? 1 : -1) * 70.0f;
+  // approach from the least defended side: score 8 directions by lantern posts, fences, flagpoles and watchtowers near that edge
+  float edge = VILLAGE_SAFE, far = edge + 30;
+  float sx = far, sz = far, bestD = 1e9f;
+  for (int k = 0; k < 8; k++) {
+    float a = k * TAU / 8, ex = std::cos(a) * edge, ez = std::sin(a) * edge, d = 0;
+    for (auto& s : A.structures) {
+      float w = s.kind == SK_LAMP_POST ? 1.5f : s.kind == SK_FENCE ? 0.4f : s.kind == SK_FLAGPOLE ? 0.5f : 0;
+      if (w > 0) d += w * std::max(0.0f, 1 - hypot2(s.x - ex, s.z - ez) / 35);
+    }
+    for (auto& b : A.buildings) if (b.built && b.type == "watchtower") d += 5 * std::max(0.0f, 1 - hypot2(b.pos[0] - ex, b.pos[2] - ez) / 50);
+    d += hypot2(std::cos(a) * far - best->ax, std::sin(a) * far - best->az) * 0.004f;  // slight preference for the pack's own side
+    if (d < bestD) { bestD = d; sx = std::cos(a) * far; sz = std::sin(a) * far; }
+  }
   for (Animal* m : raidPack) {
     m->x = sx + (randf() - 0.5f) * 8; m->z = sz + (randf() - 0.5f) * 8; m->y = world::getTerrainHeight(m->x, m->z);
-    m->state = S_RAID; m->raid = true; m->t = 9; m->prey = nullptr;
+    m->state = S_RAID; m->raid = true; m->t = 25; m->prey = nullptr;  // they sniff around the stores before stealing: time for you to fight
     m->tx = tx + (randf() - 0.5f) * 3; m->tz = tz + (randf() - 0.5f) * 3;
   }
   E.raid.active = true;
   E.raid.x = sx;
   E.raid.z = sz;
   ambience::howl(hypot2(E.player.pos.x - sx, E.player.pos.z - sz));
+  raidStartN = (int)raidPack.size();
   actions::notify(raidRepelled ? "Wolves are howling at the edge of the village. Your lanterns and watch should keep them back."
-                               : "A wolf pack is raiding the village stores! Defend the food — more lantern posts, fences and a watchtower will keep them away.");
+                               : "A wolf pack is raiding the village stores! Shoot them before they reach the food (follow the red marker)." + std::string(hasWatchtower() ? " The watchtower guides your arrows: +50% damage inside the village." : ""));
 }
 
 void endRaid(bool stole) {
@@ -634,16 +668,27 @@ void nightEvents(float dt) {
       if (m->state == S_DOWNED) killed++;
       else if (m->raid) done = false;
     }
+    // the player fights back: once half the pack is down the rest lose their nerve
+    if (!done && killed > 0 && killed * 2 >= std::max(2, raidStartN)) {
+      for (Animal* m : raidPack) if (m->state != S_DOWNED) { m->raid = false; m->state = S_RETREAT; m->t = 14; }
+      done = true;
+    }
     if (done) {
       raidPack.clear();
       E.raid.active = false;
-      if (killed) actions::notify("You drove off the raiding wolves!");
+      if (killed) {
+        int food = 4 * killed;
+        actions::addItems({{"food", food}});
+        actions::addScore(120 * killed);
+        actions::notify("You drove off the raiding wolves! The grateful villagers share " + std::to_string(food) + " food.");
+      }
     }
   }
   auto& P = E.player;
   const Vec3& p = P.pos;
-  if (season.snow > 0.55f && E.daylight < 0.3f && !E.world.gearCoat && hypot2(p.x, p.z) > VILLAGE_SAFE && E.playing && !E.uiOpen) {
-    if (P.hp > 25) { P.hp -= dt * 0.8f; P.hurtT = E.clock - 4; }
+  bool exposed = (season.snow > 0.55f && E.daylight < 0.3f) || sky::blizzard() > 0.4f;  // winter nights, and blizzards at any hour
+  if (exposed && !E.world.gearCoat && hypot2(p.x, p.z) > VILLAGE_SAFE && !roofAt(p.x, p.z) && E.playing && !E.uiOpen) {
+    if (P.hp > 25) { P.hp -= dt * (0.8f + 1.4f * sky::blizzard()); P.hurtT = E.clock - 4; }
     coldWarned -= dt;
     if (coldWarned <= 0) {
       coldWarned = 90;
@@ -673,16 +718,18 @@ void migrate(Herd* h, float dt) {
       float ang = randf() * TAU, r = 50 + randf() * 110;
       float x = h->ax + std::cos(ang) * r, z = h->az + std::sin(ang) * r;
       if (std::fabs(x) > MAP_HALF - 30 || std::fabs(z) > MAP_HALF - 30) continue;
-      if (hypot2(x, z) < (PRED(h->sp) ? 110.0f : 45.0f)) continue;
+      if (hypot2(x, z) < std::max(PRED(h->sp) ? 110.0f : 45.0f, VILLAGE_SAFE + (PRED(h->sp) ? 40.0f : 10.0f))) continue;  // herds roam outside the settlement
       if (h->sp == SP_DEER && hypot2(x, z) < 150) {  // at most one deer herd near camp
         bool other = false;
         for (auto& o : herds) if (o.get() != h && o->sp == SP_DEER && hypot2(o->ax, o->az) < 150) other = true;
         if (other) continue;
       }
       float s = habitatScore(h->sp, x, z);
+      if (!PRED(h->sp)) s -= 4 * dangerAt(x, z);  // remember where they were shot at
       if (PRED(h->sp)) {
+        // patrol: strongly prefer ground close to the current position of a prey herd
         for (auto& o : herds)
-          if (!PRED(o->sp) && hypot2(o->ax - x, o->az - z) < 60) s += 1.5f;
+          if (!PRED(o->sp)) { float d = hypot2(o->ax - x, o->az - z); if (d < 90) s += 2.5f * (1 - d / 90); }
       } else
         for (auto& o : herds)
           if (PRED(o->sp) && hypot2(o->ax - x, o->az - z) < 70) s -= 2;
@@ -703,7 +750,13 @@ void migrate(Herd* h, float dt) {
 
 void updateHerds(float dt) {
   const Vec3& p = E.player.pos;
-  for (auto& h : herds) {
+  g_danger.erase(std::remove_if(g_danger.begin(), g_danger.end(), [](const Danger& d) { return d.until < E.clock; }), g_danger.end());
+  for (auto& hp : herds) {
+    Herd* hh = hp.get();
+    float hdt = dt;
+    if (hypot2(p.x - hh->ax, p.z - hh->az) > 220) { hh->slow += dt; if (hh->slow < 0.5f) continue; hdt = hh->slow; hh->slow = 0; }
+    auto& h = hp;
+    float dt = hdt;
     migrate(h.get(), dt);
     if (h->calmT > 0) {
       float cx = 0, cz = 0;
@@ -748,6 +801,15 @@ namespace wildlife {
 const char* speciesName(Species sp) { return SPEC[sp].name; }
 bool isPredator(Species sp) { return PRED(sp) != nullptr; }
 int animalCount() { return (int)animals.size(); }
+int nearPositions(float x, float z, float r, float* out, int maxN) {
+  int n = 0;
+  for (auto& a : animals) {
+    if (n >= maxN) break;
+    float dx = a->x - x, dz = a->z - z;
+    if (dx * dx + dz * dz < r * r) { out[n * 3] = a->x; out[n * 3 + 1] = a->z; out[n * 3 + 2] = a->sp == SP_BEAR ? 1.4f : 0.9f; n++; }
+  }
+  return n;
+}
 
 void spawn(uint32_t seed) {
   raidPack.clear();
@@ -832,6 +894,9 @@ bool arrowHitTest(const Vec3& p0, const Vec3& p1, ArrowHit& out) {
 
 void damage(Animal* a, float dmg, bool headshot) {
   const Spec& S = SPEC[a->sp];
+  // watchtower: lookouts call targets, so arrows hit raiders harder inside the settlement
+  if (a->raid && hasWatchtower() && hypot2(E.player.pos.x, E.player.pos.z) < VILLAGE_SAFE + 25) dmg *= 1.5f;
+  if (!PRED(a->sp)) { markDanger(a->x, a->z); if (a->herd) a->herd->migT = 0; }
   a->hp -= headshot ? dmg * 2 : dmg;
   const Vec3& p = E.player.pos;
   const PredDef* D = PRED(a->sp);
@@ -937,6 +1002,7 @@ void initRender() {
       Animal* a = ap.get();
       float d2 = (a->x - p.x) * (a->x - p.x) + (a->z - p.z) * (a->z - p.z);
       if (a->state == S_DOWNED) out.push_back({a->x, a->y + 1.4f, a->z, MI_HARVEST, std::string(SPEC[a->sp].name) + " — harvest"});
+      else if (a->raid) out.push_back({a->x, a->y + 1.8f, a->z, MI_DANGER, "Raider"});  // raiders always marked, any range
       else if (PRED(a->sp)) { if (d2 < 60 * 60 || d2 < r2) out.push_back({a->x, a->y + 1.8f, a->z, MI_DANGER, SPEC[a->sp].name}); }
       else if (d2 < r2) out.push_back({a->x, a->y + 1.6f, a->z, MI_ANIMAL, ""});
     }
@@ -1019,7 +1085,7 @@ static void fill(bool shadow) {
       a->gaitT += dt * f;
     }
     if (std::fabs(a->x - p.x) > 140 || std::fabs(a->z - p.z) > 140) continue;
-    if (shadow && hypot2(a->x - p.x, a->z - p.z) > 46) continue;
+    if (shadow && hypot2(a->x - p.x, a->z - p.z) > (SPEC[a->sp].hp < 100 ? 30.0f : 46.0f)) continue;  // deer and goral are small at range: shadows only within 30 m
     const SpeciesModel& M = models::species(a->sp);
     if (!shadow && !render::cam.sphere({a->x, a->y + 0.8f, a->z}, 2.2f)) continue;
     bool predator = a->sp == SP_WOLF || a->sp == SP_LEOPARD || a->sp == SP_BEAR;
@@ -1060,7 +1126,18 @@ static void fill(bool shadow) {
 #define WADD(field, mat) do { Mat4 m_ = (mat); for (int t_ = 0; t_ < nT; t_++) T[t_]->field.add(m_); } while (0)
     WADD(body, base);
     float headPitch = a->state == S_DOWNED ? 0.3f : a->pitch - a->lunge * 0.45f - bob * 1.5f / std::max(0.2f, legLen);
-    WADD(head, base * partMatrix(M.headPivot, headPitch));
+    // head turns to watch the player when the animal has noticed them
+    float hy = 0;
+    if (a->state != S_DOWNED && a->aware > 0.25f) {
+      float rel = std::atan2(E.player.pos.x - a->x, E.player.pos.z - a->z) - a->yaw;
+      while (rel > PI) rel -= TAU;
+      while (rel < -PI) rel += TAU;
+      hy = clampf(rel, -0.9f, 0.9f) * std::min(1.0f, (a->aware - 0.25f) * 3.0f) * (1.0f - std::min(1.0f, std::fabs(a->speed) / 4.0f));
+    }
+    static std::unordered_map<int, float> s_head;
+    float& sh = s_head[a->id];
+    sh += (hy - sh) * 0.12f;
+    WADD(head, base * Mat4::compose(M.headPivot, Quat::axisAngle({0, 1, 0}, sh) * Quat::axisAngle({1, 0, 0}, headPitch), {1, 1, 1}));
 
     for (int L = 0; L < 4; L++) {
       bool front = L < 2;
@@ -1126,14 +1203,42 @@ static void drawBatches(Batches* B, int n) {
   s.set2f("u_fadeIn", 0, 0);
 }
 
+float g_alpha = 1;
+void snapshot() { for (auto& a : animals) { a->px = a->x; a->py = a->y; a->pz = a->z; a->pyaw = a->yaw; a->pphase = a->phase; a->pv = true; } }
+void setAlpha(float a) { g_alpha = clampf(a, 0, 1); }
+// draw-time interpolation: temporarily place every animal between its last two simulated states
+struct Saved { float x, y, z, yaw, phase; };
+static std::vector<Saved> g_saved;
+static void interpBegin() {
+  g_saved.resize(animals.size());
+  for (size_t i = 0; i < animals.size(); i++) {
+    Animal* a = animals[i].get();
+    g_saved[i] = {a->x, a->y, a->z, a->yaw, a->phase};
+    if (!a->pv || std::fabs(a->x - a->px) + std::fabs(a->z - a->pz) > 6) continue;  // spawned or teleported: no blend
+    float t = g_alpha;
+    float dy = a->yaw - a->pyaw;
+    while (dy > PI) dy -= TAU;
+    while (dy < -PI) dy += TAU;
+    a->x = a->px + (a->x - a->px) * t; a->y = a->py + (a->y - a->py) * t; a->z = a->pz + (a->z - a->pz) * t;
+    a->yaw = a->pyaw + dy * t; a->phase = a->pphase + (a->phase - a->pphase) * t;
+  }
+}
+static void interpEnd() {
+  for (size_t i = 0; i < animals.size() && i < g_saved.size(); i++) { Animal* a = animals[i].get(); const Saved& s = g_saved[i]; a->x = s.x; a->y = s.y; a->z = s.z; a->yaw = s.yaw; a->phase = s.phase; }
+}
+
 void draw() {
+  interpBegin();
   fill(false);
+  interpEnd();
   glEnable(GL_CULL_FACE);
   drawBatches(g_batch, SP_COUNT * 2);
 }
 
 void drawShadow() {
+  interpBegin();
   fill(true);
+  interpEnd();
   drawBatches(g_shadowBatch, SP_COUNT);
 }
 

@@ -19,6 +19,11 @@ void confirmSelect();
 void coinPickup();
 void footstepWood();
 void footstepStone();
+void footstepGrass();
+void footstepSnow();
+void footstepWater();
+bool dangerSting();  // true if it played (rate-limited)
+void setIndoor(float k);  // 0 outside .. 1 under a roof: muffles rain and wind
 void levelUpStinger();
 void meleePunch();
 void powerupChime();
@@ -36,5 +41,6 @@ namespace ambience {
 void start();
 void ringBell(int strikes = 3, float gap = 2.4f);
 void howl(float dist = 80);
+void thunder(float delay, float dist);  // dist 0 near .. 1 far
 void update(float dt);
 }

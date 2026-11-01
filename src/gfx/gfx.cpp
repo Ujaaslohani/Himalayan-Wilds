@@ -1,5 +1,9 @@
 #include <cstdlib>
 #include "gfx.h"
+#include "../platform/platform.h"
+#include <filesystem>
+#include <vector>
+#include <string>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
@@ -216,7 +220,10 @@ void InstBatch::destroy() {
 }
 
 GLint Shader::loc(const char* name) {
+  auto pit = plocs.find(name);
+  if (pit != plocs.end()) return pit->second;
   auto it = locs.find(name);
+  if (it != locs.end()) { plocs[name] = it->second; return it->second; }
   if (it != locs.end()) return it->second;
   GLint l = glGetUniformLocation(prog, name);
   locs[name] = l;
@@ -247,8 +254,67 @@ static GLuint compileStage(GLenum type, const std::string& src) {
   return s;
 }
 
+// ---- shader binary cache: linked programs are saved to disk, so later launches skip GLSL compilation
+// (faster loading and no first-sight hitches). Keyed by source + driver; any mismatch just recompiles.
+namespace {
+typedef void (*PFN_GetProgramBinary)(GLuint, GLsizei, GLsizei*, GLenum*, void*);
+typedef void (*PFN_ProgramBinary)(GLuint, GLenum, const void*, GLsizei);
+typedef void (*PFN_ProgramParameteri)(GLuint, GLenum, GLint);
+PFN_GetProgramBinary pGetProgramBinary = nullptr;
+PFN_ProgramBinary pProgramBinary = nullptr;
+PFN_ProgramParameteri pProgramParameteri = nullptr;
+int g_binState = 0;  // 0 unknown, 1 usable, -1 unsupported
+std::string g_binDir;
+bool binReady() {
+  if (g_binState == 0) {
+    g_binState = -1;
+    if (std::getenv("HW_NOSHADERCACHE")) return false;
+    GLint nf = 0;
+    glGetIntegerv(0x87FE /*GL_NUM_PROGRAM_BINARY_FORMATS*/, &nf);
+    pGetProgramBinary = (PFN_GetProgramBinary)platform::glProc("glGetProgramBinary");
+    pProgramBinary = (PFN_ProgramBinary)platform::glProc("glProgramBinary");
+    pProgramParameteri = (PFN_ProgramParameteri)platform::glProc("glProgramParameteri");
+    if (nf > 0 && pGetProgramBinary && pProgramBinary && pProgramParameteri) {
+      g_binDir = platform::saveDir() + "/shadercache";
+      std::error_code ec;
+      std::filesystem::create_directories(g_binDir, ec);
+      g_binState = 1;
+    }
+  }
+  return g_binState == 1;
+}
+uint64_t fnv(const std::string& s, uint64_t h = 1469598103934665603ull) { for (unsigned char c : s) { h ^= c; h *= 1099511628211ull; } return h; }
+std::string binPath(const std::string& src) {
+  static std::string drv = std::string((const char*)glGetString(GL_RENDERER)) + "|" + (const char*)glGetString(GL_VERSION);
+  char b[40];
+  std::snprintf(b, sizeof b, "/%016llx.bin", (unsigned long long)fnv(drv, fnv(src)));
+  return g_binDir + b;
+}
+void finishProgram(Shader& sh, GLuint p) {
+  sh.prog = p;
+  sh.locs.clear();
+  GLuint blk = glGetUniformBlockIndex(p, "Frame");
+  if (blk != GL_INVALID_INDEX) glUniformBlockBinding(p, blk, 0);
+}
+}  // namespace
+
 bool compileShader(Shader& sh, const std::string& vs, const std::string& fs, const std::string& defines) {
-  std::string head = "#version 330 core\n" + defines + "\n";
+  std::string head = "#version 330 core\n" + std::string(std::getenv("HW_NOGRADE") ? "#define NO_GRADE\n" : "") + defines + "\n";
+  std::string cachePath;
+  if (binReady()) {
+    cachePath = binPath(head + vs + "\n----\n" + fs);
+    std::vector<uint8_t> bin;
+    if (platform::readFile(cachePath, bin) && bin.size() > 8) {
+      GLenum fmt;
+      std::memcpy(&fmt, bin.data(), 4);
+      GLuint p = glCreateProgram();
+      pProgramBinary(p, fmt, bin.data() + 4, (GLsizei)(bin.size() - 4));
+      GLint ok = 0;
+      glGetProgramiv(p, GL_LINK_STATUS, &ok);
+      if (ok) { finishProgram(sh, p); return true; }
+      glDeleteProgram(p);  // driver changed or file damaged: compile from source below
+    }
+  }
   GLuint v = compileStage(GL_VERTEX_SHADER, head + vs);
   GLuint f = compileStage(GL_FRAGMENT_SHADER, head + fs);
   if (!v || !f) return false;
@@ -265,6 +331,7 @@ bool compileShader(Shader& sh, const std::string& vs, const std::string& fs, con
   glBindAttribLocation(p, 7, "a_i1");
   glBindAttribLocation(p, 8, "a_i2");
   glBindAttribLocation(p, 9, "a_itint");
+  if (!cachePath.empty()) pProgramParameteri(p, 0x8257 /*GL_PROGRAM_BINARY_RETRIEVABLE_HINT*/, 1);
   glLinkProgram(p);
   glDeleteShader(v);
   glDeleteShader(f);
@@ -277,10 +344,18 @@ bool compileShader(Shader& sh, const std::string& vs, const std::string& fs, con
     glDeleteProgram(p);
     return false;
   }
-  sh.prog = p;
-  sh.locs.clear();
-  GLuint blk = glGetUniformBlockIndex(p, "Frame");
-  if (blk != GL_INVALID_INDEX) glUniformBlockBinding(p, blk, 0);
+  finishProgram(sh, p);
+  if (!cachePath.empty()) {
+    GLint len = 0;
+    glGetProgramiv(p, 0x8741 /*GL_PROGRAM_BINARY_LENGTH*/, &len);
+    if (len > 0) {
+      std::string out(4 + (size_t)len, '\0');
+      GLenum fmt = 0;
+      GLsizei got = 0;
+      pGetProgramBinary(p, len, &got, &fmt, &out[4]);
+      if (got > 0) { std::memcpy(&out[0], &fmt, 4); out.resize(4 + (size_t)got); platform::writeFile(cachePath, out); }
+    }
+  }
   return true;
 }
 

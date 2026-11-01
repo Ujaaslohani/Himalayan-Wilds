@@ -1,3 +1,4 @@
+#include "../render/sky.h"
 #define MINIAUDIO_IMPLEMENTATION
 #define MA_NO_ENCODING
 #define MA_NO_GENERATION
@@ -54,6 +55,7 @@ struct Voice {
   int ftype;
   double phase = 0, vphase = 0;
   Biquad bq;
+  bool bqSet = false;
   bool bus = false;
 };
 
@@ -73,7 +75,7 @@ std::mutex g_mtx;
 std::vector<Voice> g_pending, g_voices;
 std::vector<float> g_noise;
 std::atomic<double> g_time{0};
-Bed g_beds[5];
+Bed g_beds[7];  // 0 wind, 1-3 river, 4 waterfall, 5 rain hiss, 6 rain body
 std::atomic<bool> g_sfxMuted{false}, g_musicMuted{false}, g_musicPlaying{false};
 std::atomic<float> g_musicVol{0.22f}, g_sfxVol{0.6f};
 std::vector<float> g_musicPcm;
@@ -111,20 +113,24 @@ void callback(ma_device*, void* out, const void*, ma_uint32 frames) {
   double t0 = g_time.load();
   float sv = g_sfxMuted ? 0.0f : g_sfxVol.load();
   const float dt = 1.0f / SR;
+  double tBlockEnd = t0 + frames * (double)dt;
   for (auto& v : g_voices) {
+    if (v.start >= tBlockEnd || t0 > v.start + v.dur + 0.03) continue;  // not started yet / finished: skip the whole block
     float pl = std::sqrt(0.5f * (1 - v.pan)), pr = std::sqrt(0.5f * (1 + v.pan));
+    float g = 0;
+    if (v.kind == V_NOISE && v.nf1 <= 0 && !v.bqSet) { v.bq.set(v.ftype, v.nf0, v.q); v.bqSet = true; }
     for (ma_uint32 i = 0; i < frames; i++) {
       double t = t0 + i * (double)dt;
       float lt = (float)(t - v.start);
-      if (lt < 0 || lt > v.dur + 0.03f) continue;
+      if (lt < 0 || lt > v.dur) continue;
       float u = lt / v.dur;
-      float g;
-      if (v.env == E_BLIP) g = expRamp(v.gain, 0.0001f, u);
-      else {
-        float a = v.attack;
-        g = lt < a ? expRamp(0.0001f, v.gain, lt / a) : expRamp(v.gain, 0.0001f, (lt - a) / std::max(1e-4f, v.dur - a));
+      if ((i & 15) == 0 || g == 0) {  // envelope is smooth: evaluate the pow() every 16 samples, not every sample
+        if (v.env == E_BLIP) g = expRamp(v.gain, 0.0001f, u);
+        else {
+          float a = v.attack;
+          g = lt < a ? expRamp(0.0001f, v.gain, lt / a) : expRamp(v.gain, 0.0001f, (lt - a) / std::max(1e-4f, v.dur - a));
+        }
       }
-      if (lt > v.dur) g = 0;
       float s;
       if (v.kind == V_OSC) {
         float f = v.f1 > 0 ? expRamp(v.f0, v.f1, u) : v.f0;
@@ -135,7 +141,7 @@ void callback(ma_device*, void* out, const void*, ma_uint32 frames) {
         v.phase += f * dt;
         s = osc(v.wave, v.phase);
       } else {
-        if ((i & 31) == 0) v.bq.set(v.ftype, v.nf1 > 0 ? expRamp(v.nf0, v.nf1, u) : v.nf0, v.q);
+        if (v.nf1 > 0 && (i & 31) == 0) v.bq.set(v.ftype, expRamp(v.nf0, v.nf1, u), v.q);
         size_t idx = (size_t)(v.phase) % g_noise.size();
         v.phase += 1;
         s = v.bq.run(g_noise[idx]);
@@ -172,7 +178,16 @@ void callback(ma_device*, void* out, const void*, ma_uint32 frames) {
       if (++g_musicPos >= n) g_musicPos = 0;
     }
   }
-  for (ma_uint32 i = 0; i < frames * 2; i++) o[i] = std::tanh(o[i]);
+  // smooth limiter: loud moments (thunder) turn the whole mix down briefly instead of
+  // hard-saturating it into distortion; tanh only catches what slips through
+  static float lim = 1.0f;
+  for (ma_uint32 i = 0; i < frames; i++) {
+    float pk = std::max(std::fabs(o[i * 2]), std::fabs(o[i * 2 + 1])) * lim;
+    if (pk > 0.8f) lim *= 0.8f / pk;                    // instant attack
+    else lim += (1.0f - lim) * 0.00004f;                 // ~0.5 s release
+    o[i * 2] = std::tanh(o[i * 2] * lim);
+    o[i * 2 + 1] = std::tanh(o[i * 2 + 1] * lim);
+  }
   g_time = tEnd;
 }
 
@@ -181,7 +196,7 @@ double now() { return g_time.load() + 0.03; }
 void push(const Voice& v) {
   if (!g_ok) return;
   std::lock_guard<std::mutex> lk(g_mtx);
-  if (g_pending.size() < 256) g_pending.push_back(v);
+  if (g_pending.size() < 64 && g_voices.size() < 160) g_pending.push_back(v);  // hard cap: the mixer never falls behind
 }
 
 void blip(double at, Wave w, float f0, float f1, float dur, float gain) {
@@ -260,9 +275,9 @@ bool init() {
     last = (last + 0.04f * w) / 1.04f;
     s = last * 3.2f * 0.6f + w * 0.4f;
   }
-  int types[5] = {0, 2, 0, 2, 0};
-  float freqs[5] = {420, 760, 210, 2100, 520}, qs[5] = {0.6f, 0.55f, 0.7f, 2.2f, 0.5f};
-  for (int i = 0; i < 5; i++) {
+  int types[7] = {0, 2, 0, 2, 0, 2, 0};
+  float freqs[7] = {420, 760, 210, 2100, 520, 4200, 700}, qs[7] = {0.6f, 0.55f, 0.7f, 2.2f, 0.5f, 0.45f, 0.6f};
+  for (int i = 0; i < 7; i++) {
     g_beds[i].type = types[i];
     g_beds[i].freq = g_beds[i].freqTarget = freqs[i];
     g_beds[i].q = qs[i];
@@ -331,6 +346,51 @@ void footstepStone() {
   noiseBurst(t, 0.05f, 0.08f, 1000 * v, 600 * v);
   blip(t, Wave::Triangle, 300 * v, -1, 0.03f, 0.04f);
 }
+// surface footsteps: soft swish on grass, crunch on snow, splash in shallow water
+void footstepGrass() {
+  float v = vary(0.12f);
+  double t = now();
+  aburst(t, 1, 3200 * v, 0.7f, 0.07f, 0.035f, (rnd() * 2 - 1) * 0.3f, 0.006f);
+  aburst(t, 0, 420 * v, 0.8f, 0.05f, 0.03f, 0, 0.003f);
+}
+void footstepSnow() {
+  float v = vary(0.1f);
+  double t = now();
+  for (int i = 0; i < 4; i++) aburst(t + i * 0.012, 2, 1700 * v + i * 260, 2.0f, 0.03f, 0.04f, (rnd() * 2 - 1) * 0.3f, 0.002f);
+  aburst(t, 0, 260 * v, 0.7f, 0.1f, 0.035f, 0, 0.01f);
+}
+void footstepWater() {
+  float v = vary(0.12f);
+  double t = now();
+  aburst(t, 2, 900 * v, 1.2f, 0.16f, 0.06f, (rnd() * 2 - 1) * 0.3f, 0.004f);
+  aburst(t + 0.03, 1, 2400 * v, 0.8f, 0.2f, 0.035f, (rnd() * 2 - 1) * 0.3f, 0.01f);
+}
+// a predator has spotted you: low thump + rising strings stab (rate-limited)
+bool dangerSting() {
+  // "you've been spotted" stinger, built like stealth-game detection cues:
+  // rising whoosh -> low boom + dissonant brass stab + high string screech -> two heartbeat thumps
+  static double last = -100;
+  double t = now();
+  if (t - last < 8) return false;
+  last = t;
+  {
+    Voice v{};  // riser: swelling band-passed noise sweeping upward
+    v.kind = V_NOISE; v.env = E_TONE; v.start = t; v.dur = 0.34f; v.attack = 0.3f; v.gain = 0.22f;
+    v.ftype = 2; v.nf0 = 300; v.nf1 = 4200; v.q = 1.2f; v.phase = rnd() * g_noise.size();
+    push(v);
+  }
+  double h = t + 0.3;
+  aburst(h, 0, 55, 0.9f, 0.9f, 0.55f, 0, 0.003f);                           // boom
+  aburst(h, 2, 160, 1.5f, 0.12f, 0.25f, 0, 0.001f);                         // impact click
+  const float chord[4] = {220.0f, 233.1f, 329.6f, 466.2f};                  // minor 2nd + tritone: alarm
+  for (int i = 0; i < 4; i++) atone(h, Wave::Sawtooth, chord[i], chord[i] * 0.94f, 0.55f, 0.07f, (i - 1.5f) * 0.25f, 0);
+  atone(h + 0.02, Wave::Triangle, 1760, 1990, 0.7f, 0.05f, 0.1f, 14);        // screech
+  aburst(h + 0.55, 0, 48, 0.9f, 0.22f, 0.4f, 0, 0.002f);                    // heartbeat
+  aburst(h + 0.78, 0, 44, 0.9f, 0.25f, 0.33f, 0, 0.002f);
+  return true;
+}
+std::atomic<float> g_indoor{0};
+void setIndoor(float k) { g_indoor = std::max(0.0f, std::min(1.0f, k)); }
 void meleePunch() {
   float v = vary();
   double t = now();
@@ -373,7 +433,7 @@ void update(float) {}
 namespace ambience {
 
 namespace {
-float babbleT = 0, dayT = 4, extraT = 6, crackleT = 1, nextEvent = 3, beatT = 0;
+float dropT = 0, babbleT = 0, dayT = 4, extraT = 6, crackleT = 1, nextEvent = 3, beatT = 0;
 int beat = 0;
 const float FIRES[3][2] = {{73.5f, 54.5f}, {-92.5f, -27.5f}, {24.5f, -120.5f}};
 const float SCALE[7] = {293.7f, 329.6f, 370, 440, 493.9f, 587.3f, 659.3f};
@@ -485,6 +545,20 @@ void ringBell(int strikes, float gap) {
   }
 }
 
+void thunder(float delay, float dist) {
+  if (!g_ok || g_sfxMuted) return;
+  double t = now() + delay;
+  float g = 0.28f * (1.1f - dist);
+  float pan = rnd() * 1.2f - 0.6f;
+  if (dist < 0.5f) aburst(t, 2, 1800, 0.7f, 0.25f, g * 0.5f, pan, 0.003f);  // close strike: sharp crack first
+  // long low rumble from a few filtered noise rolls, spaced so they don't pile up into one huge peak
+  int rolls = 3 + (int)(rnd() * 3);
+  for (int k = 0; k < rolls; k++) {
+    double at = t + 0.1 + k * (0.55 + rnd() * 0.5);
+    aburst(at, 0, 90 + rnd() * 120, 0.7f, 1.4f + rnd() * 1.4f, g * (1.0f - k * 0.15f), pan + (rnd() - 0.5f) * 0.4f, 0.12f);
+  }
+}
+
 void howl(float dist) {
   if (!g_ok || g_sfxMuted) return;
   float g = std::max(0.01f, 0.07f * (1 - std::min(1.0f, dist / 220)));
@@ -504,6 +578,7 @@ void update(float dt) {
   const Vec3& p = E.player.pos;
   float gust = 0.6f + 0.4f * std::sin(E.clock * 0.23f) * std::sin(E.clock * 0.071f + 1);
   float w = (0.025f + 0.07f * season.snow + 0.06f * season.fall + std::max(0.0f, (p.y - 40) / 80) * 0.06f) * gust * on;
+  w *= 1 + 3.0f * sky::blizzard();  // blizzard wind roar
   g_beds[0].target = w;
   g_beds[0].freqTarget = 300 + gust * 380 + season.fall * 200;
   RiverHit q = world::riverQuery(p.x, p.z);
@@ -534,6 +609,25 @@ void update(float dt) {
   const P2& hd = world::RIVER.head;
   float fd = hypot2(p.x - hd[0], p.z - (hd[1] - 6));
   g_beds[4].target = std::pow(std::max(0.0f, 1 - fd / 130), 2.0f) * 0.5f * frozen * on;
+  // rain: steady hiss + body, scaled by strength; heavier drips under tree canopy
+  float rain = sky::rainAmount() * on;
+  float canopy = world::forestDensity(p.x, p.z);
+  float in = audio::g_indoor.load();  // under a roof: rain hiss and wind are muffled, the drum on the roof stays
+  g_beds[5].target = rain * 0.22f * (1 - 0.85f * in);
+  g_beds[6].target = rain * (0.1f + canopy * 0.08f) * (1 - 0.35f * in);
+  g_beds[6].freqTarget = 700 - 350 * in;
+  g_beds[0].target *= 1 - 0.7f * in;
+  if (rain > 0.05f && E.playing && in < 0.5f) {
+    dropT -= dt;
+    if (dropT < -0.25f) dropT = 0;  // after a hitch, don't fire a backlog of drops in one go
+    while (dropT <= 0) {
+      dropT += 0.02f + rnd() * (0.12f - 0.08f * rain);
+      float dg = 0.012f + rnd() * 0.02f;
+      double at = now() + rnd() * 0.02;
+      if (rnd() < 0.25f + canopy * 0.4f) aburst(at, 2, 900 + rnd() * 900, 3.0f, 0.05f, dg * 1.4f, rnd() * 1.6f - 0.8f, 0.001f);  // fat drip off leaves
+      else aburst(at, 2, 2500 + rnd() * 3500, 2.5f, 0.025f, dg, rnd() * 1.6f - 0.8f, 0.001f);   // drop on grass / ground
+    }
+  }
 
   if (!E.playing || E.uiOpen) return;
   float day = E.daylight;

@@ -1,3 +1,4 @@
+#include <array>
 #pragma once
 #include "gl.h"
 #include "../core/math.h"
@@ -59,15 +60,24 @@ struct InstBatch {
 struct Shader {
   GLuint prog = 0;
   std::unordered_map<std::string, GLint> locs;
+  std::unordered_map<const char*, GLint> plocs;            // fast path: string literals keyed by pointer
+  std::unordered_map<GLint, std::array<float, 4>> vals;     // last value sent per uniform: skip redundant uploads
   GLint loc(const char* name);
   void use() const { glUseProgram(prog); }
-  void set1f(const char* n, float v) { glUniform1f(loc(n), v); }
-  void set1i(const char* n, int v) { glUniform1i(loc(n), v); }
-  void set2f(const char* n, float a, float b) { glUniform2f(loc(n), a, b); }
-  void set3f(const char* n, float a, float b, float c) { glUniform3f(loc(n), a, b, c); }
-  void set3(const char* n, const Vec3& v) { glUniform3f(loc(n), v.x, v.y, v.z); }
-  void set3c(const char* n, const Color& c) { glUniform3f(loc(n), c.r, c.g, c.b); }
-  void set4f(const char* n, float a, float b, float c, float d) { glUniform4f(loc(n), a, b, c, d); }
+  bool same(GLint l, float a, float b, float c, float d) {
+    if (l < 0) return true;
+    auto& v = vals[l];
+    if (v[0] == a && v[1] == b && v[2] == c && v[3] == d && vals.size() && v[0] == v[0]) return true;
+    v = {a, b, c, d};
+    return false;
+  }
+  void set1f(const char* n, float v) { GLint l = loc(n); if (!same(l, v, 1e30f, 0, 0)) glUniform1f(l, v); }
+  void set1i(const char* n, int v) { GLint l = loc(n); if (!same(l, (float)v, -1e30f, 0, 0)) glUniform1i(l, v); }
+  void set2f(const char* n, float a, float b) { GLint l = loc(n); if (!same(l, a, b, 2e30f, 0)) glUniform2f(l, a, b); }
+  void set3f(const char* n, float a, float b, float c) { GLint l = loc(n); if (!same(l, a, b, c, 3e30f)) glUniform3f(l, a, b, c); }
+  void set3(const char* n, const Vec3& v) { set3f(n, v.x, v.y, v.z); }
+  void set3c(const char* n, const Color& c) { set3f(n, c.r, c.g, c.b); }
+  void set4f(const char* n, float a, float b, float c, float d) { GLint l = loc(n); if (!same(l, a, b, c, d)) glUniform4f(l, a, b, c, d); }
   void setMat4(const char* n, const Mat4& m) { glUniformMatrix4fv(loc(n), 1, GL_FALSE, m.m); }
 };
 

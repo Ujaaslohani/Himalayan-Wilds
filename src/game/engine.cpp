@@ -25,6 +25,10 @@ const ItemDef ITEMS[] = {
     {"wolf_fur", "Wolf Fur", "Wolf Fur", "Thick grey winter fur. A prized trophy.", "wolf"},
     {"bear_hide", "Bear Hide", "Bear Hide", "Heavy black hide with a cream chest mark. A rare trophy.", "bear"},
     {"leopard_pelt", "Leopard Pelt", "Leopard Pelt", "Golden rosetted pelt from the high slopes.", "leopard"},
+    {"recurve_bow", "Recurve Bow", "Recurve Bow", "Arrows hit 30% harder.", "bow"},
+    {"quiver", "Hunter's Quiver", "Quiver", "More arrows from every timber.", "arrow"},
+    {"snowshoes", "Snowshoes", "Snowshoes", "No slowdown in deep snow.", "wood"},
+    {"lantern", "Hand Lantern", "Lantern", "Lights your way at night.", "herb"},
 };
 const ItemDef* findItem(const std::string& id) {
   for (auto& i : ITEMS)
@@ -35,7 +39,7 @@ std::vector<std::pair<std::string, std::function<void(std::vector<Marker>&)>>> g
 std::mt19937 g_rng(12345);
 }  // namespace
 
-const char* ITEM_ORDER[] = {"bow", "arrow", "wood", "stone", "fiber", "herb", "deer_pelt", "boar_hide", "goral_horn", "bone", "sinew", "food", "fur_coat", "leather_armour", "wolf_fur", "bear_hide", "leopard_pelt"};
+const char* ITEM_ORDER[] = {"bow", "arrow", "wood", "stone", "fiber", "herb", "deer_pelt", "boar_hide", "goral_horn", "bone", "sinew", "food", "fur_coat", "leather_armour", "wolf_fur", "bear_hide", "leopard_pelt", "recurve_bow", "quiver", "snowshoes", "lantern"};
 const int ITEM_COUNT = sizeof(ITEM_ORDER) / sizeof(ITEM_ORDER[0]);
 
 const char* itemLabel(const std::string& id) { auto* i = findItem(id); return i ? i->label : id.c_str(); }

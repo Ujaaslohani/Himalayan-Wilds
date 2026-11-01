@@ -1,4 +1,11 @@
+#include <filesystem>
+#include <atomic>
+#include <thread>
 #include "app.h"
+#include "events.h"
+#include "../core/crashlog.h"
+#include "tutorial.h"
+#include "relics.h"
 #include "season.h"
 #include "village.h"
 #include "resources.h"
@@ -19,6 +26,7 @@
 
 const int UNLOCK[SK_COUNT] = {0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0};
 
+namespace app { void saveAsync(); }
 namespace {
 
 const Cost START_COUNTS = {{"bow", 1}, {"arrow", 30}, {"wood", 12}, {"stone", 8}, {"fiber", 6}, {"herb", 2}, {"food", 20}};
@@ -99,7 +107,9 @@ std::string costText(const Cost& c) {
   return s;
 }
 
-std::string savePath() { return platform::saveDir() + "/save.json"; }
+// three save slots: slot 1 keeps the original file name so old saves still load
+std::string savePathFor(int slot) { return platform::saveDir() + (slot <= 0 ? std::string("/save.json") : "/save" + std::to_string(slot + 1) + ".json"); }
+std::string savePath() { return savePathFor(A.saveSlot); }
 
 void resetWorld() {
   wildlife::spawn(7);
@@ -195,10 +205,11 @@ void secondTick() {
   A.jobAcc += 1;
   if (A.jobAcc >= JOB_EVERY) {
     A.jobAcc = 0;
+    village::refreshAutoJobs();
     std::map<std::string, float> give;
-    float k = A.hungerDays > 0 ? 0.5f : 1;
+    float k = (A.hungerDays > 0 ? 0.5f : 1) * (A.coldDays > 0 ? 0.6f : 1) * tierBonus() * events::workMult();
     for (int j = 0; j < JOB_COUNT; j++) {
-      int n = A.jobs[j];
+      int n = A.jobs[j] + village::autoJobCount(j);  // player-set jobs plus idle villagers helping out
       if (!n) continue;
       for (auto& g : JOBS[j].give) give[g.first] += g.second * n * seasonOutput(g.first) * k;
     }
@@ -218,7 +229,45 @@ void secondTick() {
   bool dawn = A.lastHour < 6 && h >= 6;
   A.lastHour = h;
   int pop = A.population;
+  if (dawn) {
+    events::dawn();
+    app::saveAsync();  // autosave every morning
+  }
   if (dawn && pop > 0) {
+    // winter: every home burns firewood each night; without it families get cold and eventually leave
+    bool cold = season.index == 3 || season.snow > 0.35f;
+    if (cold) {
+      int homes = 0;
+      for (auto& st : A.structures) if (KINDS[st.kind].group == KG_HOME) homes++;
+      int wood = invCount("wood"), burn = std::max(1, homes);
+      if (wood >= burn) {
+        actions::addItems({{"wood", -burn}});
+        if (A.coldDays > 0) actions::notify("The hearths are burning again. The village is warm.");
+        A.coldDays = 0;
+        if (wood - burn < burn * 2) actions::notify("Firewood is running low: " + std::to_string(wood - burn) + " wood left, homes burn " + std::to_string(burn) + " a night.");
+      } else {
+        actions::addItems({{"wood", -wood}});
+        A.coldDays += 1;
+        if (A.coldDays >= 2) {
+          A.population = std::max(0, A.population - 1);
+          actions::notify("A cold family packed up and left for the lowlands. Gather firewood quickly!");
+        } else actions::notify("Not enough firewood last night (" + std::to_string(wood) + "/" + std::to_string(burn) + "). The village is cold: work slows to 60%.");
+      }
+    } else A.coldDays = 0;
+    // food spoils in the warm months; food stores keep it fresh (none spoils in winter)
+    if (!cold) {
+      int stores = 0;
+      for (auto& st : A.structures) if (st.kind == SK_FOOD_STORE) stores++;
+      // no hard cap: food inside your storage keeps well, anything piled up beyond it spoils fast
+      float warm = season.index == 1 ? 1.0f : 0.6f;
+      int food = invCount("food"), stored = std::min(food, foodCap()), loose = food - stored;
+      int spoil = (int)std::floor(stored * 0.02f * warm + loose * 0.12f * warm);
+      if (spoil > 0) {
+        actions::addItems({{"food", -spoil}});
+        if (spoil >= 3) actions::notify(std::to_string(spoil) + " food spoiled overnight." + (loose > 0 ? " More than your stores can hold rots quickly: build a food store." : ""));
+      }
+      (void)stores;
+    }
     int need = dailyNeed(pop, season.index == 3);
     int have = invCount("food");
     if (have >= need) {
@@ -240,7 +289,7 @@ void secondTick() {
   if (A.population >= cap || A.hungerDays > 0) A.arrivalAcc = 0;
   else {
     A.arrivalAcc += 1;
-    float wait = std::max(12.0f, std::min(45.0f, 40 - villageAppeal() * 1.5f + A.population * 0.6f)) * settlerPace();
+    float wait = std::max(12.0f, std::min(45.0f, 40 - villageAppeal() * 1.5f + A.population * 0.6f)) * settlerPace() * (A.stage >= 4 ? 0.75f : 1.0f);
     if (A.arrivalAcc >= wait) {
       A.arrivalAcc = 0;
       A.population += 1;
@@ -260,7 +309,7 @@ void secondTick() {
       Cost give;
       std::string text = b.name + ":";
       for (auto& g : P->give) {
-        int v = std::max(1, (int)std::lround(g.second * std::max(1, b.level) * seasonOutput(g.first)));
+        int v = std::max(1, (int)std::lround(g.second * std::max(1, b.level) * seasonOutput(g.first) * tierBonus() * events::workMult(b.id)));
         give.push_back({g.first, v});
         text += (give.size() > 1 ? ", +" : " +") + std::to_string(v) + " " + itemLabel(g.first);
       }
@@ -354,6 +403,15 @@ Json buildSave() {
   for (int j = 0; j < JOB_COUNT; j++) jobs.set(JOBS[j].key, Json::number(A.jobs[j]));
   d.set("jobs", jobs);
   d.set("hungerDays", Json::number(A.hungerDays));
+  d.set("coldDays", Json::number(A.coldDays));
+  d.set("event", Json::number(events::active()));
+  d.set("eventDays", Json::number(events::daysSince()));
+  d.set("tutorial", Json::number(tutorial::step()));
+  {
+    Json r = Json::array();
+    for (int i : relics::found()) r.push(Json::number(i));
+    d.set("relics", r);
+  }
   d.set("stage", Json::number(A.stage));
   Json se = Json::object();
   se.set("start", Json::number(season.start));
@@ -376,9 +434,9 @@ Json buildSave() {
   return d;
 }
 
-bool readSave(Json& out) {
+bool readSave(Json& out, int slot = -1) {
   std::vector<uint8_t> bytes;
-  if (!platform::readFile(savePath(), bytes)) return false;
+  if (!platform::readFile(slot < 0 ? savePath() : savePathFor(slot), bytes)) return false;
   if (!Json::parse(std::string(bytes.begin(), bytes.end()), out)) return false;
   return out.num("v", 0) == 1;
 }
@@ -399,8 +457,6 @@ namespace actions {
 
 void addItems(const Cost& delta) {
   for (auto& d : delta) A.inv[d.first] = std::max(0, A.inv[d.first] + d.second);
-  int fcap = foodCap();
-  if (A.inv["food"] > fcap) A.inv["food"] = fcap;
   E.world.gearCoat = invCount("fur_coat") > 0;
   E.world.gearArmour = invCount("leather_armour") > 0;
 }
@@ -408,6 +464,7 @@ void addItems(const Cost& delta) {
 void addScore(int n) { A.score += n; }
 
 void notify(const std::string& text) {
+  crashlog::note(text);
   A.notification = text;
   A.notifyAt = platform::time();
 }
@@ -595,12 +652,14 @@ void init() {
   A.quests = initialQuests();
   A.clues = initialClues();
   Json d;
+  A.saveSlot = latestSlot();
   A.hasSave = readSave(d);
 }
 
 void newGame() {
   resetWorld();
   setSeasonStart(A.startSeason);
+  forest::seasonJumped();
   A.prodAcc.clear();
   A.status = Status::Playing;
   A.score = 0;
@@ -618,6 +677,10 @@ void newGame() {
   A.population = 0;
   for (auto& j : A.jobs) j = 0;
   A.hungerDays = 0;
+  A.coldDays = 0;
+  events::reset();
+  tutorial::start();
+  relics::reset();
   A.uid = 1;
   A.jobAcc = 0;
   A.lastHour = E.time;
@@ -639,13 +702,26 @@ void newGame() {
   audio::victoryFanfare();
 }
 
-bool continueGame() {
+int latestSlot() {
+  int best = 0;
+  double bestAt = -1;
+  for (int k = 0; k < 3; k++) {
+    Json d;
+    if (readSave(d, k) && d.num("at", 0) > bestAt) { bestAt = d.num("at", 0); best = k; }
+  }
+  return best;
+}
+
+bool continueGame(int slot) {
+  finishSaves();
+  if (slot >= 0) A.saveSlot = slot;
   Json d;
   if (!readSave(d)) return false;
   resetWorld();
   const Json* se = d.get("season");
   float t = (float)d.num("time", 7.5);
   restoreSeason(se ? (int)se->num("start", 2) : 2, se ? (int)se->num("day", 0) : 0, t);
+  forest::seasonJumped();
   E.time = t;
   A.lastHour = t;
   const Json* pl = d.get("player");
@@ -712,6 +788,14 @@ bool continueGame() {
   if (const Json* jobs = d.get("jobs"))
     for (int j = 0; j < JOB_COUNT; j++) A.jobs[j] = (int)jobs->num(JOBS[j].key, 0);
   A.hungerDays = (int)d.num("hungerDays", 0);
+  A.coldDays = (int)d.num("coldDays", 0);
+  events::restore((int)d.num("event", -1), (int)d.num("eventDays", 0));
+  tutorial::restore((int)d.num("tutorial", -1));
+  {
+    std::vector<int> rf;
+    if (const Json* r = d.get("relics")) for (auto& v : r->arr) rf.push_back((int)v.n);
+    relics::restore(rf);
+  }
   A.status = Status::Playing;
   A.score = (int)d.num("score", 0);
   A.level = (int)d.num("level", 1);
@@ -740,20 +824,52 @@ void quitToTitle() {
   A.hasSave = readSave(d);
 }
 
+void finishSaves();
 void saveNow() {
   if (A.status != Status::Playing) return;
+  finishSaves();  // never write while a background autosave is still writing the same file
   std::string text = buildSave().dump();
   if (platform::writeFile(savePath(), text)) A.hasSave = true;
 }
+// autosave: build the snapshot on the main thread (cheap), write the file on a background thread (disk can stall)
+static std::thread g_saveThread;
+static std::atomic<bool> g_saving{false};
+void saveAsync() {
+  if (A.status != Status::Playing || g_saving) return;
+  std::string text = buildSave().dump();
+  std::string path = savePath();
+  if (g_saveThread.joinable()) g_saveThread.join();
+  g_saving = true;
+  g_saveThread = std::thread([text = std::move(text), path]() { platform::writeFile(path, text); g_saving = false; });
+  A.hasSave = true;
+}
+void finishSaves() { if (g_saveThread.joinable()) g_saveThread.join(); }
 
-bool readSaveSummary(std::string& summary) {
+bool readSaveSummary(std::string& summary, int slot) {
+  // title screen polls this: only re-read and re-parse the save when the file actually changed
+  if (slot < 0) slot = A.saveSlot;
+  slot = std::max(0, std::min(2, slot));
+  static std::string cachedA[3];
+  static long long cachedKeyA[3] = {-1, -1, -1};
+  std::string& cached = cachedA[slot];
+  long long& cachedKey = cachedKeyA[slot];
+  long long key = -2;
+  {
+    std::error_code ec;
+    auto p = std::filesystem::path(savePathFor(slot));
+    if (std::filesystem::exists(p, ec)) key = (long long)std::filesystem::file_size(p, ec) * 1000003LL + (long long)std::filesystem::last_write_time(p, ec).time_since_epoch().count();
+  }
+  if (key == cachedKey) { summary = cached; return !cached.empty(); }
+  cachedKey = key;
+  cached.clear();
   Json d;
-  if (!readSave(d)) return false;
+  if (!readSave(d, slot)) return false;
   const Json* se = d.get("season");
   int start = se ? (int)se->num("start", 2) : 2, day = se ? (int)se->num("day", 0) : 0;
   int idx = ((start * 7 + day) / 7) % 4;
   const Json* st = d.get("structures");
   summary = std::string(SEASON_NAMES[idx]) + " · " + std::to_string((int)d.num("population", 0)) + " villagers · " + std::to_string(st ? (int)st->arr.size() : 0) + " buildings · " + std::to_string((int)d.num("score", 0)) + " renown";
+  cached = summary;
   return true;
 }
 
@@ -761,7 +877,8 @@ void craftArrows(bool bundle) {
   Cost cost = bundle ? Cost{{"wood", 2}, {"fiber", 1}} : Cost{{"wood", 1}};
   if (!has(cost)) { actions::notify("Need " + shortfall(cost) + " to fletch arrows."); audio::crispClick(); return; }
   spend(cost);
-  int n = bundle ? 25 : 10;
+  bool q = invCount("quiver") > 0;
+  int n = bundle ? (q ? 40 : 25) : (q ? 15 : 10);
   actions::addItems({{"arrow", n}});
   audio::confirmSelect();
   popup("+" + std::to_string(n) + " Arrows");
@@ -803,9 +920,11 @@ void trade(const Trade& t) {
   if (!market) { actions::notify("Build a Market Stall first."); return; }
   if (!has(t.give)) { actions::notify("Need " + shortfall(t.give) + "."); return; }
   spend(t.give);
-  actions::addItems(t.get);
+  Cost got = t.get;
+  for (auto& g : got) g.second = (int)std::lround(g.second * events::tradeMult());
+  actions::addItems(got);
   audio::coinPickup();
-  popup("Traded for " + costText(t.get), rgbHex("#fde68a"));
+  popup("Traded for " + costText(got), rgbHex("#fde68a"));
 }
 
 void craftGear(const GearDef& g) {
@@ -932,6 +1051,7 @@ void update(float dt) {
   E.uiOpen = uiOpen();
   if (A.victoryAt > 0 && E.clock >= A.victoryAt) { A.victoryAt = -1; A.status = Status::Victory; }
   if (A.status != Status::Playing) return;
+  if (!A.menuOpen) { tutorial::update(dt); relics::update(dt); }
   if (!A.menuOpen) {
     A.secAcc += dt;
     while (A.secAcc >= 1) {
@@ -940,7 +1060,21 @@ void update(float dt) {
     }
   }
   A.saveAcc += dt;
-  if (A.saveAcc >= 30) { A.saveAcc = 0; saveNow(); }
+  if (A.saveAcc >= 30) { A.saveAcc = 0; saveAsync(); }
+  static int lastSeason = -1;
+  if (lastSeason >= 0 && season.index != lastSeason) saveAsync();  // autosave when the season turns
+  lastSeason = season.index;
+  {
+    static float stT = 0;
+    stT += dt;
+    if (stT > 2) {
+      stT = 0;
+      char b[200];
+      std::snprintf(b, sizeof b, "pos %.0f %.0f %.0f | %s day %d %.1fh | pop %d | stage %d | raid %d | slot %d", E.player.pos.x, E.player.pos.y, E.player.pos.z,
+                    SEASON_NAMES[season.index], season.dayOfSeason, E.time, A.population, A.stage, E.raid.active ? 1 : 0, A.saveSlot + 1);
+      crashlog::setState(b);
+    }
+  }
   g_questT += dt;
   if (g_questT > 0.25f) {
     g_questT = 0;
@@ -951,7 +1085,9 @@ void update(float dt) {
       actions::addScore(1000);
       popup(st.name, rgbHex("#fbbf24"));
       int food = 10 + st.level * 10;
-      actions::notify("Festival! Your settlement is now a " + st.name + ". " + (st.level == 1 ? "Family houses, the communal house and the community hall are unlocked." : "Travellers speak of your village across the valley.") +
+      static const char* PERK[5] = {"", "Family houses, the communal house and the community hall are unlocked.", "Travellers speak of your village across the valley.",
+                                    "Traders now stop by more often.", "Pilgrims climb to your temple town; settlers arrive faster."};
+      actions::notify("Festival! Your settlement is now a " + st.name + ". " + PERK[std::min(4, st.level)] + " All work +" + std::to_string(st.level * 8) + "%." +
                       " The villagers gather at the hearth and share a feast (+" + std::to_string(food) + " food).");
       E.festival.t = 150;
       actions::addItems({{"food", food}});

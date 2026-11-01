@@ -1,3 +1,5 @@
+#include "../audio/audio.h"
+#include <algorithm>
 #include "sky.h"
 #include "render.h"
 #include "../game/engine.h"
@@ -6,6 +8,10 @@
 #include "../world/forest.h"
 #include "../platform/platform.h"
 #include <vector>
+#include <cstdlib>
+#include "../core/noise.h"
+#include "terrain_render.h"
+#include "../game/events.h"
 
 namespace {
 
@@ -22,12 +28,15 @@ void main(){
 
 const char* SKY_FS = R"(
 in vec3 v_dir;
+uniform sampler2D u_cloudTex;
 uniform vec3 u_top;
 uniform vec3 u_bottom;
 uniform vec3 u_sun;
 uniform vec3 u_moon;
 uniform vec3 u_sunTint;
 uniform float u_cover;
+uniform float u_storm;   // 0..1 rain strength
+uniform float u_flash;   // lightning
 out vec4 fragColor;
 void main(){
   vec3 d = normalize(v_dir);
@@ -36,9 +45,10 @@ void main(){
   float sd = max(dot(d, u_sun), 0.0);
   float hz = smoothstep(-0.02, 0.03, d.y);
   float day = u_daylight;
-  col += u_sunTint * (pow(sd, 1400.0) * 0.6 + pow(sd, 90.0) * 0.35 + pow(sd, 10.0) * 0.2) * day;
+  float sunVis = 1.0 - smoothstep(0.05, 0.5, u_storm);  // rain clouds hide the sun and its glow
+  col += u_sunTint * (pow(sd, 1400.0) * 0.6 + pow(sd, 90.0) * 0.35 + pow(sd, 10.0) * 0.2) * day * sunVis;
   vec3 disc = mix(vec3(1.0, 0.97, 0.88) * 1.6 + u_sunTint * 0.2, u_sunTint * 1.45, 1.0 - smoothstep(0.03, 0.4, u_sun.y));
-  col = mix(col, disc, smoothstep(0.99955, 0.99972, sd) * hz);
+  col = mix(col, disc, smoothstep(0.99955, 0.99972, sd) * hz * sunVis);
   float md = dot(d, u_moon);
   float night = 1.0 - day;
   if (md > 0.995) {
@@ -49,23 +59,33 @@ void main(){
     float disc = smoothstep(0.99962, 0.99976, md) * hz;
     float lit = smoothstep(-0.35, 0.25, mp.x + 0.25);
     vec3 mc = mix(vec3(0.62, 0.64, 0.68), vec3(0.95, 0.95, 0.9), smoothstep(0.35, 0.65, mare)) * mix(0.18, 1.0, lit);
-    col = mix(col, mc * mix(0.75, 1.15, night), disc * mix(0.35, 1.0, night));
+    col = mix(col, mc * mix(0.75, 1.15, night), disc * mix(0.35, 1.0, night) * sunVis);
   }
   col += vec3(0.55, 0.65, 0.85) * (pow(max(md, 0.0), 400.0) * 0.22 + pow(max(md, 0.0), 40.0) * 0.05) * night * hz;
   if (d.y > 0.0) {
     vec2 uv = d.xz / (d.y + 0.15) * 1.35 + vec2(u_clock * 0.004, u_clock * 0.0017);
-    float n = fbm4(uv);
+    // pre-baked fbm: 2 texture reads instead of 7 noise taps per sky pixel
+    float n = texture(u_cloudTex, uv * (1.0 / 32.0)).r;
     float c = smoothstep(0.66 - u_cover * 0.3, 0.8 - u_cover * 0.2, n);
-    float n2 = fbm3(uv + u_sun.xz * 0.12);
+    float n2 = texture(u_cloudTex, (uv + u_sun.xz * 0.12) * (1.0 / 32.0)).g;
     float lit = clamp(0.7 + (n - n2) * 3.0, 0.15, 1.25);
     float mglow = pow(max(md, 0.0), 6.0);
     float cday = smoothstep(0.0, 0.3, day);  // clouds stay lit until late dusk
     vec3 dark = mix(vec3(0.025, 0.03, 0.05), vec3(0.52, 0.56, 0.64), cday);
     vec3 bright = mix(vec3(0.07, 0.085, 0.12) + vec3(0.16, 0.18, 0.22) * mglow, mix(u_sunTint, vec3(1.0), 0.55), cday);
-    vec3 cc = mix(dark, bright, clamp(lit, 0.0, 1.0)) + u_sunTint * pow(sd, 6.0) * (1.0 - c) * 0.6 * day + vec3(0.35, 0.42, 0.55) * pow(max(md, 0.0), 160.0) * night * 0.35;
+    vec3 cc = mix(dark, bright, clamp(lit, 0.0, 1.0)) + u_sunTint * pow(sd, 6.0) * (1.0 - c) * 0.6 * day * sunVis + vec3(0.35, 0.42, 0.55) * pow(max(md, 0.0), 160.0) * night * 0.35;
     float fade = smoothstep(0.0, 0.07, d.y);
+    cc *= mix(1.0, 0.42, u_storm);                  // rain clouds are heavy and dark
     col = mix(col, cc, c * fade * 0.94);
+    if (u_storm > 0.02) {
+      // low ragged storm layer racing under the main deck
+      vec2 uv2 = d.xz / (d.y + 0.08) * 0.8 + vec2(u_clock * 0.02, u_clock * 0.011);
+      float s2 = smoothstep(0.42, 0.7, texture(u_cloudTex, uv2 * (1.0 / 32.0) + 0.37).g) * u_storm;
+      vec3 sc2 = mix(vec3(0.03, 0.035, 0.045), vec3(0.24, 0.26, 0.29), smoothstep(0.0, 0.3, day));
+      col = mix(col, sc2, s2 * fade * 0.85);
+    }
   }
+  col += vec3(0.7, 0.75, 0.9) * u_flash * (0.6 + 0.4 * max(d.y, 0.0));
   fragColor = vec4(col, 1.0);
 }
 )";
@@ -114,7 +134,7 @@ uniform vec3 u_tint;
 out vec4 fragColor;
 void main(){
   float r = length(v_uv * vec2(1.0, 1.3));
-  float n = fbm3(v_uv * 1.6 + vec2(v_seed * 17.0 + u_clock * 0.01, v_seed * 9.0));
+  float n = vnoise(v_uv * 1.6 + vec2(v_seed * 17.0 + u_clock * 0.01, v_seed * 9.0)) * 0.75 + 0.18;
   float day = clamp((u_light - 0.22) / 0.78, 0.0, 1.0);
   float a = smoothstep(1.0, 0.3, r) * smoothstep(0.5, 0.82, n) * v_fade * (0.06 + 0.44 * day);
   if (a < 0.01) discard;
@@ -126,12 +146,14 @@ void main(){
 const char* SNOW_VS = R"(
 in vec3 a_pos;
 uniform float u_fallAmt;
+uniform float u_blow;
 out float v_a;
 void main(){
   vec3 box = vec3(40.0, 20.0, 40.0);
   vec3 sd = a_pos;
   vec3 p = sd * box;
-  p.y -= u_clock * (1.0 + sd.x * 0.7);
+  p.y -= u_clock * (1.0 + sd.x * 0.7) * (1.0 + u_blow);
+  p.xz += u_windDir * u_clock * u_blow * (7.0 + sd.y * 4.0);  // blizzard: snow driven sideways
   p.x += sin(u_clock * 0.6 + sd.z * 25.0) * 0.8;
   p.z += cos(u_clock * 0.5 + sd.y * 19.0) * 0.6;
   vec3 rel = mod(p - u_camPos + box * 0.5, box) - box * 0.5;
@@ -140,6 +162,129 @@ void main(){
   float on = step(sd.y, u_fallAmt);
   v_a = on * (1.0 - smoothstep(14.0, 20.0, length(rel)));
   gl_PointSize = on * clamp((0.05 + sd.z * 0.05) * u_viewH / max(-mv.z, 0.1), 1.0, 14.0);
+}
+)";
+const char* RAIN_VS = R"(
+uniform float u_rainAmt;
+out float v_a;
+float hh(float n){ return fract(sin(n * 12.9898) * 43758.5453); }
+void main(){
+  int id = gl_VertexID / 2, end = gl_VertexID - id * 2;
+  vec3 sd = vec3(hh(float(id)), hh(float(id) + 17.3), hh(float(id) + 41.7));
+  vec3 box = vec3(36.0, 24.0, 36.0);
+  vec3 p = sd * box;
+  p.y -= u_clock * 16.0 * (0.9 + sd.x * 0.3);
+  vec3 rel = mod(p - u_camPos + box * 0.5, box) - box * 0.5;
+  vec3 slant = vec3(u_windDir.x, 0.0, u_windDir.y) * 0.25 * u_windS;
+  vec3 wp = u_camPos + rel + (end == 1 ? vec3(0.0, 0.55, 0.0) - slant : vec3(0.0));
+  gl_Position = u_viewProj * vec4(wp, 1.0);
+  float on = step(sd.z, u_rainAmt);
+  v_a = on * (1.0 - smoothstep(10.0, 18.0, length(rel))) * (end == 1 ? 0.0 : 1.0);
+}
+)";
+const char* RAIN_FS = R"(
+in float v_a;
+out vec4 fragColor;
+void main(){ fragColor = vec4(vec3(0.75, 0.8, 0.88) * (0.3 + 0.7 * u_daylight), v_a * 0.35); }
+)";
+// ambient life: fireflies (summer nights), butterflies (spring/summer days), pollen motes in sunlight
+const char* LIFE_VS = R"(
+uniform sampler2D u_height;
+uniform vec4 u_grid;
+uniform vec4 u_life;   // x fireflies, y butterflies, z pollen
+out vec4 v_c;
+out float v_kind;
+out float v_flap;
+float hh(float n){ return fract(sin(n * 12.9898) * 43758.5453); }
+float hAt(vec2 w){ vec2 g = (w - u_grid.xx) / u_grid.y; ivec2 c = clamp(ivec2(g + 0.5), ivec2(0), ivec2(int(u_grid.z) - 1)); return texelFetch(u_height, c, 0).r; }
+void main(){
+  int id = gl_VertexID;
+  float kind = id < 300 ? 0.0 : id < 340 ? 1.0 : 2.0;
+  float f = float(id);
+  vec3 sd = vec3(hh(f), hh(f + 17.3), hh(f + 41.7));
+  float box = kind == 1.0 ? 40.0 : 30.0;
+  vec2 base = sd.xy * box;
+  float t = u_clock;
+  // gentle wandering paths
+  base += vec2(sin(t * (0.2 + sd.z * 0.3) + f), cos(t * (0.17 + sd.x * 0.25) + f * 1.3)) * (kind == 2.0 ? 1.5 : 3.0);
+  vec2 rel = mod(base - u_camPos.xz + box * 0.5, box) - box * 0.5;
+  vec2 w = u_camPos.xz + rel;
+  float gy = hAt(w);
+  float hgt = kind == 0.0 ? 0.4 + sd.z * 2.2 + sin(t * 0.9 + f) * 0.3 : kind == 1.0 ? 0.5 + sd.z * 1.4 + abs(sin(t * 2.2 + f)) * 0.35 : 0.6 + sd.z * 3.0 + sin(t * 0.3 + f) * 0.5;
+  vec3 wp = vec3(w.x, gy + hgt, w.y);
+  vec4 vp = u_view * vec4(wp, 1.0);
+  gl_Position = u_proj * vp;
+  float amt = kind == 0.0 ? u_life.x : kind == 1.0 ? u_life.y : u_life.z;
+  float on = step(sd.z * 0.999, amt) * (1.0 - smoothstep(box * 0.35, box * 0.5, length(rel)));
+  float blink = kind == 0.0 ? smoothstep(0.55, 1.0, sin(t * (1.3 + sd.x) + f * 3.1)) : 1.0;
+  vec3 col = kind == 0.0 ? vec3(0.75, 1.0, 0.35) : kind == 1.0 ? mix(vec3(0.95, 0.75, 0.2), mix(vec3(0.9, 0.95, 1.0), vec3(0.65, 0.4, 0.9), step(0.5, sd.y)), step(0.33, sd.x)) : vec3(1.0, 0.96, 0.82);
+  v_c = vec4(col, on * blink);
+  v_kind = kind;
+  v_flap = abs(sin(t * 14.0 + f));
+  float px = kind == 0.0 ? 0.09 : kind == 1.0 ? 0.16 : 0.025;
+  gl_PointSize = on * clamp(px * u_viewH / max(-vp.z, 0.1), 1.0, 40.0);
+}
+)";
+const char* LIFE_FS = R"(
+in vec4 v_c;
+in float v_kind;
+in float v_flap;
+out vec4 fragColor;
+void main(){
+  vec2 q = gl_PointCoord * 2.0 - 1.0;
+  if (v_kind == 1.0) {
+    // butterfly: thin dark body, larger forewings and smaller hindwings, dark wing edges and an eye spot,
+    // wings narrowing as they fold through each flap
+    float body = step(abs(q.x), 0.06) * step(abs(q.y), 0.55);
+    float fx = abs(q.x) / max(0.12, v_flap);
+    vec2 fw = vec2(fx - 0.5, q.y + 0.18);            // forewing (upper)
+    vec2 hw = vec2(fx - 0.38, q.y - 0.38);           // hindwing (lower)
+    float fore = length(fw * vec2(1.0, 1.35)) - 0.48;
+    float hind = length(hw * vec2(1.0, 1.2)) - 0.33;
+    float wing = min(fore, hind);
+    if (wing > 0.0 && body < 0.5) discard;
+    vec3 c = v_c.rgb;
+    float edge = smoothstep(-0.1, -0.02, wing);
+    c = mix(c, vec3(0.08, 0.06, 0.05), edge * 0.85);
+    float eye = 1.0 - smoothstep(0.06, 0.1, length(fw - vec2(0.12, -0.08)));
+    c = mix(c, vec3(0.1, 0.08, 0.06), eye);
+    c = mix(c, vec3(0.06, 0.05, 0.04), body);
+    fragColor = vec4(outColor(c * (0.35 + 0.65 * u_daylight) * 0.9), v_c.a);
+    return;
+  }
+  float d = length(q);
+  if (d > 1.0) discard;
+  float a = v_kind == 0.0 ? pow(1.0 - d, 2.0) : (1.0 - d) * 0.5 * smoothstep(0.1, 0.5, u_daylight);
+  fragColor = vec4(v_c.rgb * (v_kind == 0.0 ? 1.6 : 1.0), v_c.a * a);
+}
+)";
+const char* BIRD_VS = R"(
+uniform vec4 u_birds[24];   // xyz position, w flap phase (<0 = unused)
+out float v_flap;
+out float v_on;
+void main(){
+  vec4 b = u_birds[gl_VertexID];
+  v_on = b.w < 0.0 ? 0.0 : 1.0;
+  v_flap = abs(sin(b.w));
+  vec4 vp = u_view * vec4(b.xyz, 1.0);
+  gl_Position = u_proj * vp;
+  gl_PointSize = v_on * clamp(0.45 * u_viewH / max(-vp.z, 0.1), 2.0, 48.0);
+}
+)";
+const char* BIRD_FS = R"(
+in float v_flap;
+in float v_on;
+out vec4 fragColor;
+void main(){
+  if (v_on < 0.5) discard;
+  vec2 q = gl_PointCoord * 2.0 - 1.0;
+  // small dark bird seen from below/side: body plus two wings sweeping up and down
+  float wingY = mix(0.35, -0.35, v_flap);
+  float ax = abs(q.x);
+  float wing = abs(q.y - (0.0 + (wingY) * ax)) - 0.09 * (1.0 - ax);
+  float body = length(q * vec2(2.8, 1.6)) - 0.35;
+  if (min(wing, body) > 0.0 || ax > 0.95) discard;
+  fragColor = vec4(outColor(vec3(0.05, 0.045, 0.04) * (0.4 + 0.6 * u_daylight)), 1.0);
 }
 )";
 const char* SNOW_FS = R"(
@@ -236,7 +381,7 @@ void main(){
 struct SkyCols { Color zen, hor; };
 const Color NIGHT = Color::hex("0b1430"), NIGHTH = Color::hex("1c2846"), DAWN = Color::hex("f08a4b"), DAWNH = Color::hex("fbc99a");
 const Color DAY = Color::hex("78bdf0"), DAYH = Color::hex("d3e8ee"), GOLD = Color::hex("f6a35c"), GOLDH = Color::hex("fde3a7");
-const Color SUN = Color::hex("fff1d6"), SUNLOW = Color::hex("ffc58a"), SUNSET = Color::hex("ff7a2a"), MOON = Color::hex("9db4e0");
+const Color SUN = Color::hex("fff1d6"), SUNLOW = Color::hex("ffc58a"), SUNSET = Color::hex("ff7a2a"), MOON = Color::hex("a8c0ee");
 const Color WINTER_H = Color::hex("e4eaf0"), WINTER_Z = Color::hex("9fb6cc"), AUTUMN_H = Color::hex("f3d9b5");
 const Color G_SUMMER = Color::hex("7a9a45"), G_AUTUMN = Color::hex("9a7038"), G_WINTER = Color::hex("c9d3dc"), HEMI_SKY = Color::hex("d6ecff");
 const float SHADOW_HALF = 32;
@@ -252,6 +397,11 @@ Mat4 g_builtMat, g_prevMat;
 float g_mixT = 1.0f;
 bool g_haveBuilt = false;
 float g_cover = 0.4f;
+float g_rain = 0, g_wet = 0, g_flash = 0, g_thunderT = 0, g_blizzard = 0, g_fogBank = 0;
+struct Bird { Vec3 p, v; float ph, life; };
+std::vector<Bird> g_birds;
+float g_birdCheck = 0;
+GLuint g_rainVao = 0;
 GLuint g_starVao = 0, g_starVbo = 0, g_mistVao = 0, g_mistIbo = 0, g_snowVao = 0, g_snowVbo = 0, g_leafVao = 0, g_leafSeedVbo = 0, g_leafEmitVbo = 0;
 int g_mistCount = 0;
 const int LEAF_EMIT = 40, LEAF_PER = 32;
@@ -382,7 +532,53 @@ void update(float dt) {
   float sunElev = g_sunDir.y;
   float dusk = 1.0f - sstep(sunElev, 0.02f, 0.42f);
   float sunI = 2.1f * std::pow(daylight, 1.15f) * (1 - 0.18f * snow) * (1.0f - 0.28f * dusk * dusk);
-  float moonI = 0.32f * moonUp * (1 - daylight);
+  float moonI = 0.5f * moonUp * (1 - daylight);  // brighter blue-silver moonlight, casts soft shadows
+  {
+    // showers: deterministic weather over game hours; spring/summer/autumn only, ground stays wet for a while after
+    float hrs = (season.start * 7 + season.day) * 24.0f + E.time;
+    float n = valueNoise(hrs / 9.0f, 3.7f, 913);
+    float want = sstep(n, 0.68f, 0.8f) * (1 - sstep(season.snow + season.fall, 0.15f, 0.4f));
+    if (g_settings.weather == 1) want = 1 - sstep(season.snow + season.fall, 0.15f, 0.4f);  // config: always rain (snow still wins)
+    else if (g_settings.weather == 2) want = 0;
+    if (std::getenv("HW_RAIN") || (events::forceRain() && g_settings.weather != 2)) want = 1 - sstep(season.snow + season.fall, 0.15f, 0.4f) * (events::forceRain() ? 0 : 1);  // storm day event
+    g_rain += (want - g_rain) * std::min(1.0f, dt * 0.25f);
+    // winter: the same storm systems arrive as blizzards (storm-day events too)
+    float wantB = season.snow > 0.5f ? std::max(sstep(n, 0.62f, 0.78f), events::forceRain() ? 1.0f : 0.0f) : 0.0f;
+    if (g_settings.weather == 2) wantB = 0;
+    if (std::getenv("HW_BLIZZARD")) wantB = 1, g_blizzard = std::max(g_blizzard, 0.95f);
+    if (wantB > 0.5f && g_blizzard < 0.05f && E.playing) actions::notify("A blizzard is sweeping down the valley. Get indoors or wear a fur coat: the cold will drain your health.");
+    g_blizzard += (wantB - g_blizzard) * std::min(1.0f, dt * 0.2f);
+    // morning valley fog: on some days a fog bank fills the low ground after dawn and burns off by late morning
+    {
+      float dayN = valueNoise((float)(season.start * 7 + season.day) * 0.9f, 7.3f, 421);
+      float morning = sstep(E.time, 4.8f, 6.0f) * (1 - sstep(E.time, 8.5f, 10.5f));
+      float low = 1 - sstep(render::cam.pos.y, 35.0f, 90.0f);
+      float want2 = sstep(dayN, 0.55f, 0.7f) * morning * (0.35f + 0.65f * low) * (1 - g_rain);
+      g_fogBank += (want2 - g_fogBank) * std::min(1.0f, dt * 0.3f);
+    }
+    g_wet = g_rain > 0.15f ? std::min(1.0f, g_wet + dt * 0.08f) : std::max(0.0f, g_wet - dt * 0.006f);
+    sunI *= 1.0f - 0.5f * std::min(1.0f, g_rain * 2.5f);  // overcast: sunlight drops with the first drops
+    // thunderstorms in heavy rain: lightning flash now, thunder arrives 1-4 s later (sound travels slower)
+    g_flash = std::max(0.0f, g_flash - dt * 7.0f);
+    if (g_rain > 0.6f && dt > 0) {
+      g_thunderT -= dt;
+      if (g_thunderT <= 0) {
+        g_thunderT = 9 + valueNoise(E.clock * 0.37f, 1.3f, 77) * 25;
+        float dist = 0.3f + valueNoise(E.clock * 0.53f, 4.1f, 78) * 0.7f;  // 0 near .. 1 far
+        g_flash = 1.0f - 0.6f * dist;
+        ambience::thunder(1.0f + dist * 3.0f, dist);
+      }
+    }
+    // overcast: sky and haze go grey while it rains
+    Color grey = Color::hex("8a9096").lerp(Color::hex("2a2e34"), 1 - daylight);
+    float rs = std::min(1.0f, g_rain * 2.5f);  // the sky clouds over as soon as the first drops fall
+    g_hor = g_hor.lerp(grey, rs * 0.65f);
+    g_zen = g_zen.lerp(grey * 0.9f, rs * 0.75f);
+    Color white = Color::hex("c9d2dc").lerp(Color::hex("2c323a"), 1 - daylight);
+    g_hor = g_hor.lerp(white, g_blizzard * 0.85f + g_fogBank * 0.35f);
+    g_zen = g_zen.lerp(white * 0.92f, g_blizzard * 0.8f);
+    sunI *= 1.0f - 0.55f * g_blizzard;
+  }
   bool useSun = sunI >= moonI;
   // shadows fade out as sun and moon trade places, so the light direction swap is never visible
   float ratio = std::min(sunI, moonI) / std::max(1e-4f, std::max(sunI, moonI));
@@ -393,9 +589,9 @@ void update(float dt) {
   g_sunTint = SUN.lerp(SUNLOW, sstep(dusk, 0.0f, 0.55f)).lerp(SUNSET, sstep(dusk, 0.45f, 1.0f));
   Color lightCol = useSun ? g_sunTint : MOON;
   float lightI = std::max(std::max(sunI, moonI), 0.05f);
-  float hemiI = lerpf(0.32f, 1.05f, daylight);
+  float hemiI = lerpf(0.32f, 1.05f, daylight) * (1 + g_flash * 2.5f);
   Color ground = G_SUMMER.lerp(G_AUTUMN, au * 0.8f).lerp(G_WINTER, snow);
-  g_cover = 0.64f + 0.22f * season.fall + 0.08f * season.autumn;
+  g_cover = std::min(0.95f, 0.64f + 0.22f * season.fall + 0.08f * season.autumn + 0.25f * std::min(1.0f, g_rain * 2.5f));
 
   const Vec3& p = E.player.pos;
   float texel = (SHADOW_HALF * 2) / (float)g_settings.shadowSize;
@@ -404,7 +600,7 @@ void update(float dt) {
   static Vec3 s_light{0, 1, 0};
   static int s_size = 0;
   bool moved = c.distanceSq(g_shadowC) > 0.01f || s_size != g_settings.shadowSize;
-  bool turned = g_lightDir.dot(s_light) < 0.999995f;
+  bool turned = g_lightDir.dot(s_light) < 0.99985f;  // re-render the static (tree/rock) shadow every ~1 degree of sun travel, not every 0.2
   if (moved || turned || g_staticDirty) {
     g_shadowC = c;
     s_light = g_lightDir;
@@ -428,13 +624,15 @@ void update(float dt) {
   float strength = useSun ? std::min(1.0f, sunI / 1.3f) : 0.45f * moonUp;
   setv(F.sunDir, g_lightDir, strength);
   setv(F.sunCol, lightCol * lightI, daylight);
-  setv(F.hemiSky, HEMI_SKY * hemiI, std::max(0.011f, g_shadowK));
+  setv(F.hemiSky, HEMI_SKY.lerp(Color::hex("8aa4d6"), (1 - daylight) * 0.6f) * hemiI, std::max(0.011f, g_shadowK));
   setv(F.hemiGround, ground * hemiI, season.fall);
-  setv(F.fogCol, g_hor, (60 - 25 * season.fall) * g_settings.drawDist());
-  F.fogParam[0] = (260 - 100 * season.fall) * g_settings.drawDist();
+  float rainFog = (1.0f - 0.45f * g_rain) * (1.0f - 0.72f * g_blizzard) * (1.0f - 0.55f * g_fogBank);  // rain, blizzards and fog banks close the view in
+  setv(F.fogCol, g_hor, (60 - 25 * season.fall) * g_settings.drawDist() * rainFog);
+  F.fogParam[0] = (260 - 100 * season.fall) * g_settings.drawDist() * rainFog;
   F.fogParam[1] = (float)platform::height();
   F.fogParam[2] = clampf((0.45f - daylight) / 0.35f, 0, 1);
-  F.fogParam[3] = 0;
+  F.fogParam[3] = g_wet;
+  F.shadowMix[1] = g_rain;
   F.season[0] = season.snow; F.season[1] = season.autumn; F.season[2] = season.bare; F.season[3] = season.spring;
   F.season2[0] = season.dry; F.season2[1] = season.ice; F.season2[2] = wind.t; F.season2[3] = wind.strength;
   F.wind[0] = wind.dirX; F.wind[1] = wind.dirZ; F.wind[2] = 1.0f / (float)g_settings.shadowSize; F.wind[3] = SHADOW_HALF;
@@ -470,6 +668,12 @@ void drawSky() {
   s.set3("u_moon", g_moonDir);
   s.set3c("u_sunTint", g_sunTint);
   s.set1f("u_cover", g_cover);
+  s.set1f("u_storm", std::min(1.0f, g_rain * 2.5f));
+  s.set1f("u_flash", g_flash);
+  s.set1i("u_cloudTex", 12);
+  glActiveTexture(GL_TEXTURE12);
+  glBindTexture(GL_TEXTURE_2D, render::fbmTexture());
+  glActiveTexture(GL_TEXTURE0);
   render::drawFullscreen();
   float op = 1 - E.daylight;
   if (op > 0.01f) {
@@ -557,14 +761,108 @@ void drawStarsAndMist() {
   glDisable(GL_BLEND);
 }
 
+float rainAmount() { return g_rain; }
+float blizzard() { return g_blizzard; }
+float fogBank() { return g_fogBank; }
+
+void warmPrograms() {
+  // compile every weather/ambient shader up front (rain, snow, life, birds) so the first shower doesn't hitch
+  render::program("rain", RAIN_VS, RAIN_FS);
+  render::program("snow", SNOW_VS, SNOW_FS);
+  render::program("life", LIFE_VS, LIFE_FS);
+  render::program("birds", BIRD_VS, BIRD_FS);
+}
+
+void scareBirds(const Vec3& from) {
+  if (g_birds.size() > 12) return;
+  std::vector<float> t;
+  forest::nearTrees(from.x, from.z, 18, t, 3);
+  for (size_t i = 0; i + 3 < t.size() + 1 && i < t.size(); i += 4) {
+    Vec3 top(t[i], t[i + 1] + 6.0f * t[i + 3], t[i + 2]);
+    Vec3 away = top - from; away.y = 0;
+    float L = std::sqrt(away.x * away.x + away.z * away.z);
+    if (L < 0.01f) away = Vec3(1, 0, 0); else away = away * (1.0f / L);
+    int n = 3 + (int)(std::fmod(top.x * 13.7f, 1.0f + 1e-3f) * 4);
+    for (int k = 0; k < n && g_birds.size() < 24; k++) {
+      float a = k * 1.7f + top.z;
+      Vec3 v = away * (5.0f + (k % 3)) + Vec3(std::cos(a) * 1.5f, 3.5f + (k % 2), std::sin(a) * 1.5f);
+      g_birds.push_back({top + Vec3(std::cos(a) * 0.8f, (k % 3) * 0.4f, std::sin(a) * 0.8f), v, a, 7.0f});
+    }
+    break;
+  }
+}
+
 void drawWeather(float dt) {
+  // birds: occasionally startled out of trees as you walk by; fly up and away, then are gone
+  g_birdCheck -= dt;
+  if (g_birdCheck <= 0) {
+    g_birdCheck = 1.0f;
+    const Vec3& pp = E.player.pos;
+    float r = std::fmod(std::fabs(std::sin(E.clock * 12.9898f) * 43758.5f), 1.0f);
+    if (E.daylight > 0.25f && g_rain < 0.3f && season.snow < 0.5f && r < 0.06f) scareBirds(pp);
+  }
+  for (auto& b : g_birds) {
+    b.life -= dt;
+    b.v.y += dt * 0.6f;
+    b.p = b.p + b.v * dt;
+    b.ph += dt * 18.0f;
+  }
+  g_birds.erase(std::remove_if(g_birds.begin(), g_birds.end(), [](const Bird& b) { return b.life <= 0; }), g_birds.end());
+  if (!g_birds.empty()) {
+    float u[24 * 4];
+    for (int i = 0; i < 24; i++) {
+      if (i < (int)g_birds.size()) { u[i * 4] = g_birds[i].p.x; u[i * 4 + 1] = g_birds[i].p.y; u[i * 4 + 2] = g_birds[i].p.z; u[i * 4 + 3] = g_birds[i].ph; }
+      else { u[i * 4] = u[i * 4 + 1] = u[i * 4 + 2] = 0; u[i * 4 + 3] = -1; }
+    }
+    if (!g_rainVao) glGenVertexArrays(1, &g_rainVao);
+    glEnable(GL_PROGRAM_POINT_SIZE);
+    Shader& bs = render::program("birds", BIRD_VS, BIRD_FS);
+    glUniform4fv(bs.loc("u_birds"), 24, u);
+    glBindVertexArray(g_rainVao);
+    glDrawArrays(GL_POINTS, 0, 24);
+    gfx::drawCalls++;
+  }
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glDepthMask(GL_FALSE);
   glEnable(GL_PROGRAM_POINT_SIZE);
-  if (season.fall > 0.01f) {
+  {
+    float night = 1 - sstep(E.daylight, 0.05f, 0.3f), day = sstep(E.daylight, 0.25f, 0.6f);
+    float summer = season.index == 1 ? 1.0f : 0.0f, spring = season.index == 0 ? 1.0f : 0.0f;
+    float dry = 1 - g_rain;
+    float ff = (E.daylight < 0.12f ? night : 0.0f) * summer * dry, bf = day * (spring + summer * 0.6f) * dry, pl = 0.0f;  // pollen off: read as daytime fireflies
+    if (ff + bf + pl > 0.02f) {
+      if (!g_rainVao) glGenVertexArrays(1, &g_rainVao);
+      Shader& l = render::program("life", LIFE_VS, LIFE_FS);
+      glActiveTexture(GL_TEXTURE1);
+      glBindTexture(GL_TEXTURE_2D, terrain_render::heightTexture());
+      glActiveTexture(GL_TEXTURE0);
+      l.set1i("u_height", 1);
+      l.set4f("u_grid", GRID_MIN, GRID_STEP, (float)GRID_N, 0);
+      l.set4f("u_life", ff, bf, pl, 0);
+      glBindVertexArray(g_rainVao);
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE);  // glow
+      glDrawArrays(GL_POINTS, 0, 300);
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      glDrawArrays(GL_POINTS, 300, 12);
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+      glDrawArrays(GL_POINTS, 340, 400);
+      glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      gfx::drawCalls += 3;
+    }
+  }
+  if (g_rain > 0.02f) {
+    if (!g_rainVao) glGenVertexArrays(1, &g_rainVao);
+    Shader& r = render::program("rain", RAIN_VS, RAIN_FS);
+    r.set1f("u_rainAmt", g_rain);
+    glBindVertexArray(g_rainVao);
+    glDrawArrays(GL_LINES, 0, 2 * 2400);
+    gfx::drawCalls++;
+  }
+  if (season.fall > 0.01f || g_blizzard > 0.01f) {
     Shader& s = render::program("snow", SNOW_VS, SNOW_FS);
-    s.set1f("u_fallAmt", season.fall);
+    s.set1f("u_fallAmt", std::max(season.fall, g_blizzard));
+    s.set1f("u_blow", g_blizzard);
     glBindVertexArray(g_snowVao);
     glDrawArrays(GL_POINTS, 0, 1600);
     gfx::drawCalls++;

@@ -19,6 +19,8 @@ struct Settings {
   float musicVolume = 0.22f;
   float sfxVolume = 0.6f;
   float grassRadius = 36.0f;
+  float grassAuto = 1.0f;
+  int weather = 0;  // 0 auto (showers come and go), 1 always rain, 2 never rain  // runtime grass detail trimmed by per-system auto detail
   float undergrowthRadius = 60.0f;
   float treeRadius = 110.0f;
   float rockRadius = 110.0f;
@@ -40,7 +42,7 @@ extern Settings g_settings;
 
 enum Key {
   K_W, K_A, K_S, K_D, K_Q, K_E, K_R, K_F, K_C, K_J, K_B, K_M, K_I, K_TAB, K_SPACE, K_SHIFT, K_CTRL,
-  K_ESC, K_ENTER, K_UP, K_DOWN, K_LEFT, K_RIGHT, K_1, K_2, K_3, K_4, K_5, K_6, K_F2, K_F3, K_F4, K_F11, K_COUNT
+  K_ESC, K_ENTER, K_UP, K_DOWN, K_LEFT, K_RIGHT, K_1, K_2, K_3, K_4, K_5, K_6, K_F2, K_F3, K_F4, K_F11, K_P, K_COUNT
 };
 
 struct Input {
@@ -62,12 +64,17 @@ void shutdown();
 bool shouldClose();
 void requestClose();
 void pollEvents();
+// set during loading: long load steps call loadPump() so the window keeps answering the OS (no 'Not Responding')
+extern void (*loadPump)();
+inline void pumpLoad() { if (loadPump) loadPump(); }
 void swap();
 int width();
 int height();
 double time();
 float pixelRatio();
 bool focused();
+bool minimized();
+void* glProc(const char* name);
 int refreshRate();
 void setCapture(bool on);
 Input& input();

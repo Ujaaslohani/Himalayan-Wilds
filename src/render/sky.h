@@ -17,4 +17,9 @@ void invalidateStaticShadow();
 void onStaticRebuild();
 Color horizon();
 void shutdown();
+void scareBirds(const Vec3& from);
+void warmPrograms();
+float rainAmount();
+float blizzard();  // 0..1 winter blizzard strength
+float fogBank();   // 0..1 morning valley fog  // birds burst out of nearby trees
 }

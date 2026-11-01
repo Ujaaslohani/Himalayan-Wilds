@@ -11,8 +11,10 @@ constexpr float SAFE_DEFENSE = 10;
 
 struct Trade { const char* id; Cost give, get; };
 extern const Trade TRADES[9];
+extern const Trade CARAVAN[4];
 struct GearDef { const char *id, *name, *blurb; Cost cost; };
-extern const GearDef GEAR[2];
+constexpr int GEAR_COUNT = 6;
+extern const GearDef GEAR[GEAR_COUNT];
 
 struct Production { float every; Cost give; const char* label; };
 const Production* production(const std::string& buildingId);

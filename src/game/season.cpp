@@ -1,3 +1,4 @@
+#include "../render/sky.h"
 #include "season.h"
 #include "engine.h"
 #include <cmath>
@@ -33,7 +34,7 @@ void updateWind(float dt) {
   const float bases[4] = {0.8f, 0.6f, 1.0f, 1.25f};
   float base = bases[season.index & 3];
   float gust = 0.7f + 0.22f * std::sin(t * 0.13f) + 0.12f * std::sin(t * 0.37f + 1.3f) + 0.08f * std::sin(t * 0.91f + 2.1f);
-  wind.strength = base * gust * (1 + 0.6f * season.fall);
+  wind.strength = base * gust * (1 + 0.6f * season.fall) * (1 + 1.4f * sky::blizzard());  // blizzards howl
   float a = 0.65f + 0.5f * std::sin(t * 0.017f);
   wind.dirX = std::cos(a);
   wind.dirZ = std::sin(a);

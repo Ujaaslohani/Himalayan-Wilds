@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include "../assets/assets.h"
 #include <cstdint>
 #include <vector>
@@ -103,6 +104,7 @@ void init() {
   glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 8, nullptr);
   glBindVertexArray(0);
   std::memset(&frame, 0, sizeof frame);
+  fbmTexture();  // bake the cloud noise up front (a few ms), not on the first sky frame
 }
 
 void shutdown() {
@@ -388,6 +390,18 @@ void main(){
   o = vec4(m * 0.5, h, m * 0.5, 1.0);
 }
 )";
+// wood slope bake: the grain bump used to be 6 extra texture reads per pixel (finite differences); store it once
+static const char* PT_WGRAD = R"(in vec2 v_uv;
+uniform sampler2D u_src;
+out vec4 o;
+float H(vec2 uv){ return textureLod(u_src, fract(uv), 0.0).g; }
+void main(){
+  const float e = 1.0 / 512.0;
+  vec4 c = textureLod(u_src, v_uv, 0.0);
+  vec2 g = vec2(H(v_uv + vec2(e, 0.0)) - c.g, H(v_uv + vec2(0.0, e)) - c.g);
+  o = vec4(c.r, c.g, clamp(g * 2.0 + 0.5, 0.0, 1.0));
+}
+)";
 static void ptexEnsure() {
   if (g_ptexA) return;
   const int N = 1024;
@@ -422,6 +436,20 @@ static void ptexEnsure() {
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_ptexW, 0);
   program("ptexwood", PT_VS, PT_WOOD);
   drawFullscreen();
+  {
+    GLuint w2 = 0;
+    mk(w2);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, w2, 0);
+    Shader& g = program("ptexwgrad", PT_VS, PT_WGRAD);
+    g.set1i("u_src", 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, g_ptexW);
+    glGenerateMipmap(GL_TEXTURE_2D);  // complete the texture, or it samples as black
+    drawFullscreen();
+    glDeleteTextures(1, &g_ptexW);
+    gfx::addBufferBytes(-(long long)N * N * 4 * 4 / 3);
+    g_ptexW = w2;
+  }
   glBindTexture(GL_TEXTURE_2D, g_ptexW);
   glGenerateMipmap(GL_TEXTURE_2D);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_ptexN, 0);
@@ -461,10 +489,71 @@ static void ptexEnsure() {
     gfx::addBufferBytes(-(long long)N * N * 4 * 4 / 3);
     t = nt.id;
   };
-  squash(g_ptexA);
-  squash(g_ptexW);
+  squash(g_ptexA);  // wood stays RGBA8: its baked slope lives in b/a
+  if (std::getenv("HW_DBGTEX")) {
+    std::vector<uint8_t> px((size_t)N * N * 4);
+    glBindTexture(GL_TEXTURE_2D, g_ptexW);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    double a[4] = {};
+    for (size_t i = 0; i < px.size(); i++) a[i & 3] += px[i];
+    std::printf("woodtex avg %.1f %.1f %.1f %.1f\n", a[0] / (N * N), a[1] / (N * N), a[2] / (N * N), a[3] / (N * N));
+    std::fflush(stdout);
+  }
   glViewport(vp[0], vp[1], vp[2], vp[3]);
   glEnable(GL_DEPTH_TEST);
+}
+
+GLuint fbmTexture() {
+  static GLuint tex = 0;
+  if (tex) return tex;
+  const int N = 1024, T = 32, OCT = 4;
+  // periodic value-noise lattices, one per octave (32, 64, 128, 256 cells across the tile)
+  std::vector<float> lat[OCT];
+  for (int o = 0; o < OCT; o++) {
+    int P = T << o;
+    lat[o].resize((size_t)P * P);
+    for (int y = 0; y < P; y++)
+      for (int x = 0; x < P; x++) {
+        uint32_t h = (uint32_t)x * 374761393u ^ (uint32_t)y * 668265263u ^ (uint32_t)(o * 7919 + 13) * 1442695041u;
+        h = (h ^ (h >> 13)) * 1274126177u;
+        h ^= h >> 16;
+        lat[o][(size_t)y * P + x] = (float)(h / 4294967296.0);
+      }
+  }
+  std::vector<uint8_t> px((size_t)N * N * 2);
+  for (int y = 0; y < N; y++)
+    for (int x = 0; x < N; x++) {
+      float s = 0, a = 0.5f, s3 = 0;
+      for (int o = 0; o < OCT; o++) {
+        int P = T << o;
+        float fx = (x + 0.5f) / N * P, fy = (y + 0.5f) / N * P;
+        int ix = (int)fx, iy = (int)fy;
+        float tx = fx - ix, ty = fy - iy;
+        tx = tx * tx * (3 - 2 * tx); ty = ty * ty * (3 - 2 * ty);
+        const float* L = lat[o].data();
+        int x0 = ix % P, x1 = (ix + 1) % P, y0 = iy % P, y1 = (iy + 1) % P;
+        float v0 = L[y0 * P + x0] + (L[y0 * P + x1] - L[y0 * P + x0]) * tx;
+        float v1 = L[y1 * P + x0] + (L[y1 * P + x1] - L[y1 * P + x0]) * tx;
+        s += a * (v0 + (v1 - v0) * ty);
+        if (o == 2) s3 = s;
+        a *= 0.5f;
+      }
+      px[((size_t)y * N + x) * 2] = (uint8_t)std::lround(std::min(1.0f, s + 0.03f) * 255);
+      px[((size_t)y * N + x) * 2 + 1] = (uint8_t)std::lround(std::min(1.0f, s3 + 0.06f) * 255);
+    }
+  glGenTextures(1, &tex);
+  glBindTexture(GL_TEXTURE_2D, tex);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, N, N, 0, GL_RG, GL_UNSIGNED_BYTE, px.data());
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+  glGenerateMipmap(GL_TEXTURE_2D);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 2);  // like the old live noise: never blur clouds to grey at the horizon
+  gfx::addBufferBytes((long long)N * N * 2 * 4 / 3);
+  return tex;
 }
 
 void bindShadow() {

@@ -4,6 +4,8 @@
 #include "../game/engine.h"
 #include "../game/season.h"
 #include <cmath>
+#include <vector>
+#include "../world/forest.h"
 #include <algorithm>
 
 namespace {
@@ -34,17 +36,17 @@ uniform vec2 u_sun;
 uniform float u_aspect;
 out vec4 o;
 void main(){
-  vec2 d = (u_sun - v_uv) / 28.0;
+  vec2 d = (u_sun - v_uv) / 20.0;
   vec2 uv = v_uv;
   float acc = 0.0, w = 1.0;
-  for (int i = 0; i < 28; i++) {
+  for (int i = 0; i < 20; i++) {
     acc += step(0.99999, texture(u_depth, uv).r) * w;
-    w *= 0.955;
+    w *= 0.94;
     uv += d;
   }
   vec2 dd = (v_uv - u_sun) * vec2(u_aspect, 1.0);
   float fall = exp(-length(dd) * 2.4);
-  o = vec4(acc / 16.0 * fall);
+  o = vec4(acc / 12.5 * fall);
 }
 )";
 
@@ -57,6 +59,7 @@ uniform float u_k;
 uniform float u_look;
 uniform float u_time;
 uniform vec3 u_col;
+uniform float u_shaftK;
 out vec4 o;
 void main(){
   float vis = texture(u_occ, vec2(0.5)).r;
@@ -68,7 +71,7 @@ void main(){
   rays *= exp(-r * 8.0) * 0.4;
   float glare = (core + rays) * vis;
   float wash = vis * u_look * (exp(-r * 4.5) * 0.24 + 0.03);
-  float shaft = texture(u_shaft, v_uv).r * 0.22;
+  float shaft = texture(u_shaft, v_uv).r * u_shaftK;
   vec3 c = u_col * (glare + wash + shaft) * u_k;
   o = vec4(c, 1.0);
 }
@@ -104,7 +107,7 @@ struct RT {
 };
 
 RT g_occ, g_shaft;
-float g_sx = 0, g_sy = 0, g_k = 0, g_look = 0, g_aspect = 1;
+float g_sx = 0, g_sy = 0, g_k = 0, g_look = 0, g_aspect = 1, g_shaftK = 0.22f;
 bool g_on = false;
 
 float sstep(float x, float a, float b) {
@@ -132,6 +135,13 @@ void computeState() {
   float align = std::max(0.0f, cam.forward().dot(sun));
   g_look = std::min(1.0f, std::pow(align, 6.0f) * 1.15f);
   g_on = g_k > 0.01f;
+  // canopy shafts: under trees with a low sun the light breaks through gaps in visible beams
+  static std::vector<float> near;
+  static int tick = 0;
+  static float canopy = 0;
+  if ((tick++ % 30) == 0) { near.clear(); forest::nearTrees(cam.pos.x, cam.pos.z, 16, near, 24); canopy = std::min(1.0f, (near.size() / 4) / 10.0f); }
+  float low = 1.0f - sstep(sun.y, 0.15f, 0.6f);
+  g_shaftK = 0.22f + 0.55f * canopy * (0.4f + 0.6f * low);
 }
 
 }  // namespace
@@ -169,7 +179,7 @@ void occlusion(GLuint depthTex, int w, int h) {
   render::drawFullscreen();
   glDisable(GL_BLEND);
 
-  g_shaft.ensure(std::max(1, w / 4), std::max(1, h / 4));
+  g_shaft.ensure(std::max(1, w / 8), std::max(1, h / 8));  // shafts are soft: 1/8 res is plenty
   glBindFramebuffer(GL_FRAMEBUFFER, g_shaft.fbo);
   glViewport(0, 0, g_shaft.w, g_shaft.h);
   Shader& sh = render::program("sunshaft", FS_VS, SHAFT_FS);
@@ -186,6 +196,7 @@ void occlusion(GLuint depthTex, int w, int h) {
 
 void composite(int W, int H) {
   if (!g_on || !g_occ.fbo) return;
+  if (sky::rainAmount() > 0.25f) return;  // sun hidden behind rain clouds: no glare or shafts
   Shader& s = render::program("suncomp", FS_VS, COMP_FS);
   glDisable(GL_DEPTH_TEST);
   glEnable(GL_BLEND);
@@ -198,7 +209,8 @@ void composite(int W, int H) {
   s.set1i("u_shaft", 1);
   s.set2f("u_sun", g_sx, g_sy);
   s.set1f("u_aspect", (float)W / std::max(1, H));
-  s.set1f("u_k", g_k);
+  s.set1f("u_k", g_k * (1.0f - std::min(1.0f, sky::rainAmount() / 0.25f)));
+  s.set1f("u_shaftK", g_shaftK * (1.0f - std::min(1.0f, sky::rainAmount() / 0.25f)));
   s.set1f("u_look", g_look);
   s.set1f("u_time", E.clock);
   float dusk = 1.0f - fxStep(sky::sunDir().y, 0.02f, 0.42f);

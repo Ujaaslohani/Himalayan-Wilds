@@ -1,3 +1,8 @@
+#include "../game/buildings.h"
+#include "../game/tutorial.h"
+#include "../game/relics.h"
+#include "../game/events.h"
+#include "../core/version.h"
 #include "../render/render.h"
 #include "../world/forest.h"
 #include "screens.h"
@@ -820,13 +825,32 @@ float tabInventory(float x, float y, float w) {
     if (ok && !g_block && clicked(r)) app::trade(t);
   }
   y += th + 14;
+  float cx_, cy_, cz_, cw_;
+  if (events::traderPos(cx_, cy_, cz_, cw_)) {
+    // the caravan: rare goods, today only
+    float ch = 40 + 4 * 30 + 6;
+    card({x, y, w, ch}, "#78350f", "#0c0a09", 0.75f);
+    text("Travelling caravan · rare goods, today only", x + 14, y + 20, 13, C("#fbbf24"));
+    for (int i = 0; i < 4; i++) {
+      const Trade& t = CARAVAN[i];
+      Rect r{x + 14, y + 38 + i * 30, w - 28, 26};
+      bool ok = app::has(t.give);
+      bool hot = ok && !g_block && hovered(r);
+      rect(r, ok ? C(hot ? "#292524" : "#1c1917") : C("#0c0a09", 0), 5);
+      border(r, ok ? C("#f59e0b") : C("#292524"), 1, 5);
+      float gx = text(costText(t.give, " + ") + "  ->  ", r.x + 8, r.y + 13, 11, ok ? C("#e7e5e4") : C("#78716c"), SANS);
+      text(costText(t.get, " + "), r.x + 8 + gx, r.y + 13, 11, ok ? C("#fcd34d") : C("#78716c"), SANS);
+      if (ok && !g_block && clicked(r)) { app::spend(t.give); actions::addItems(t.get); audio::coinPickup(); popup("Bought " + costText(t.get), rgbHex("#fde68a")); }
+    }
+    y += ch + 14;
+  }
   }
 
   if (g_invSection == 1) {
-  float gh = 36 + 2 * 62;
+  float gh = 36 + GEAR_COUNT * 62;
   card({x, y, w, gh}, "#292524", "#0c0a09", 0.7f);
   text("Craft gear", x + 14, y + 20, 13, C("#e7e5e4"));
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < GEAR_COUNT; i++) {
     const GearDef& g = GEAR[i];
     float gy = y + 38 + i * 62;
     bool owned = invCount(g.id) > 0, ok = !owned && app::has(g.cost);
@@ -867,6 +891,15 @@ float tabInventory(float x, float y, float w) {
 
 float tabQuests(float x, float y, float w) {
   float y0 = y;
+  {
+    // collectibles: count only, no locations (they're meant to be found)
+    Rect r{x, y, w, 44};
+    rect(r, C("#0c0a09", 0.8f), 12);
+    border(r, C("#b45309", 0.5f), 1, 12);
+    text("Lost prayer wheels", x + 16, y + 22, 14, C("#fbbf24"));
+    text(std::to_string(relics::count()) + " / " + std::to_string(relics::total()) + " found — hidden off the roads: high, deep and out of the way", x + w - 16, y + 22, 11, C("#d6d3d1"), SANS, 2);
+    y += 54;
+  }
   const Quest* aq = activeQuest();
   for (auto& q : A.quests) {
     bool act = &q == aq;
@@ -901,7 +934,7 @@ float stageCard(float x, float y, float w) {
   StageInfo st = computeStage();
   int cap = app::capacity();
   float h = 36;
-  std::string nx = st.next.empty() ? "Your settlement is fully established. Keep shaping it." : "";
+  std::string nx = st.next.empty() ? "Temple Town: the highest tier. Keep shaping it." : "";
   for (size_t i = 0; i < st.next.size(); i++) nx += (i ? " · " : "Next stage needs: ") + st.next[i];
   auto nl = wrap(nx, 10.5f, w - 28, SANS);
   h += nl.size() * 14;
@@ -920,7 +953,7 @@ float stageCard(float x, float y, float w) {
 float catalog(float x, float y, float w, KindGroup group) {
   float y0 = y;
   int stage = computeStage().level;
-  const char* STAGE_SHORT[3] = {"Clearing", "Growing Village", "Established"};
+  const char* STAGE_SHORT[5] = {"Clearing", "Growing Village", "Established", "Market Town", "Temple Town"};
   for (int k = 0; k < SK_COUNT; k++) {
     const KindInfo& info = KINDS[k];
     if (info.group != group) continue;
@@ -972,7 +1005,7 @@ float peoplePanel(float x, float y, float w) {
     text(b, sx, sy + 24, 12, col, SANS);
   };
   stat(0, "Residents", std::to_string(pop) + "/" + std::to_string(cap) + " · " + std::to_string(idle) + " idle", C("#7dd3fc"));
-  stat(1, "Food store", std::to_string(food) + "/" + std::to_string(fcap), food < need ? C("#fca5a5") : C("#fcd34d"));
+  stat(1, "Food (stored safely)", std::to_string(food) + " (" + std::to_string(fcap) + ")", food < need ? C("#fca5a5") : food > fcap ? C("#fdba74") : C("#fcd34d"));
   std::string lasts = need > 0 ? " · lasts " + std::to_string(food / need) + (food / need == 1 ? " day" : " days") : "";
   stat(2, "Eaten each dawn", std::to_string(need) + " food" + lasts, C("#e7e5e4"));
   char db[64];
@@ -1114,6 +1147,21 @@ float tabMap(float x, float y, float w) {
   image(g_mapTex.id, {mx, my, s, s});
   border({mx, my, s, s}, C("#78350f", 0.6f), 2, 10);
   auto P = [&](float wx, float wz) { return Vec2{mx + (0.5f + wx / MAP_HALF * 0.5f) * s, my + (0.5f + wz / MAP_HALF * 0.5f) * s}; };
+  {
+    // settlement edges: green = animals kept out, amber = how far you can build
+    Vec2 c = P(0, 0);
+    float k = 0.5f * s / MAP_HALF;
+    auto circ = [&](float R, float wdt, uint32_t col, bool dashed) {
+      const int N = 64;
+      for (int i = 0; i < N; i++) {
+        if (dashed && (i & 1)) continue;
+        float a0 = i * TAU / N, a1 = (i + 1) * TAU / N;
+        line(c.x + std::cos(a0) * R, c.y + std::sin(a0) * R, c.x + std::cos(a1) * R, c.y + std::sin(a1) * R, wdt, col);
+      }
+    };
+    circ(settlementSafe() * k, 2.5f, C("#4ade80", 0.9f), false);
+    circ(settlementLimit() * k, 2.0f, C("#f59e0b", 0.95f), true);
+  }
   std::vector<Marker> ms;
   collectMarkers(ms);
   for (auto& m : ms)
@@ -1157,13 +1205,22 @@ float tabMap(float x, float y, float w) {
     circle(lx + 5, y + 8, 4, C(ICON_HEX[i]));
     lx += 14 + text(lab[i], lx + 14, y + 8, 11, C("#d6d3d1"), SANS) + 12;
   }
+  y += 18;
+  lx = x + std::max(0.0f, (w - 330) / 2);
+  ring(lx + 6, y + 8, 5, 2, C("#4ade80"));
+  lx += 16 + text("Safe from animals", lx + 16, y + 8, 11, C("#d6d3d1"), SANS) + 16;
+  ring(lx + 6, y + 8, 5, 1.5f, C("#f59e0b"));
+  lx += 16 + text("Build limit", lx + 16, y + 8, 11, C("#d6d3d1"), SANS) + 12;
+  y -= 18;
+  lx = x + std::max(0.0f, (w - lw) / 2);
+  for (int i = 0; i < 4; i++) lx += 14 + textWidth(lab[i], 11, SANS) + 12;
   MarkerIcon gi[3] = {MI_RECRUIT, MI_CLUE, MI_QUEST};
   const char* gl[3] = {"Specialist", "Landmark", "Objective"};
   for (int i = 0; i < 3; i++) {
     glyph(gi[i], lx + 7, y + 8, 7);
     lx += 18 + text(gl[i], lx + 18, y + 8, 11, C("#d6d3d1"), SANS) + 12;
   }
-  y += 24;
+  y += 42;
   if (E.questTarget.valid) { text("Objective: " + E.questTarget.label, x + w / 2, y + 8, 12, C("#fcd34d"), SERIF, 1); y += 22; }
   return y - y0;
 }
@@ -1290,7 +1347,8 @@ void menuBackdrop(float W, float H, float a) {
   const int N = 40;
   for (int i = 0; i < N; i++) {
     float t = (float)i / N;
-    rect({W * 0.7f * t, 0, W * 0.7f / N + 1, H}, C("#0c0a09", 0.6f * (1 - t * t)));
+    float x0 = std::floor(W * 0.7f * t), x1 = std::floor(W * 0.7f * (i + 1) / N);  // abutting strips: no overlap seams
+    rect({x0, 0, x1 - x0, H}, C("#0c0a09", 0.6f * (1 - t * t)));
   }
 }
 
@@ -1339,6 +1397,23 @@ void drawOptions(float W, float H) {
   Rect r = modal(W, H, 760, 640, "#b45309");
   text("OPTIONS", r.x + 32, r.y + 38, 24, C("#fbbf24"));
   Settings& st = g_settings;
+  {
+    // one-click quality presets (tuned for entry-level cards up to mid-range)
+    const char* PN[3] = {"Low", "Medium", "High"};
+    float bx = r.x + r.w - 32 - 3 * 92;
+    text("PRESET", bx - 62, r.y + 38, 10, C("#78716c"), SANS);
+    for (int i = 0; i < 3; i++) {
+      bool cur = (i == 0 && st.drawDistance <= 1.55f && st.shadowSize <= 1024) || (i == 1 && st.drawDistance > 1.55f && st.drawDistance <= 2.05f && st.shadowSize == 1536) ||
+                 (i == 2 && st.drawDistance >= 2.95f && st.shadowSize >= 2048);
+      if (button({bx + i * 92, r.y + 24, 84, 28}, PN[i], cur ? ST_AMBER : ST_STONE, 12, nullptr, SANS)) {
+        static const float DD[3] = {1.5f, 2.0f, 3.0f}, GR[3] = {26, 32, 36};
+        static const int SHS[3] = {1024, 1536, 2048}, MS[3] = {0, 0, 2}, FPS[3] = {45, 60, 60};
+        st.drawDistance = DD[i]; st.shadowSize = SHS[i]; st.msaa = MS[i]; st.fxaa = true; st.grassRadius = GR[i]; st.fpsLimit = FPS[i];
+        g_settingsDirty = true;
+        actions::notify(std::string(PN[i]) + " quality preset applied. Anti-aliasing changes take effect after a restart.");
+      }
+    }
+  }
   float colW = (r.w - 64 - 40) / 2, x1 = r.x + 32, x2 = x1 + colW + 40, y0 = r.y + 76;
   text("DISPLAY", x1, y0, 10, C("#78716c"), SANS);
   float y = y0 + 16;
@@ -1443,26 +1518,52 @@ void drawMenu(float W, float H) {
 
 void drawTitle(float W, float H) {
   menuBackdrop(W, H, 0.35f);
-  static std::string summary;
+  static std::string summary, slotSum[3];
+  static int latest = 0;
   static double summaryAt = -10;
-  if (now() - summaryAt > 2) { summaryAt = now(); if (!app::readSaveSummary(summary)) summary.clear(); }
+  if (now() - summaryAt > 2) {
+    summaryAt = now();
+    latest = app::latestSlot();
+    for (int k = 0; k < 3; k++) if (!app::readSaveSummary(slotSum[k], k)) slotSum[k].clear();
+    summary = slotSum[latest];
+  }
   bool hasSave = !summary.empty();
   float x = std::max(48.0f, W * 0.08f), w = 380, y = H * 0.2f;
+  text(HW_VERSION_FULL, 16, H - 16, 10, C("#a8a29e", 0.7f), SANS);  // build id for bug reports
   text("HIMALAYAN", x + 18, y, 54, C("#fbbf24"), SERIF, 0, 2.5f);
   text("WILDS", x + 18, y + 54, 54, C("#fef3c7"), SERIF, 0, 2.5f);
   y += 110;
   if (g_titlePage == 0) {
     paragraph("Hunt, gather, recruit four specialists and grow a struggling camp into a thriving Kath-Kuni village.", x + 18, y, w, 12, C("#d6d3d1"), SANS, 1.4f);
     y += 56;
-    if (menuItem(x, y, w, "Continue", hasSave ? summary : "No saved village yet", hasSave, hasSave)) { audio::confirmSelect(); app::continueGame(); return; }
+    if (menuItem(x, y, w, "Continue", hasSave ? "Slot " + std::to_string(latest + 1) + " · " + summary : "No saved village yet", hasSave, hasSave)) { audio::confirmSelect(); app::continueGame(latest); return; }
     y += 66;
-    if (menuItem(x, y, w, "New Game", hasSave ? "Replaces your save once it autosaves" : "", !hasSave)) g_titlePage = 1;
-    y += hasSave ? 66 : 54;
+    if (menuItem(x, y, w, "Save Slots", "Load a village or start a new one in any of 3 slots", !hasSave)) g_titlePage = 2;
+    y += 66;
     if (menuItem(x, y, w, "Options")) g_options = true;
     y += 54;
     if (menuItem(x, y, w, "How to Play")) A.howToOpen = true;
     y += 54;
     if (menuItem(x, y, w, "Exit")) platform::requestClose();
+    return;
+  }
+  if (g_titlePage == 2) {
+    text("SAVE SLOTS", x + 18, y + 4, 12, C("#a8a29e"), SANS, 0, 1);
+    y += 28;
+    for (int k = 0; k < 3; k++) {
+      bool has = !slotSum[k].empty();
+      std::string lab = "Slot " + std::to_string(k + 1) + (has ? "" : " · empty");
+      if (menuItem(x, y, w, lab, has ? slotSum[k] : "Start a new village here", has)) {
+        audio::confirmSelect();
+        if (has) { app::continueGame(k); g_titlePage = 0; return; }
+        A.saveSlot = k;
+        g_titlePage = 1;
+        return;
+      }
+      if (has && button({x + w + 12, y + 6, 120, 40}, "New here", ST_STONE, 12)) { A.saveSlot = k; g_titlePage = 1; return; }
+      y += 66;
+    }
+    if (button({x + 18, y + 8, 120, 42}, "Back", ST_STONE, 14)) g_titlePage = 0;
     return;
   }
   text("CHOOSE A STARTING SEASON", x + 18, y + 4, 12, C("#a8a29e"), SANS, 0, 1);
@@ -1480,6 +1581,7 @@ void drawTitle(float W, float H) {
   }
   y += 214;
   if (button({x + 18, y, 200, 46}, "BEGIN", ST_AMBER, 16)) { g_titlePage = 0; app::newGame(); return; }
+  text("Saves to slot " + std::to_string(A.saveSlot + 1) + (slotSum[A.saveSlot].empty() ? "" : " (replaces the village there)"), x + 370, y + 23, 11, C("#a8a29e"), SANS);
   if (button({x + 230, y, 120, 46}, "Back", ST_STONE, 14)) g_titlePage = 0;
 }
 
@@ -1494,7 +1596,7 @@ void drawVictory(float W, float H) {
 std::string g_passGpu, g_passCpu;
 void drawStats(float W) {
   char b[256];
-  std::snprintf(b, sizeof b, "%.0f fps  %.1f ms  |  CPU %.1f ms  GPU %.1f ms  |  scale %.0f%%  detail %.0f%%  |  %d draws  %dk tris  |  RAM %.0f MB  %s %.0f MB", g_fs.fps, g_fs.ms, g_fs.cpuMs, g_fs.gpuMs, g_fs.renderScale * 100, forest::detailLevel() * 100, g_fs.drawCalls, g_fs.tris / 1000, g_fs.ramMB, g_fs.vramExact == 1 ? "VRAM" : g_fs.vramExact == 2 ? "VRAM (all apps)" : "VRAM (est.)", g_fs.gpuMB);
+  std::snprintf(b, sizeof b, "v" HW_VERSION "  |  %.0f fps  %.1f ms  |  CPU %.1f ms  GPU %.1f ms  |  scale %.0f%%  detail %.0f%%  |  %d draws  %dk tris  |  RAM %.0f MB  %s %.0f MB", g_fs.fps, g_fs.ms, g_fs.cpuMs, g_fs.gpuMs, g_fs.renderScale * 100, forest::detailLevel() * 100, g_fs.drawCalls, g_fs.tris / 1000, g_fs.ramMB, g_fs.vramExact == 1 ? "VRAM" : g_fs.vramExact == 2 ? "VRAM (all apps)" : "VRAM (est.)", g_fs.gpuMB);
   char r[200];
   { const Vec3& P = E.player.pos; std::snprintf(r, sizeof r, "X %.1f  Y %.1f  Z %.1f   |   %s", P.x, P.y, P.z, (const char*)glGetString(GL_RENDERER)); }
   float w = textWidth(b, 11, SANS) + 16;
@@ -1524,6 +1626,7 @@ bool statsVisible() { return g_stats; }
 void setPassText(const std::string& g, const std::string& c) { g_passGpu = g; g_passCpu = c; }
 bool optionsOpen() { return g_options; }
 void openOptions(bool on) { g_options = on; }
+void openMarket() { A.tab = Tab::Inventory; g_invSection = 2; }
 void setTitlePage(int p) { g_titlePage = p; }
 bool takeSettingsChanged() { bool d = g_settingsDirty; g_settingsDirty = false; return d; }
 void setStats(const FrameStats& s) { g_fs = s; }
@@ -1540,8 +1643,19 @@ bool escape() {
   return false;
 }
 
+static bool g_photoWas = false;
 void draw(float, bool cursorFree) {
   float W = width(), H = height();
+  if (E.photo && A.status == Status::Playing) {
+    // photo mode: no HUD, just a fading key reminder
+    static double since = -1;
+    if (!g_photoWas) since = now();
+    g_photoWas = true;
+    float a = clampf(1.5f - (float)(now() - since) / 3.0f, 0, 1);
+    if (a > 0) textShadowed("PHOTO MODE   WASD fly · Q/E down/up · Shift fast · Left/Right time of day · Up/Down zoom · F2 screenshot · P exit", W / 2, H - 30, 12, C("#fde68a", a), SANS, 1);
+    return;
+  }
+  g_photoWas = false;
   g_block = !cursorFree;
   bool playing = A.status == Status::Playing;
   bool cut = E.cutscene.dur > 0;
@@ -1555,6 +1669,19 @@ void draw(float, bool cursorFree) {
     g_block = b || modalOpen;
     { float b = ui::scale(); ui::setScale(b * TOPBAR_K); drawTopBar(W / TOPBAR_K); ui::setScale(b); }
     if (!modalOpen) drawNotification(W);
+    if (!modalOpen && E.world.placing.empty()) if (const char* h = tutorial::hint()) {
+      // tutorial hint: one short line above the health bar
+      float maxW = std::min(W - 80, 620.0f);
+      auto ls = wrap(h, 13, maxW, SANS);
+      float tw = 0;
+      for (auto& l : ls) tw = std::max(tw, textWidth(l, 13, SANS));
+      tw += 40;
+      float bh = 14 + ls.size() * 18;
+      Rect r{(W - tw) / 2, H - 116 - bh, tw, bh};
+      rect(r, C("#0c0a09", 0.62f), 8);
+      border(r, C("#f59e0b", 0.55f), 1, 8);
+      for (size_t i = 0; i < ls.size(); i++) text(ls[i], W / 2, r.y + 16 + i * 18, 13, C("#fde68a"), SANS, 1);
+    }
     setTextShadow(0);
     drawPlacement(W, H);
     g_block = b;
@@ -1584,6 +1711,7 @@ void draw(float, bool cursorFree) {
   if (g_stats) drawStats(W);
 }
 
+void prebuildMap() { buildMap(); }
 void shutdown() { g_mapTex.destroy(); }
 
 }  // namespace screens

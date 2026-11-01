@@ -10,28 +10,25 @@
 namespace {
 
 const char* GROUND_COMMON = R"(
+// pre-baked 32 m ground detail tile: rg = bump slope, b = trail-stone shade, a = puddle mask
+uniform sampler2D u_gdet;
+vec4 gdet(vec3 wp){ return texture(u_gdet, wp.xz * (1.0 / 32.0)); }
 vec3 groundShade(vec3 sc, vec3 wp, float ny, float road){
+  // seasons travel: autumn colour starts high and creeps down the slopes, spring green rises from the valley floor
+  float lAut = clamp(u_autumn * 1.5 - (1.0 - smoothstep(20.0, 200.0, wp.y)) * 0.5, 0.0, 1.0);
+  float lSpr = clamp(u_spring * 1.5 - smoothstep(10.0, 160.0, wp.y) * 0.5, 0.0, 1.0);
   float sG = clamp((sc.g - max(sc.r, sc.b)) * 14.0, 0.0, 1.0);
   float sN1 = 0.5 + 0.5 * sin(wp.x * 2.7 + sin(wp.z * 2.1)) * sin(wp.z * 3.1 + sin(wp.x * 1.9));
   float sN2 = 0.5 + 0.5 * sin(wp.x * 0.21 + sin(wp.z * 0.17) * 2.0) * sin(wp.z * 0.19 + 1.3);
   vec3 sAu = mix(vec3(0.42, 0.26, 0.07), vec3(0.5, 0.18, 0.05), sN2);
-  sc = mix(sc, sAu * (0.9 + 0.2 * sN1), u_autumn * sG * 0.45);
-  sc = mix(sc, sc * vec3(0.88, 1.18, 0.82), u_spring * sG);
+  sc = mix(sc, sAu * (0.9 + 0.2 * sN1), lAut * sG * 0.45);
+  sc = mix(sc, sc * vec3(0.88, 1.18, 0.82), lSpr * sG);
   sc = mix(sc, sc * vec3(1.25, 1.05, 0.6), u_dry * sG * (0.35 + 0.45 * sN2));
 #ifndef GROUND_BAKE
   if (road > 0.01) {
     float sCam = 1.0 - smoothstep(20.0, 70.0, length(wp - u_camPos));
-    vec2 rq = wp.xz + vec2(vnoise(wp.xz * 0.17), vnoise(wp.zx * 0.19 + 9.0)) * 4.0;  // warp breaks the lattice
-    mat2 rr = mat2(0.73, -0.68, 0.68, 0.73);
-    float sG1 = vnoise(rq * 7.0);
-    float sG2 = vnoise(rr * rq * 2.3 + 17.0);
-    float sSz = mix(0.6, 1.6, vnoise(rq * 0.09 + 2.0));  // stone size varies along the trail
-    float sPeb = smoothstep(0.74, 0.84, vnoise(rr * rq * 6.5 * sSz + 3.0));
-    float sDk = smoothstep(0.76, 0.86, vnoise(rr * rr * rq * 4.1 / sSz - 7.0)) * smoothstep(0.3, 0.6, vnoise(rq * 0.23 + 4.0));
-    vec3 sGv = sc * (0.84 + 0.22 * sG1 + 0.12 * sG2);
-    sGv = mix(sGv, sc * 1.25, sPeb * 0.45);
-    sGv = mix(sGv, sc * 0.52, sDk * 0.55);
-    sc = mix(sc, sGv, road * sCam);
+    // trail stones come from the pre-baked tile (was 8 noise taps per pixel)
+    sc = mix(sc, sc * (gdet(wp).b * 1.4), road * sCam);
   }
 #endif
 #ifdef GROUND_BAKE
@@ -59,7 +56,7 @@ vec3 groundShade(vec3 sc, vec3 wp, float ny, float road){
   sc = mix(sc, sCol, sAmt);
   return sc;
 }
-float mountainDetail(vec3 wp, float ny){
+float mountainDetailK(vec3 wp, float ny, float k){
   float steep = 1.0 - smoothstep(0.45, 0.85, ny);
 #ifndef GROUND_BAKE
   vec3 big = texture(u_ptexA, vec2(wp.x + wp.z * 0.6, wp.y * 1.3) * 0.012).rgb * 2.0;
@@ -68,25 +65,86 @@ float mountainDetail(vec3 wp, float ny){
   float bl = 1.0;
 #endif
   vec2 sp = vec2(wp.x + wp.z * 0.7, wp.y) + vec2(vnoise(wp.xz * 0.006) * 90.0, vnoise(wp.zx * 0.008 + 3.0) * 40.0);
-#ifndef GROUND_BAKE
-  sp *= mix(1.0, 0.2, smoothstep(150.0, 700.0, length(wp - u_camPos)));
-#endif
+  sp *= k;
   float rb = vnoise(sp * vec2(0.03, 0.05)) * 0.5 + vnoise(wp.xz * 0.011 + 4.0) * 0.3 + vnoise(sp * 0.13 + 2.0) * 0.2;
   float gul = smoothstep(0.5, 0.85, vnoise(vec2(sp.x * 0.14, sp.y * 0.012)));
   float rid = smoothstep(0.62, 0.92, vnoise(vec2(sp.x * 0.09, sp.y * 0.02) + 7.0));
   float hi = smoothstep(80.0, 150.0, wp.y);
   return mix(1.0, mix(0.6, 1.3, rb) * (1.0 - 0.4 * gul) * (1.0 + 0.28 * rid) * mix(1.0, bl, 0.7), (0.3 + 0.7 * steep) * mix(0.3, 1.0, hi));
 }
+float mountainDetail(vec3 wp, float ny){
+#ifndef GROUND_BAKE
+  return mountainDetailK(wp, ny, mix(1.0, 0.2, smoothstep(150.0, 700.0, length(wp - u_camPos))));
+#else
+  return mountainDetailK(wp, ny, 1.0);
+#endif
+}
 vec3 groundBump(vec3 n, vec3 wp, float road){
-  float sK = (0.42 + 0.35 * road) * (1.0 - smoothstep(25.0, 70.0, length(wp - u_camPos)));
+  float sK = (0.42 + 0.35 * road) * (1.0 - smoothstep(8.0, 15.0, length(wp - u_camPos)));
   if (sK > 0.001) {
-    // non-periodic bumps: one rotated value-noise octave, forward-difference gradient (3 fetches)
-    vec2 q = mat2(0.8, -0.6, 0.6, 0.8) * wp.xz * 1.3;
-    float e = 0.12, c0 = vnoise(q);
-    vec2 g = vec2(vnoise(q + vec2(e, 0.0)) - c0, vnoise(q + vec2(0.0, e)) - c0) * 5.0;
+    // bump slope from the pre-baked tile (was 3 noise taps)
+    vec2 g = gdet(wp).rg * 2.0 - 1.0;
     n = normalize(n + vec3(-g.x * sK, 0.0, -g.y * sK));
   }
   return n;
+}
+)";
+
+// one-off generator for the ground detail tile (periodic noise, so the 32 m tile repeats seamlessly)
+const char* GDET_FS = R"(
+in vec2 v_uv;
+out vec4 o;
+float hp(vec2 i, float P){ i = mod(i, P); return fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5453); }
+float vn(vec2 p, float P){ vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hp(i, P), hp(i + vec2(1, 0), P), u.x), mix(hp(i + vec2(0, 1), P), hp(i + vec2(1, 1), P), u.x), u.y); }
+// noise at a whole number of cells per tile
+float tn(vec2 uv, float cells, float seed){ return vn(uv * cells + seed * 17.0, cells); }
+void main(){
+  vec2 uv = v_uv;                  // 0..1 across 32 m
+  // bump: one octave at ~1.3 per metre, forward-difference slope
+  float bc = 42.0, e = 0.12 / bc, c0 = tn(uv, bc, 0.0);
+  vec2 g = vec2(tn(uv + vec2(e, 0.0), bc, 0.0) - c0, tn(uv + vec2(0.0, e), bc, 0.0) - c0) * 5.0;
+  // trail stones: warped grain, two stone sizes blended along the trail, pebbles and dark gaps
+  vec2 w = (vec2(tn(uv, 5.0, 1.0), tn(uv, 6.0, 2.0)) - 0.5) * (4.0 / 32.0);  // +-2 m warp
+  vec2 q = uv + w;
+  float g1 = tn(q, 224.0, 3.0), g2 = tn(q, 74.0, 4.0);
+  float sz = tn(q, 3.0, 5.0);
+  float pb = mix(tn(q, 320.0, 6.0), tn(q, 128.0, 7.0), sz);
+  float dk = mix(tn(q, 208.0, 8.0), tn(q, 84.0, 9.0), sz);
+  float peb = smoothstep(0.74, 0.84, pb);
+  float drk = smoothstep(0.76, 0.86, dk) * smoothstep(0.3, 0.6, tn(q, 7.0, 10.0));
+  float f = 0.84 + 0.22 * g1 + 0.12 * g2;
+  f = mix(f, 1.25, peb * 0.45);
+  f = mix(f, 0.52, drk * 0.55);
+  // puddle mask
+  float pm = tn(uv, 11.0, 11.0) * 0.7 + tn(uv, 42.0, 12.0) * 0.3;
+  o = vec4(clamp(g * 0.5 + 0.5, 0.0, 1.0), clamp(f / 1.4, 0.0, 1.0), pm);
+}
+)";
+
+// one-off bake of the mountain rock detail over the whole terrain (r: near pattern, g: the 5x larger far pattern).
+// The far terrain used to compute this per vertex every frame (7 noise taps + a texture read each).
+const char* MDET_FS = R"(
+in vec2 v_uv;
+uniform sampler2D u_height;
+uniform vec4 u_grid;
+out vec4 o;
+float hAt(ivec2 c){ c = clamp(c, ivec2(0), ivec2(int(u_grid.z) - 1)); return texelFetch(u_height, c, 0).r; }
+float heightAt(vec2 g){
+  vec2 i = floor(g); vec2 f = g - i; ivec2 c = ivec2(i);
+  float a = hAt(c), b = hAt(c + ivec2(1, 0)), cc = hAt(c + ivec2(0, 1)), d = hAt(c + ivec2(1, 1));
+  if (f.x + f.y <= 1.0) return a + (b - a) * f.x + (cc - a) * f.y;
+  return d + (cc - d) * (1.0 - f.x) + (b - d) * (1.0 - f.y);
+}
+void main(){
+  vec2 g = v_uv * (u_grid.z - 1.0);
+  vec2 w = u_grid.x + g * u_grid.y;
+  float h = heightAt(g);
+  ivec2 ci = ivec2(floor(g + 0.5));
+  float hl = hAt(ci - ivec2(1, 0)), hr = hAt(ci + ivec2(1, 0)), hd = hAt(ci - ivec2(0, 1)), hu = hAt(ci + ivec2(0, 1));
+  vec3 n = normalize(vec3(hl - hr, 2.0 * u_grid.y, hd - hu));
+  vec3 wp = vec3(w.x, h, w.y);
+  o = vec4(mountainDetailK(wp, n.y, 1.0) / 3.0, mountainDetailK(wp, n.y, 0.2) / 3.0, 0.0, 1.0);
 }
 )";
 
@@ -159,6 +217,7 @@ in vec4 a_i0;
 uniform sampler2D u_height;
 uniform sampler2D u_color;
 uniform sampler2D u_bake;
+uniform sampler2D u_mdet;
 out vec3 v_farCol;
 uniform vec4 u_grid;
 uniform float u_range[8];
@@ -216,9 +275,10 @@ void main(){
   vec4 vp = u_view * vec4(v_wpos, 1.0);
   v_depth = -vp.z;
   v_farCol = vec3(0.0);
-  if (d > 40.0) {
+  if (d > 30.0) {
     vec4 t = textureLod(u_bake, cell / (u_grid.z - 1.0), clamp(log2(d / 30.0), 0.0, 6.0));
-    vec3 sc = t.rgb * t.rgb * mountainDetail(v_wpos, v_nrm.y);
+    vec2 md = textureLod(u_mdet, cell / (u_grid.z - 1.0), clamp(log2(d / 90.0), 0.0, 6.0)).rg * 3.0;  // pre-baked rock detail
+    vec3 sc = t.rgb * t.rgb * mix(md.x, md.y, smoothstep(150.0, 700.0, length(v_wpos - u_camPos)));
     float sh = shadowAt(v_wpos, v_nrm);
     vec3 c = outColor(lambert(sc, v_nrm, sh));
     v_farCol = mix(c, fogTint(v_wpos), fogGround(v_wpos, v_depth));
@@ -240,14 +300,13 @@ uniform sampler2D u_height;
 out vec4 fragColor;
 void main(){
   float fd = distance(v_wpos.xz, u_camPos.xz);
-  if (fd > 85.0) { fragColor = vec4(v_farCol, 1.0); return; }
+  if (fd > 50.0) { fragColor = vec4(v_farCol, 1.0); return; }
   vec4 b = texture(u_bake, v_cell / (u_grid.z - 1.0));
   vec3 sc = b.rgb * b.rgb;
   float road = b.a;
   // per-pixel normal from the filtered height field: smooth curved shading instead of triangle facets
-  vec2 tc = (v_cell + 0.5) / u_grid.z, px = vec2(1.0 / u_grid.z, 0.0);
-  float hl = texture(u_height, tc - px.xy).r, hr = texture(u_height, tc + px.xy).r, hd = texture(u_height, tc - px.yx).r, hu = texture(u_height, tc + px.yx).r;
-  vec3 n = normalize(mix(normalize(vec3(hl - hr, 2.0 * u_grid.y, hd - hu)), normalize(v_nrm), max(smoothstep(40.0, 85.0, fd), 1.0 - smoothstep(70.0, 85.0, fd))));
+  // normals come precomputed per vertex from the smooth (bicubic) surface: no per-pixel height lookups
+  vec3 n = normalize(v_nrm);
   if (road > 0.01 && fd < 70.0) {
     vec4 t = texture(u_color, (v_cell + 0.5) / u_grid.z);
     sc = groundShade(srgbToLinear(t.rgb), v_wpos, n.y, t.a);
@@ -256,7 +315,7 @@ void main(){
   // snow surface: wind-carved ripples and soft blue shade in hollows
   {
     float lum = dot(sc, vec3(0.3, 0.59, 0.11));
-    float snowy = smoothstep(0.42, 0.62, lum) * (1.0 - smoothstep(0.06, 0.16, max(sc.r, max(sc.g, sc.b)) - min(sc.r, min(sc.g, sc.b)))) * (1.0 - smoothstep(30.0, 50.0, fd));
+    float snowy = smoothstep(0.42, 0.62, lum) * (1.0 - smoothstep(0.06, 0.16, max(sc.r, max(sc.g, sc.b)) - min(sc.r, min(sc.g, sc.b)))) * (1.0 - smoothstep(10.0, 16.0, fd));
     if (snowy > 0.01) {
       vec2 q = v_wpos.xz;
       float rip = vnoise(vec2(q.x * 0.35 + vnoise(q * 0.08) * 3.0, q.y * 1.4));
@@ -267,7 +326,7 @@ void main(){
       nb = normalize(nb + vec3(-g.x, 0.0, -g.y) * 0.35 * snowy);
     }
   }
-  float steepN = (1.0 - smoothstep(0.4, 0.82, n.y)) * (1.0 - smoothstep(35.0, 60.0, fd)) * mix(0.35, 1.0, max(smoothstep(70.0, 125.0, v_wpos.y), 1.0 - smoothstep(0.4, 0.62, n.y)));
+  float steepN = (1.0 - smoothstep(0.4, 0.82, n.y)) * (1.0 - smoothstep(20.0, 32.0, fd)) * mix(0.35, 1.0, max(smoothstep(70.0, 125.0, v_wpos.y), 1.0 - smoothstep(0.4, 0.62, n.y)));
   if (steepN > 0.01) {
     vec3 nr = nb;
     vec3 alb = ptexRock(v_wpos, nr, 0.16, 1.0);
@@ -275,9 +334,41 @@ void main(){
     nb = normalize(mix(nb, nr, steepN));
   }
   float sh = shadowAt(v_wpos, n);
-  vec3 c = outColor(lambert(sc, nb, sh));
+  // rain: soaked ground darkens, puddles collect on trails and flat hollows and mirror the sky
+  float wetG = u_wet * (1.0 - u_snow);
+  float puddle = 0.0;
+  if (wetG > 0.01) {
+    sc *= 1.0 - 0.3 * wetG;
+  }
+  if (wetG > 0.01 && fd < 35.0) {  // puddles within 35 m (ripple rings stay within 15 m)
+    float pm = gdet(v_wpos).a;
+    puddle = smoothstep(0.62, 0.7, pm + road * 0.18) * smoothstep(0.85, 0.97, n.y) * wetG * (1.0 - smoothstep(27.0, 35.0, fd));
+    sc = mix(sc, sc * 0.45, puddle);
+    nb = normalize(mix(nb, vec3(0.0, 1.0, 0.0), puddle));
+    if (u_rain > 0.05 && puddle > 0.05 && fd < 15.0) {
+      // raindrop rings: each 0.5 m cell spawns an expanding ring on its own cycle
+      vec2 cell = floor(v_wpos.xz * 2.0), f = fract(v_wpos.xz * 2.0) - 0.5;
+      float h = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.55);
+      float ph = fract(u_clock * 1.3 + h);
+      vec2 o = (vec2(fract(h * 7.1), fract(h * 3.7)) - 0.5) * 0.4;
+      float r = length(f - o);
+      float ring = smoothstep(0.04, 0.0, abs(r - ph * 0.45)) * (1.0 - ph) * u_rain;
+      vec2 dir = (f - o) / max(r, 1e-3);
+      nb = normalize(nb + vec3(dir.x, 0.0, dir.y) * ring * 0.6 * puddle);
+    }
+  }
+  vec3 litT = lambert(sc, nb, sh);
+  if (wetG > 0.01 && fd < 35.0) {
+    // puddle sky reflection and wet sheen folded into the same lighting (single tone-map)
+    vec3 Vt = normalize(u_camPos - v_wpos);
+    float fr = pow(1.0 - max(Vt.y, 0.0), 5.0);
+    vec3 skyR = mix(u_fogCol.rgb, u_misc.rgb, 0.4) * (0.35 + 0.65 * u_daylight);
+    litT = mix(litT, skyR * 0.6, puddle * (0.35 + 0.6 * fr));
+    litT += u_sunCol.rgb * pow(max(dot(reflect(-u_sunDir.xyz, nb), Vt), 0.0), 60.0) * sh * (0.15 + puddle) * wetG * 0.3;
+  }
+  vec3 c = outColor(litT);
   c = mix(c, fogTint(v_wpos), fogGround(v_wpos, v_depth));
-  if (fd > 70.0) c = mix(c, v_farCol, smoothstep(70.0, 85.0, fd));
+  if (fd > 40.0) c = mix(c, v_farCol, smoothstep(40.0, 50.0, fd));
   fragColor = vec4(c, 1.0);
 }
 )";
@@ -341,6 +432,44 @@ void main(){
 constexpr int PATCH = 16;
 constexpr int LEVELS = 6;
 Texture g_heightTex, g_colorTex;
+GLuint g_gdetTex = 0, g_mdetTex = 0;
+void buildMountainDetail() {
+  const int N = 1024;
+  glGenTextures(1, &g_mdetTex);
+  glBindTexture(GL_TEXTURE_2D, g_mdetTex);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, N, N, 0, GL_RG, GL_UNSIGNED_BYTE, nullptr);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  GLint vp[4], prev = 0;
+  glGetIntegerv(GL_VIEWPORT, vp);
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev);
+  GLuint fbo;
+  glGenFramebuffers(1, &fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_mdetTex, 0);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  glViewport(0, 0, N, N);
+  static const std::string fs = std::string(GROUND_COMMON) + MDET_FS;
+  Shader& sh = render::program("mdetgen", BAKE_VS, fs.c_str());
+  sh.set1i("u_height", 1);
+  sh.set4f("u_grid", GRID_MIN, GRID_STEP, (float)GRID_N, 0);
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, g_heightTex.id);
+  glActiveTexture(GL_TEXTURE0);
+  render::drawFullscreen();
+  glBindTexture(GL_TEXTURE_2D, g_mdetTex);
+  glGenerateMipmap(GL_TEXTURE_2D);
+  glBindFramebuffer(GL_FRAMEBUFFER, prev);
+  glDeleteFramebuffers(1, &fbo);
+  glViewport(vp[0], vp[1], vp[2], vp[3]);
+  glEnable(GL_DEPTH_TEST);
+  glDepthMask(GL_TRUE);
+  gfx::addBufferBytes((long long)N * N * 2 * 4 / 3);
+}
 GLuint g_vao = 0, g_vbo = 0, g_ibo = 0, g_ivbo = 0;
 GLsizei g_indexCount = 0;
 size_t g_icap = 0;
@@ -498,6 +627,36 @@ void init() {
   buildPatchMesh();
   buildBounds();
   g_backdrop = uploadMesh(world::buildBackdrop());
+  {
+    const int N = 1024;
+    glGenTextures(1, &g_gdetTex);
+    glBindTexture(GL_TEXTURE_2D, g_gdetTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, N, N, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    if (gfx::maxAniso() > 1.0f) glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, std::min(4.0f, gfx::maxAniso()));
+    GLint vp[4], prev = 0;
+    glGetIntegerv(GL_VIEWPORT, vp);
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev);
+    GLuint fbo;
+    glGenFramebuffers(1, &fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_gdetTex, 0);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glViewport(0, 0, N, N);
+    render::program("gdetgen", BAKE_VS, GDET_FS);
+    render::drawFullscreen();
+    glBindTexture(GL_TEXTURE_2D, g_gdetTex);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glBindFramebuffer(GL_FRAMEBUFFER, prev);
+    glDeleteFramebuffers(1, &fbo);
+    glViewport(vp[0], vp[1], vp[2], vp[3]);
+    glEnable(GL_DEPTH_TEST);
+    gfx::addBufferBytes((long long)N * N * 4 * 4 / 3);
+  }
 }
 
 GLuint g_bakeTex = 0, g_bakeFbo = 0;
@@ -566,8 +725,9 @@ void updateBake() {
   glActiveTexture(GL_TEXTURE2);
   glBindTexture(GL_TEXTURE_2D, g_colorTex.id);
   glActiveTexture(GL_TEXTURE0);
-  int n = first ? total : 1;
-  for (int k = 0; k < n && g_bakeNext < total; k++) bakeTile(g_bakeNext++);
+  static int bakeTick = 0;
+  int n = first ? total : ((bakeTick++ % 3) == 0 ? 1 : 0);  // spread season re-bakes thinner: no GPU spikes
+  for (int k = 0; k < n && g_bakeNext < total; k++) { bakeTile(g_bakeNext++); if (first) platform::pumpLoad(); }
   if (g_bakeNext >= total) {
     glBindTexture(GL_TEXTURE_2D, g_bakeTex);
     glGenerateMipmap(GL_TEXTURE_2D);
@@ -582,6 +742,7 @@ void updateBake() {
 
 void draw() {
   updateBake();
+  if (!g_mdetTex) buildMountainDetail();  // needs the rock texture, which exists once shadows are bound
   g_inst.clear();
   int top = LEVELS - 1;
   for (int z = 0; z < g_nodes[top]; z++)
@@ -594,6 +755,12 @@ void draw() {
     s.set1i("u_height", 1);
     s.set1i("u_color", 2);
     s.set1i("u_bake", 4);
+    s.set1i("u_gdet", 3);
+    s.set1i("u_mdet", 5);
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, g_gdetTex);
+    glActiveTexture(GL_TEXTURE5);
+    glBindTexture(GL_TEXTURE_2D, g_mdetTex);
     s.set4f("u_grid", GRID_MIN, GRID_STEP, (float)GRID_N, 0);
     g_range[6] = FINE_R[0] / 0.92f; g_range[7] = FINE_R[1] / 0.92f;
     glUniform1fv(s.loc("u_range"), 8, g_range);
@@ -629,7 +796,11 @@ void draw() {
 void drawGroundMesh(const Mesh& m) {
   if (!m.valid()) return;
   static const std::string fsM = std::string(GROUND_COMMON) + MESH_FS;
-  render::program("groundmesh", MESH_VS, fsM.c_str());
+  Shader& g = render::program("groundmesh", MESH_VS, fsM.c_str());
+  g.set1i("u_gdet", 3);
+  glActiveTexture(GL_TEXTURE3);
+  glBindTexture(GL_TEXTURE_2D, g_gdetTex);
+  glActiveTexture(GL_TEXTURE0);
   m.draw();
 }
 

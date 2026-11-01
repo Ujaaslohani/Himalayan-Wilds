@@ -468,7 +468,7 @@ MeshData makeLod(const MeshData& d, bool cutout, bool under) {
     for (size_t t = 0; t < nt; t++) comps[find(d.idx[t * 3])].push_back(t);
     bool perTri = comps.size() < 24;
     if (perTri && under) return out;
-    const float keep = under ? 0.62f : 0.45f, grow = under ? 1.2f : 1.35f;
+    const float keep = under ? 0.62f : 0.36f, grow = under ? 1.2f : 1.45f;  // mid trees: fewer, slightly larger cards
     auto emitScaled = [&](const std::vector<size_t>& tris) {
       Vec3 c{0, 0, 0};
       int n = 0;
@@ -980,17 +980,34 @@ struct SpecDef {
   int prim, sec;
 };
 const SpecDef SPD[T_COUNT] = {
-    {4.2f, 0.58f, 0.45f, 0.95f, 0.62f, 0.25f, 1.7f, 4.2f, 7, 4},   // oak: wide spreading crown
-    {4.8f, 0.48f, 0.5f, 0.7f, 0.55f, 0.45f, 1.8f, 4.0f, 6, 4},     // maple: rounded, upright
+    {6.2f, 0.62f, 0.5f, 0.72f, 0.42f, 0.45f, 1.7f, 4.2f, 8, 4},   // oak: compact rounded crown: wide spreading crown
+    {7.0f, 0.52f, 0.52f, 0.55f, 0.42f, 0.6f, 1.8f, 4.0f, 7, 4},     // maple: rounded, upright
     {9.0f, 0.3f, 0.35f, 0.55f, 0.32f, 0.2f, 1.3f, 3.6f, 11, 3},   // birch: tall, slim, light crown
     {12.5f, 0.5f, 0.12f, 1.45f, 0.0f, -0.15f, 2.3f, 2.0f, 16, 0},  // cedar: conical whorls
-    {1.6f, 0.23f, 0.2f, 0.75f, 0.9f, 0.5f, 1.3f, 4.0f, 5, 3},      // rhododendron: shrubby small tree
+    {2.6f, 0.26f, 0.2f, 0.75f, 0.95f, 0.5f, 1.3f, 4.0f, 5, 3},      // rhododendron: shrubby small tree
 };
 
 struct Built { MeshData bark, leaves; };
 
 LeafImg makeSingleLeaf(TreeSp sp, int N);
-Built growTree(TreeSp sp, uint32_t seed, bool indiv) {
+// order leaf quads outermost first: whichever side you view from, the outer cards nearest you are drawn early,
+// so the depth test rejects many hidden inner cards before they are shaded (overdraw cut without a depth prepass)
+static void sortOuterFirst(GeoB& g, Vec3 c) {
+  size_t nq = g.idx.size() / 6;
+  std::vector<std::pair<float, size_t>> key(nq);
+  for (size_t q = 0; q < nq; q++) {
+    Vec3 m(0, 0, 0);
+    for (int k = 0; k < 4; k++) { const VtxGlb& v = g.v[g.idx[q * 6] + k]; m = m + Vec3(v.p[0], v.p[1], v.p[2]); }
+    m = m * 0.25f;
+    key[q] = {-(m - c).length(), q};
+  }
+  std::sort(key.begin(), key.end());
+  std::vector<uint32_t> idx;
+  idx.reserve(g.idx.size());
+  for (auto& k : key) for (int j = 0; j < 6; j++) idx.push_back(g.idx[k.second * 6 + j]);
+  g.idx = idx;
+}
+Built growTree(TreeSp sp, uint32_t seed, bool indiv, bool fillIn = true) {
   const SpecDef& S = SPD[sp];
   PRng R(seed);
   GeoB bark, leaf;
@@ -1160,6 +1177,33 @@ Built growTree(TreeSp sp, uint32_t seed, bool indiv) {
     }
   }
   if (broad) {
+    // interior fill: clusters spread through the whole crown volume so it reads full from every side
+    if (fillIn) {
+      Vec3 mn(1e9f, 1e9f, 1e9f), mx(-1e9f, -1e9f, -1e9f);
+      for (auto& t : tips) { mn = Vec3(std::min(mn.x, t.first.x), std::min(mn.y, t.first.y), std::min(mn.z, t.first.z)); mx = Vec3(std::max(mx.x, t.first.x), std::max(mx.y, t.first.y), std::max(mx.z, t.first.z)); }
+      Vec3 cc = (mn + mx) * 0.5f, ext = (mx - mn) * 0.5f;
+      int fill = (int)tips.size();
+      for (int c = 0; c < fill; c++) {
+        Vec3 u(R.r(-1, 1), R.r(-1, 1), R.r(-1, 1));
+        if (u.length() > 1) u = u.normalized() * R.f();
+        Vec3 base = cc + Vec3(u.x * ext.x, u.y * ext.y, u.z * ext.z) * 0.85f;
+        Vec3 radial = base - crownC; radial.y *= 0.4f;
+        radial = radial.length() > 0.01f ? radial.normalized() : Vec3(1, 0, 0);
+        Vec3 up = (radial * 0.6f + Vec3(0, 0.8f, 0) + Vec3(R.r(-0.3f, 0.3f), 0, R.r(-0.3f, 0.3f))).normalized();
+        Vec3 side = rotAxis(anyPerp(up), up, R.r(0, TAU));
+        float sz = S.cardSize * R.r(0.75f, 1.05f) * 0.75f;
+        base = base - up * (sz * 0.4f);
+        Vec3 nn = ((base - crownC).normalized() + Vec3(0, 0.6f, 0)).normalized();
+        float ao = 0.5f + 0.35f * std::min(1.0f, (base - crownC).length() / crownR);
+        uint32_t k = (uint32_t)leaf.v.size();
+        float hw = sz * 0.5f;
+        leaf.vert(base - side * hw, nn, 0, 1, ao);
+        leaf.vert(base + side * hw, nn, 1, 1, ao);
+        leaf.vert(base + side * hw + up * sz, nn, 1, 0, ao);
+        leaf.vert(base - side * hw + up * sz, nn, 0, 0, ao);
+        leaf.idx.insert(leaf.idx.end(), {k, k + 1, k + 2, k, k + 2, k + 3});
+      }
+    }
     // underside canopy: near-horizontal cluster cards below each tip so the crown reads full from beneath
     for (auto& t : tips) {
       for (int c = 0; c < 2; c++) {
@@ -1184,6 +1228,7 @@ Built growTree(TreeSp sp, uint32_t seed, bool indiv) {
       }
     }
   }
+  if (!indiv) sortOuterFirst(leaf, crownC);
   return {bark.data(), leaf.data()};
 }
 
@@ -1660,6 +1705,7 @@ void buildProcTrees() {
   auto files = procTreeFiles();
   long long totalTris = 0;
   for (int s = 0; s < T_COUNT; s++) {
+    platform::pumpLoad();
     TreeSp sp = (TreeSp)s;
     int N = 512;
     const char* leafPhoto[T_COUNT] = {"textures/leaf_broad.png", "textures/leaf_broad2.png", "textures/leaf_birch.png", "textures/leaf_cedar.png", "textures/leaf_broad.png"};
@@ -1707,7 +1753,8 @@ void buildProcTrees() {
         for (int dy = 0; dy < 2; dy++) for (int dx = 0; dx < 2; dx++) m = std::max(m, (int)rgba[(((size_t)(y * 2 + dy) * N) + x * 2 + dx) * 4 + 3]);
         alpha[(size_t)y * 256 + x] = (uint8_t)m;
       }
-    MeshData lodSrc = B.leaves;
+    // mid-distance version skips the interior fill clusters: you can't see inside a far crown
+    MeshData lodSrc = sp != T_CEDAR ? growTree(sp, 7771 + s * 131, false, false).leaves : B.leaves;
     int dropped = 0;
     trimCards(B.leaves, alpha, 256, 256, dropped);
     if (texW) {
@@ -1728,6 +1775,7 @@ void buildProcTrees() {
       AssetPart ap;
       ap.mesh = uploadMesh(md);
       MeshData ld = part == 0 ? makeLod(md, false, false) : makeLod(lodSrc, true, false);
+      if (part == 1 && !ld.idx.empty()) { int dr = 0; trimCards(ld, alpha, 256, 256, dr); }  // trim mid cards to the leaf area too: far less wasted overdraw
       if (texW && part == 1) { MeshData t = ld; for (int i = 0; i < t.vertexCount; i++) { VtxGlb* v = reinterpret_cast<VtxGlb*>(t.verts.data()) + i; v->uv[0] = floatToHalf(halfToFloatA(v->uv[0]) * 0.5f + 0.5f); } ld = t; }
       if (!ld.idx.empty()) ap.lod = uploadMesh(ld);
       ap.mat.name = part == 0 ? "bark_" + std::to_string(s) : matLeaf[s];
@@ -1817,18 +1865,16 @@ void buildProcTrees() {
     const char* petalFiles[5] = {"Flower Petal.glb", "Flower Petal-LqvxG9OBOU.glb", "Flower Petal-eVE0j49ux9.glb", "Flower Petal-niuBUEJdvM.glb", "Flower Petal-tzG4JcqYWs.glb"};
     const char* petalCol[5] = {"f4c542", "e85d8a", "f2f0ea", "e8763a", "b46ad8"};
     for (int i = 0; i < 5; i++) {
-      // loose offering petals lying on the ground: 4 big petals, each two quads with the tip curling up
+      // offering flower heads laid on the ground: whole blooms, no stems or leaves (marigold/rose-like clusters)
       PRng R(60 + i);
       PartsGeo P;
-      for (int k = 0; k < 4; k++) {
-        float a = R.r(0, TAU), r = R.r(0.1f, 0.55f), L = R.r(0.6f, 0.8f), W = L * R.r(0.55f, 0.7f);
-        Vec3 c(std::cos(a) * r, 0.015f + k * 0.004f, std::sin(a) * r);
-        float h = R.r(0, TAU);
-        Vec3 d(std::cos(h), 0, std::sin(h)), side(-d.z, 0, d.x);
-        uint32_t col = packCol(Color::hex(petalCol[(i + (k == 3)) % 5]), R.r(0.85f, 1.05f));
-        Vec3 tip = (d + Vec3(0, 0.45f, 0)).normalized();
-        P.quad(c, d, side, L * 0.55f, W, Vec3(0, 1, 0), 0.0f, 0.5f, 0.25f, 0.5f, col, col);
-        P.quad(c + d * L * 0.55f, tip, side, L * 0.45f, W, tip.cross(side).normalized().y < 0 ? tip.cross(side).normalized() * -1.0f : tip.cross(side).normalized(), 0.0f, 0.5f, 0.0f, 0.25f, col, col);
+      bool daisy = i == 2;
+      for (int k = 0; k < 3; k++) {
+        float a = R.r(0, TAU), r = k == 0 ? 0.0f : R.r(0.12f, 0.24f);
+        Vec3 c(std::cos(a) * r, 0.03f + k * 0.005f, std::sin(a) * r);
+        int petals = daisy ? 14 : 6 + (i + k) % 4;
+        float sz = R.r(0.85f, 1.15f);
+        P.bloom(c, petals, (daisy ? 0.11f : 0.1f) * sz, (daisy ? 0.035f : 0.08f) * sz, daisy ? 0.1f : 0.5f, Color::hex(petalCol[(i + (k == 2)) % 5]), Color::hex(daisy ? "f0c020" : "7a3a14"), 0.03f * sz, R);
       }
       addAsset(petalFiles[i], {{P.g.data(), pm("flower_petal", SeasonKind::Flower)}}, true, nullptr);
     }

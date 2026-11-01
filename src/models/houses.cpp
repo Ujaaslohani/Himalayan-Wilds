@@ -451,6 +451,7 @@ Out decor(StructureKind kind, const Look& L) {
 struct Entry {
   Mesh mesh;
   BuiltModel model;
+  MeshData data;  // CPU copy: lets the village merge all buildings into one mesh
 };
 
 std::map<std::string, std::unique_ptr<Entry>> g_cache;
@@ -477,7 +478,9 @@ const BuiltModel& structureModel(StructureKind kind, const Look& L) {
         : kind == SK_FOOD_STORE ? foodStore(L)
         : decor(kind, L);
   auto e = std::make_unique<Entry>();
-  e->mesh = uploadMesh(o.s.build(false));
+  e->data = o.s.build(false);
+  e->mesh = uploadMesh(e->data);
+  e->model.data = &e->data;
   e->model.mesh = &e->mesh;
   e->model.lights = o.lights;
   e->model.door = o.door;

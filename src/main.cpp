@@ -1,3 +1,8 @@
+#include "game/events.h"
+#include "game/relics.h"
+#include "core/crashlog.h"
+#include "core/version.h"
+#include <atomic>
 #include <algorithm>
 #include <map>
 #include "platform/platform.h"
@@ -48,6 +53,7 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #include <fstream>
 #endif
 
+namespace platform { void (*loadPump)() = nullptr; }
 namespace {
 
 struct SceneTarget {
@@ -204,19 +210,70 @@ std::string timestampName() {
   return platform::saveDir() + "/" + b;
 }
 
-void loadingFrame(const char* msg) {
+const char* g_loadMsg = "";
+float g_loadFrac = 0;
+void loadingFrame(const char* msg, float frac = -1) {
+  if (msg) g_loadMsg = msg;
+  if (frac >= 0) g_loadFrac = frac;
   int W = platform::width(), H = platform::height();
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glViewport(0, 0, W, H);
+  glDisable(GL_DEPTH_TEST);
   glClearColor(0.05f, 0.04f, 0.035f, 1);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   float s = std::max(1.0f, H / 820.0f) * g_settings.uiScale;
   ui::begin(W, H, s);
   float w = ui::width(), h = ui::height();
   ui::text("HIMALAYAN WILDS", w / 2, h / 2 - 20, 40, ui::rgba("#fbbf24"), ui::SERIF, 1);
-  ui::text(msg, w / 2, h / 2 + 30, 14, ui::rgba("#a8a29e"), ui::SANS, 1);
+  ui::text(g_loadMsg, w / 2, h / 2 + 30, 14, ui::rgba("#a8a29e"), ui::SANS, 1);
+  float bw = std::min(420.0f, w * 0.5f);
+  ui::rect({w / 2 - bw / 2, h / 2 + 52, bw, 6}, ui::rgba("#292524"), 3);
+  ui::rect({w / 2 - bw / 2, h / 2 + 52, bw * clampf(g_loadFrac, 0, 1), 6}, ui::rgba("#fbbf24"), 3);
+  // moving dot: shows the game is alive even inside a long step
+  float ph = (float)std::fmod(platform::time() * 0.8, 1.0);
+  ui::rect({w / 2 - bw / 2 + (bw - 24) * ph, h / 2 + 62, 24, 3}, ui::rgba("#78716c"), 2);
   ui::end();
   platform::swap();
   platform::pollEvents();
+  glEnable(GL_DEPTH_TEST);
+}
+// called from inside long load steps: redraw the loading screen at most ~20 times a second
+void pumpLoading() {
+  static double last = 0;
+  double t = platform::time();
+  if (t - last < 0.05) return;
+  last = t;
+  // may be called in the middle of off-screen GL work (bake, impostor capture): save and restore the GL state it touches
+  GLint fbo = 0, rfbo = 0, vp[4], prog = 0, vao = 0, active = 0, tex[8], arr = 0;
+  GLboolean depth = glIsEnabled(GL_DEPTH_TEST), blend = glIsEnabled(GL_BLEND), scis = glIsEnabled(GL_SCISSOR_TEST), cull = glIsEnabled(GL_CULL_FACE), dmask = GL_TRUE;
+  GLint bsrc = 0, bdst = 0;
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fbo);
+  glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &rfbo);
+  glGetIntegerv(GL_VIEWPORT, vp);
+  glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
+  glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+  glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &arr);
+  glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
+  glGetBooleanv(GL_DEPTH_WRITEMASK, &dmask);
+  glGetIntegerv(GL_BLEND_SRC_ALPHA, &bsrc);
+  glGetIntegerv(GL_BLEND_DST_ALPHA, &bdst);
+  for (int i = 0; i < 8; i++) { glActiveTexture(GL_TEXTURE0 + i); glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex[i]); }
+  glDisable(GL_SCISSOR_TEST);
+  loadingFrame(nullptr);
+  for (int i = 0; i < 8; i++) { glActiveTexture(GL_TEXTURE0 + i); glBindTexture(GL_TEXTURE_2D, (GLuint)tex[i]); }
+  glActiveTexture((GLenum)active);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)fbo);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)rfbo);
+  glViewport(vp[0], vp[1], vp[2], vp[3]);
+  glUseProgram((GLuint)prog);
+  glBindVertexArray((GLuint)vao);
+  glBindBuffer(GL_ARRAY_BUFFER, (GLuint)arr);
+  depth ? glEnable(GL_DEPTH_TEST) : glDisable(GL_DEPTH_TEST);
+  blend ? glEnable(GL_BLEND) : glDisable(GL_BLEND);
+  scis ? glEnable(GL_SCISSOR_TEST) : glDisable(GL_SCISSOR_TEST);
+  cull ? glEnable(GL_CULL_FACE) : glDisable(GL_CULL_FACE);
+  glDepthMask(dmask);
+  glBlendFunc((GLenum)bsrc, (GLenum)bdst);
 }
 
 bool g_prof = false;
@@ -311,6 +368,97 @@ void drawShadows() {
 
 GLuint g_sunDepth = 0;
 SceneTarget* g_scene = nullptr;
+// ---- quarter-resolution SSAO: soft contact shadows in creases, under canopies and where objects meet the ground ----
+struct AOTarget { GLuint fbo = 0, tex = 0; int w = 0, h = 0; } g_ao;
+void ssaoPass() {
+  SceneTarget* sc = g_scene;
+  if (!sc || !sc->fbo || std::getenv("HW_NOAO")) return;
+  GLint cur = 0;
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &cur);
+  if ((GLuint)cur != sc->drawFbo()) return;  // only when the world is rendered into the scene target
+  int w = std::max(1, sc->w / 2), h = std::max(1, sc->h / 2);  // half res each way = quarter of the pixels
+  if (g_ao.w != w || g_ao.h != h) {
+    if (g_ao.fbo) { glDeleteFramebuffers(1, &g_ao.fbo); glDeleteTextures(1, &g_ao.tex); }
+    glGenTextures(1, &g_ao.tex);
+    glBindTexture(GL_TEXTURE_2D, g_ao.tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glGenFramebuffers(1, &g_ao.fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_ao.fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_ao.tex, 0);
+    g_ao.w = w; g_ao.h = h;
+  }
+  sc->resolve(GL_DEPTH_BUFFER_BIT);
+  static const char* VS = "out vec2 v_uv;\nvoid main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); v_uv = p; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }\n";
+  static const char* AO_FS = R"(in vec2 v_uv;
+uniform sampler2D u_depth;
+uniform vec2 u_nf;
+uniform float u_tanY;
+uniform float u_aspect;
+out vec4 o;
+float lin(float d){ return u_nf.x * u_nf.y / (u_nf.y - d * (u_nf.y - u_nf.x)); }
+void main(){
+  float d = texture(u_depth, v_uv).r;
+  if (d >= 0.99999) { o = vec4(1.0); return; }
+  float z = lin(d);
+  if (z > 70.0) { o = vec4(1.0); return; }
+  float r = 0.9 / (z * u_tanY * 2.0);           // ~0.9 m world radius in screen space
+  float ang = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.55) * 6.2831;
+  float occ = 0.0;
+  for (int i = 0; i < 8; i++) {
+    float a = ang + float(i) * 2.39996, rr = r * sqrt((float(i) + 0.5) / 8.0);
+    vec2 uv = v_uv + vec2(cos(a) / u_aspect, sin(a)) * rr;
+    float zs = lin(texture(u_depth, uv).r);
+    float dz = z - zs;
+    occ += smoothstep(0.04, 0.25, dz) * (1.0 - smoothstep(0.9, 2.2, dz));
+  }
+  float ao = 1.0 - occ / 8.0 * 0.85;
+  o = vec4(mix(ao, 1.0, smoothstep(45.0, 70.0, z)));
+}
+)";
+  static const char* MUL_FS = R"(in vec2 v_uv;
+uniform sampler2D u_ao;
+uniform vec2 u_px;
+out vec4 o;
+void main(){
+  float a = texture(u_ao, v_uv).r * 0.4;
+  a += texture(u_ao, v_uv + vec2(u_px.x, 0.0)).r * 0.15 + texture(u_ao, v_uv - vec2(u_px.x, 0.0)).r * 0.15;
+  a += texture(u_ao, v_uv + vec2(0.0, u_px.y)).r * 0.15 + texture(u_ao, v_uv - vec2(0.0, u_px.y)).r * 0.15;
+  o = vec4(vec3(a), 1.0);
+}
+)";
+  GLint vp[4];
+  glGetIntegerv(GL_VIEWPORT, vp);
+  glBindFramebuffer(GL_FRAMEBUFFER, g_ao.fbo);
+  glViewport(0, 0, w, h);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  Shader& a = render::program("ssao", VS, AO_FS);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, sc->depth);
+  a.set1i("u_depth", 0);
+  a.set2f("u_nf", render::cam.nearZ, render::cam.farZ);
+  a.set1f("u_tanY", 1.0f / std::max(1e-3f, render::cam.proj.at(1, 1)));
+  a.set1f("u_aspect", (float)sc->w / std::max(1, sc->h));
+  render::drawFullscreen();
+  glBindFramebuffer(GL_FRAMEBUFFER, sc->drawFbo());
+  glViewport(vp[0], vp[1], vp[2], vp[3]);
+  Shader& m = render::program("ssaomul", VS, MUL_FS);
+  glBindTexture(GL_TEXTURE_2D, g_ao.tex);
+  m.set1i("u_ao", 0);
+  m.set2f("u_px", 1.0f / w, 1.0f / h);
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_DST_COLOR, GL_ZERO);
+  render::drawFullscreen();
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glDisable(GL_BLEND);
+  glEnable(GL_DEPTH_TEST);
+  glDepthMask(GL_TRUE);
+}
 int g_sunW = 0, g_sunH = 0;
 void drawWorld(float dt, bool viewModel) {
   fx::beginFrame();
@@ -323,6 +471,8 @@ void drawWorld(float dt, bool viewModel) {
   PROF(grass::draw());
   PROF(forest::drawOpaque());
   PROF(props::draw());
+  PROF(relics::draw());
+  PROF(events::drawCaravan());
   PROF(buildings::draw());
   PROF(village::drawStructures());
   PROF(village::drawResidents());
@@ -358,6 +508,8 @@ int main(int argc, char** argv) {
   timeBeginPeriod(1);
 #endif
   if (!platform::init(argc, argv)) return 1;
+  crashlog::init(platform::saveDir());
+  crashlog::note(std::string(HW_VERSION_FULL) + " started on " + (const char*)glGetString(GL_RENDERER));
   gfx::init();
   render::init();
   fonts::init();
@@ -368,10 +520,17 @@ int main(int argc, char** argv) {
 
   auto mem = [](const char* tag) { if (platform::hasArg("--memlog")) std::printf("[mem] %-12s %.0f MB  t=%.2fs\n", tag, rssMB(), platform::time()); };
   mem("gl+ui");
-  loadingFrame("Shaping the valley...");
-  world::generate();
+  platform::loadPump = pumpLoading;
+  loadingFrame("Shaping the valley...", 0.02f);
+  {
+    // terrain generation is pure CPU: run it on a worker while the window keeps redrawing
+    std::atomic<bool> done{false};
+    std::thread gen([&] { world::generate(); done = true; });
+    while (!done) { pumpLoading(); std::this_thread::sleep_for(std::chrono::milliseconds(15)); }
+    gen.join();
+  }
   mem("terrain");
-  loadingFrame("Loading forests...");
+  loadingFrame("Growing the forests...", 0.25f);
   std::vector<AssetRequest> reqs = forest::requiredFiles();
   for (auto& f : resources::requiredFiles()) {
     bool have = false;
@@ -387,14 +546,20 @@ int main(int argc, char** argv) {
   for (auto& m : assets::missing()) std::fprintf(stderr, "missing asset: %s (place it in assets/models)\n", m.c_str());
 
   mem("assets");
-  loadingFrame("Raising the village...");
+  loadingFrame("Painting the ground...", 0.45f);
   terrain_render::init();
+  loadingFrame("Filling the rivers...", 0.5f);
   water::init();
   sky::init();
+  loadingFrame("Planting the forest...", 0.55f);
   forest::init();
+  loadingFrame("Growing the grass...", 0.65f);
   grass::init();
   fx::init();
   props::init();
+  loadingFrame("Drawing the map...", 0.68f);
+  screens::prebuildMap();
+  loadingFrame("Raising the village...", 0.7f);
   resources::initRender();
   wildlife::initRender();
   npcs::initRender();
@@ -419,6 +584,8 @@ int main(int argc, char** argv) {
         {20, "season", [=] { screens::setTitlePage(1); }},
         {30, "", [=] { screens::setTitlePage(0); app::newGame(); }},
         {200, "village", look(0, 14, 0, -0.08f)},
+        {206, "summertrees", [=] { restoreSeason(1, 2, 12.0f); forest::seasonJumped(); E.time = 12.0f; E.cutscene.dur = 0; look(68.6f, -39.1f, 3.6f, -0.02f)(); }},
+        {205, "res", [=] { A.tab = Tab::None; A.population = 12; village::syncResidents(); E.cutscene.dur = 0; restoreSeason(1, 2, 11.0f); E.time = 11.0f; look(0, 44, 0.0f, -0.1f)(); }},
         {260, "forest", look(40, -60, 2.2f, -0.05f)},
         {262, "sun", [=] { E.time = 9.5f; float ang = (9.5f - 6) / 24 * TAU; Vec3 sd = Vec3(std::cos(ang), std::sin(ang), -0.32f).normalized(); look(4, 18, std::atan2(-sd.x, -sd.z), std::asin(sd.y) * 0.85f)(); }},
         {270, "sun2", [=] {}},
@@ -474,6 +641,13 @@ int main(int argc, char** argv) {
         {575, "", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 58.0f, z = tz; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.12f)(); }},
         {589, "sw58", [=] {}},
         {306, "fdusk2", [=] {}},
+        {920, "caravan", [=] { Structure st; st.uid = 9001; st.kind = SK_MARKET_STALL; st.x = 4; st.z = 3; st.y = world::getTerrainHeight(4, 3); st.rot = 0; st.look = app::defaultLookFor(SK_MARKET_STALL); A.structures.push_back(st); village::structuresChanged(); events::restore(0, 0); look(0, 14, 0, -0.08f)(); }},
+        {925, "photo", [=] { E.photo = true; E.photoStart = true; }},
+        {930, "blizzard", [=] { E.photo = false; putenv((char*)"HW_BLIZZARD=1"); restoreSeason(3, 2, 13.0f); E.time = 13.0f; look(-30, 50, 0.6f, -0.04f)(); }},
+        {910, "relic", [=] { restoreSeason(1, 2, 16.5f); E.time = 16.5f; E.cutscene.dur = 0; for (int i = 0; i < 20; i++) { float a, b, c; relics::position(i, a, b, c); } float x, y, z; if (relics::position(0, x, y, z)) { float px = x + 3.0f, pz = z + 1.5f; look(px, pz, std::atan2(-(x - px), -(z - pz)), -0.3f)(); } }},
+        {915, "relic2", [=] { float x, y, z; if (relics::position(4, x, y, z)) { float px = x + 3.0f, pz = z + 1.5f; look(px, pz, std::atan2(-(x - px), -(z - pz)), -0.3f)(); } }},
+        {900, "fprof", [=] { restoreSeason(1, 2, 11.0f); E.time = 11.0f; E.cutscene.dur = 0; look(40, -60, 2.2f, -0.05f)(); g_profMs.clear(); g_profTri.clear(); g_profDraw.clear(); g_prof = platform::hasArg("--prof"); }},
+        {930, "fprof2", [=] { if (g_prof) { for (auto& kv : g_profMs) std::printf("prof %8.1f ms %9lld tri %5lld draws  %s\n", kv.second, g_profTri[kv.first], g_profDraw[kv.first], kv.first.c_str()); } g_prof = false; }},
         {308, "fnight", [=] { restoreSeason(0, 2, 20.6f); E.time = 20.6f; std::vector<float> t; forest::nearTrees(40, -60, 60, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 9, z = tz + 2; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.25f)(); }},
         {320, "fnight2", [=] {}},
 
@@ -510,6 +684,20 @@ int main(int argc, char** argv) {
         {836, "victory", [=] { A.tab = Tab::None; A.status = Status::Victory; }},
         {960, "end", [=] {}},
     };
+    {
+      // colour-grade comparison set: each season x morning/evening/night from the same viewpoint
+      const char* sn[4] = {"spring", "summer", "autumn", "winter"};
+      const char* tn[3] = {"morning", "evening", "night"};
+      const float tv[3] = {8.0f, 18.0f, 22.0f};
+      std::vector<Shot> g;
+      for (int si = 0; si < 4; si++)
+        for (int ti = 0; ti < 3; ti++) {
+          float tt = tv[ti];
+          int ss = si;
+          g.push_back({0, std::string("g_") + sn[si] + "_" + tn[ti], [=] { restoreSeason(ss, 3, tt); E.time = tt; look(-6, 30, 0.35f, -0.03f)(); }});
+        }
+      shots.insert(shots.end() - 1, g.begin(), g.end());
+    }
     std::string only = platform::argValue("--shots");
     if (!only.empty()) {
       std::vector<Shot> keep;
@@ -543,6 +731,48 @@ int main(int argc, char** argv) {
   g_scene = &scene;
   float renderScale = g_settings.renderScale;
 
+  // shader warm-up: draw the world once from a few spots (and seasons) during loading so every shader variant
+  // is compiled now instead of hitching the first time it appears in play
+  if (!test && !std::getenv("HW_NOWARM")) {
+    loadingFrame("Preparing shaders...", 0.8f);
+    Vec3 savePos = E.player.pos;
+    float saveYaw = E.player.yaw, savePitch = E.player.pitch;
+    int W = std::max(1, platform::width()), H = std::max(1, platform::height());
+    scene.ensure(W, H);
+    struct Spot { float x, z, yaw; };
+    sky::warmPrograms();
+    grass::setPreload(true);
+    Spot spots[5] = {{savePos.x, savePos.z, saveYaw}, {0, 14, 0}, {40, -60, 2.2f}, {world::SHRINES.empty() ? 0 : world::SHRINES[0].x - 20, world::SHRINES.empty() ? 0 : world::SHRINES[0].z, 1.57f}, {-6, 30, 0.35f}};
+    for (auto& sp : spots) {
+      E.player.pos = {sp.x, world::getTerrainHeight(sp.x, sp.z) + 1.7f, sp.z};
+      E.player.yaw = sp.yaw;
+      E.player.pitch = -0.05f;
+      player::updateCamera((float)W / H);
+      sky::update(0.016f);
+      render::uploadFrame();
+      forest::update(render::cam.pos, render::cam.forward());
+      glBindFramebuffer(GL_FRAMEBUFFER, scene.drawFbo());
+      glViewport(0, 0, scene.w, scene.h);
+      drawWorld(0.016f, false);
+      glFinish();
+      pumpLoading();
+      // second pass at night: compiles lamp/glow/firefly paths too
+      float t0 = E.time;
+      E.time = 22.0f; sky::update(0.016f); render::uploadFrame();
+      drawWorld(0.016f, false);
+      glFinish();
+      E.time = t0;
+    }
+    grass::setPreload(false);
+    sky::update(0.016f);
+    // let the forest worker finish building the cells around the start position before play begins
+    for (int i = 0; i < 40; i++) { player::updateCamera((float)W / H); forest::update(savePos, render::cam.forward()); pumpLoading(); std::this_thread::sleep_for(std::chrono::milliseconds(10)); }
+    loadingFrame("Ready", 1.0f);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    E.player.pos = savePos; E.player.yaw = saveYaw; E.player.pitch = savePitch;
+  }
+
+  platform::loadPump = nullptr;  // loading over: no more mid-step redraws
   while (!platform::shouldClose()) {
     platform::pollEvents();
     double t = platform::time();
@@ -555,7 +785,7 @@ int main(int argc, char** argv) {
     if (in.pressed[K_F11]) platform::toggleFullscreen();
     if (in.pressed[K_F3]) screens::toggleStats();
     bool takeShot = in.pressed[K_F2];
-    if (in.pressed[K_ESC]) screens::escape();
+    if (in.pressed[K_ESC]) { if (E.photo) E.photo = false; else screens::escape(); }
     else {
       for (int k = 0; k < K_COUNT; k++) {
         if (!in.pressed[k] || k == K_ESC || k == K_F2 || k == K_F3 || k == K_F4 || k == K_F11) continue;
@@ -575,12 +805,12 @@ int main(int argc, char** argv) {
     if (in.mouseReleased[0]) player::onMouseUp(0);
     if (in.mouseReleased[1]) player::onMouseUp(1);
 
-    g_pp.on = screens::statsVisible();
+    g_pp.on = screens::statsVisible() || (g_settings.adaptiveDetail && E.playing);  // timings also drive per-system auto detail
     if (g_pp.on) g_pp.begin();
     forest::profOpen = g_pp.on ? +[](const char* n) { return g_pp.open(n); } : nullptr;
     forest::profClose = g_pp.on ? +[](int i) { g_pp.close(i); } : nullptr;
     // pause menu freezes the world: game time, animals, villagers, wind
-    float simDt = (A.menuOpen && E.playing && !test) ? 0.0f : dt;
+    float simDt = ((A.menuOpen || E.photo) && E.playing && !test) ? 0.0f : dt;
     PROF(player::update(simDt));
     PROF(app::update(simDt));
     updateWind(simDt);
@@ -616,13 +846,17 @@ int main(int argc, char** argv) {
     static int frozenW = 0, frozenH = 0;
     static float frozenRs = 1;
     bool freeze = E.playing && !test && !cut && (A.menuOpen || A.howToOpen || A.tab == Tab::Map || A.tab == Tab::Inventory || A.tab == Tab::Quests);
-    if (!freeze) frozenValid = false;
-    bool skipWorld = freeze && frozenValid && frozenW == W && frozenH == H;
+    // other menus / dialogue: world at half rate; window in the background: world not redrawn at all
+    bool unfocused = !test && !platform::focused();
+    bool halfMenu = E.playing && !test && !cut && !freeze && E.world.placing.empty() && (A.tab != Tab::None || A.dialogue >= 0);
+    bool hold = freeze || unfocused || halfMenu;
+    if (!hold) frozenValid = false;
+    bool skipWorld = hold && frozenValid && frozenW == W && frozenH == H && (freeze || unfocused || (render::frameNo & 1));
     if (!skipWorld && (sky::shadowNeedsUpdate() || sky::shadowStaticDirty())) PROF(drawShadows());
     float rs = clampf(g_settings.adaptiveQuality ? renderScale : g_settings.renderScale, 0.4f, 1.0f);
     if (skipWorld) rs = frozenRs;
     bool sunOn = !cut && sunfx::wanted();
-    bool scaled = rs < 0.99f || g_settings.fxaa || sunOn || freeze;
+    bool scaled = rs < 0.99f || g_settings.fxaa || sunOn || hold;  // full res and no effects: draw straight to the screen, no copy
     if (scaled) {
       scene.ensure(std::max(1, (int)(W * rs)), std::max(1, (int)(H * rs)));
       glBindFramebuffer(GL_FRAMEBUFFER, scene.drawFbo());
@@ -631,8 +865,8 @@ int main(int argc, char** argv) {
     g_sunDepth = scaled && sunOn ? scene.depth : 0;
     g_sunW = scene.w;
     g_sunH = scene.h;
-    if (!skipWorld) drawWorld(dt, E.playing && !E.uiOpen && !cut);
-    if (freeze && !skipWorld) { frozenValid = true; frozenW = W; frozenH = H; frozenRs = rs; }
+    if (!skipWorld) drawWorld(dt, E.playing && !E.uiOpen && !cut && !E.photo);
+    if (hold && !skipWorld) { frozenValid = true; frozenW = W; frozenH = H; frozenRs = rs; }
     if (scaled) {
       if (!skipWorld) scene.resolve(GL_COLOR_BUFFER_BIT);
       glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -642,11 +876,24 @@ int main(int argc, char** argv) {
 uniform sampler2D u_src;
 uniform vec2 u_px;
 uniform int u_fxaa;
+uniform float u_sharp;
+uniform float u_vig;
 out vec4 o;
+float vig(){ vec2 d = (v_uv - 0.5) * vec2(1.6, 1.0); return 1.0 - smoothstep(0.35, 1.05, length(d)) * 0.38 * u_vig; }
 float lum(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
+vec3 sharpen(vec3 c){
+  // contrast-adaptive sharpening: restores crispness lost to the lower render resolution
+  if (u_sharp <= 0.0) return c;
+  vec3 a = texture(u_src, v_uv + vec2(0.0, -u_px.y)).rgb, b = texture(u_src, v_uv + vec2(-u_px.x, 0.0)).rgb;
+  vec3 d = texture(u_src, v_uv + vec2(u_px.x, 0.0)).rgb, e = texture(u_src, v_uv + vec2(0.0, u_px.y)).rgb;
+  vec3 mn = min(c, min(min(a, b), min(d, e))), mx = max(c, max(max(a, b), max(d, e)));
+  vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, 1e-4), 0.0, 1.0));
+  vec3 w = -amp * mix(0.125, 0.2, u_sharp);
+  return clamp((c + (a + b + d + e) * w) / (1.0 + 4.0 * w), 0.0, 1.0);
+}
 void main(){
   vec3 m = texture(u_src, v_uv).rgb;
-  if (u_fxaa == 0) { o = vec4(m, 1.0); return; }
+  if (u_fxaa == 0) { o = vec4(sharpen(m) * vig(), 1.0); return; }
   vec3 nw = texture(u_src, v_uv + vec2(-1.0, -1.0) * u_px).rgb, ne = texture(u_src, v_uv + vec2(1.0, -1.0) * u_px).rgb;
   vec3 sw = texture(u_src, v_uv + vec2(-1.0, 1.0) * u_px).rgb, se = texture(u_src, v_uv + vec2(1.0, 1.0) * u_px).rgb;
   float lNW = lum(nw), lNE = lum(ne), lSW = lum(sw), lSE = lum(se), lM = lum(m);
@@ -658,7 +905,8 @@ void main(){
   vec3 a = 0.5 * (texture(u_src, v_uv + dir * (1.0 / 3.0 - 0.5)).rgb + texture(u_src, v_uv + dir * (2.0 / 3.0 - 0.5)).rgb);
   vec3 b = a * 0.5 + 0.25 * (texture(u_src, v_uv - dir * 0.5).rgb + texture(u_src, v_uv + dir * 0.5).rgb);
   float lB = lum(b);
-  o = vec4((lB < lMin || lB > lMax) ? a : b, 1.0);
+  vec3 f = (lB < lMin || lB > lMax) ? a : b;
+  o = vec4((f + (sharpen(m) - m) * u_sharp * 0.6) * vig(), 1.0);
 }
 )";
       Shader& up = render::program("upscale", UPVS, UPFS);
@@ -669,12 +917,14 @@ void main(){
       up.set1i("u_src", 0);
       up.set2f("u_px", 1.0f / scene.w, 1.0f / scene.h);
       up.set1i("u_fxaa", g_settings.fxaa ? 1 : 0);
+      up.set1f("u_vig", E.playing ? 1.0f : 0.0f);  // vignette folded into this pass: no extra full-screen draw
+      up.set1f("u_sharp", clampf((1.0f - rs) / 0.28f, 0.0f, 1.0f) * 0.4f);
       PROF(render::drawFullscreen());
       glEnable(GL_DEPTH_TEST);
       if (sunOn) PROF(sunfx::composite(W, H));
     }
 
-    if (E.playing) {
+    if (E.playing && !scaled) {  // only when there was no final pass to fold it into
       static const char* VG_VS = "out vec2 v_uv;\nvoid main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); v_uv = p; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }\n";
       static const char* VG_FS = "in vec2 v_uv;\nout vec4 o;\nvoid main(){ vec2 d = (v_uv - 0.5) * vec2(1.6, 1.0); float v = smoothstep(0.35, 1.05, length(d)); o = vec4(vec3(1.0 - v * 0.38), 1.0); }\n";
       render::program("vignette", VG_VS, VG_FS);
@@ -729,9 +979,27 @@ void main(){
     cpuAcc += (platform::time() - t) * 1000;
     if (g_pp.on) g_pp.collect();
     platform::swap();
+    {
+      // frame pacing: never let the CPU queue more than 2 frames ahead of the GPU. Keeps input latency low and frame
+      // times even; the wait only happens when the GPU is the bottleneck, and the CPU sleeps instead of spinning
+      static GLsync fences[2] = {nullptr, nullptr};
+      static int fi = 0;
+      if (fences[fi]) {
+        GLenum r = glClientWaitSync(fences[fi], GL_SYNC_FLUSH_COMMANDS_BIT, 0);
+        double waitStart = platform::time();
+        while (r == GL_TIMEOUT_EXPIRED && platform::time() - waitStart < 0.05) {
+          std::this_thread::sleep_for(std::chrono::microseconds(300));
+          r = glClientWaitSync(fences[fi], 0, 0);
+        }
+        glDeleteSync(fences[fi]);
+      }
+      fences[fi] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+      fi ^= 1;
+    }
     if (!test) {
       bool menu = A.status != Status::Playing || A.menuOpen || A.tab != Tab::None || A.howToOpen;
-      int cap = !platform::focused() ? 15 : menu ? g_settings.menuFps : g_settings.fpsLimit;
+      if (platform::minimized()) std::this_thread::sleep_for(std::chrono::milliseconds(100));  // minimised: nothing to show, idle
+      int cap = !platform::focused() ? 10 : menu ? g_settings.menuFps : g_settings.fpsLimit;
       static int hz = platform::refreshRate();
       if (g_settings.vsync && cap >= hz - 1) cap = 0;
       if (cap > 0) {
@@ -740,7 +1008,8 @@ void main(){
         if (nextT < nowT - frame) nextT = nowT;
         nextT += frame;
         double wait = nextT - platform::time();
-        if (wait > 0.002) std::this_thread::sleep_for(std::chrono::duration<double>(wait - 0.0015));
+        // hybrid wait: sleep in 1 ms slices while far from the deadline, then a short yield-spin for precision
+        while (nextT - platform::time() > 0.0018) std::this_thread::sleep_for(std::chrono::milliseconds(1));
         while (platform::time() < nextT) std::this_thread::yield();
       }
     }
@@ -767,9 +1036,29 @@ void main(){
       { bool exact; float v = vramMB(exact); fs.gpuMB = v >= 0 ? v : (gfx::textureBytes() + gfx::bufferBytes()) / 1048576.0f; fs.vramExact = exact ? 1 : v >= 0 ? 2 : 0; }
       fs.instances = forest::instanceCount();
       screens::setStats(fs);
+      if (g_pp.on && g_pp.frames && g_settings.adaptiveDetail && E.playing && !test) {
+        // per-system auto detail: when over budget, trim whichever system is heaviest right now (trees or grass);
+        // when well under budget, give detail back to whichever was trimmed most
+        auto ms = [&](const char* k) { auto it = g_pp.gAcc.find(k); return it == g_pp.gAcc.end() ? 0.0 : it->second / g_pp.frames; };
+        double tr = ms("forest::drawOpaque()"), gr = ms("grass::draw()");
+        float budget = 1000.0f / std::max(30.0f, (float)platform::refreshRate());
+        static float over = 0, under = 0;
+        if (fs.gpuMs > budget * 0.85f) { over += (float)statT; under = 0; }
+        else if (fs.gpuMs < budget * 0.6f) { under += (float)statT; over = 0; }
+        else over = under = 0;
+        if (over >= 1.0f) {
+          over = 0;
+          if (gr > tr * 0.6 && g_settings.grassAuto > 0.6f) g_settings.grassAuto = std::max(0.6f, g_settings.grassAuto - 0.1f);
+          else if (g_settings.detailScale > 0.45f) { g_settings.detailScale = std::max(0.45f, g_settings.detailScale - 0.1f); forest::markDirty(); }
+        } else if (under >= 4.0f) {
+          under = 0;
+          if (g_settings.grassAuto < 1.0f && g_settings.grassAuto <= g_settings.detailScale) g_settings.grassAuto = std::min(1.0f, g_settings.grassAuto + 0.05f);
+          else if (g_settings.detailScale < 1.0f) { g_settings.detailScale = std::min(1.0f, g_settings.detailScale + 0.05f); forest::markDirty(); }
+        }
+      }
       if (g_pp.on) g_pp.publish();
       lastFs = fs;
-      if (g_settings.adaptiveDetail && !test && E.playing && fs.gpuMs > 0) {
+      if (g_settings.adaptiveDetail && !test && E.playing && fs.gpuMs > 0 && !g_pp.on) {
         static float dSlow = 0, dFast = 0;
         float budget = 1000.0f / (g_settings.fpsLimit > 0 ? std::min(g_settings.fpsLimit, platform::refreshRate()) : platform::refreshRate());
         if (fs.gpuMs > budget * 0.85f) dSlow += (float)statT, dFast = 0;
@@ -784,8 +1073,8 @@ void main(){
         if (fs.gpuMs > budget * 0.78f || fs.fps < (g_settings.fpsLimit > 0 ? g_settings.fpsLimit : 60) * 0.92f) slowT += (float)statT, fastT = 0;
         else if (fs.gpuMs < budget * 0.55f) fastT += (float)statT, slowT = 0;
         bool gpuBound = fs.gpuMs > fs.cpuMs * 0.8f;
-        if (slowT > 2 && gpuBound && renderScale > 0.85f) {
-          renderScale = std::max(0.85f, renderScale - 0.05f);
+        if (slowT > 2 && gpuBound && renderScale > 0.72f) {
+          renderScale = std::max(0.72f, renderScale - 0.05f);
           slowT = 0;
         } else if (slowT > 2 && g_settings.grassRadius > baseGrass * 0.55f) {
           g_settings.grassRadius *= 0.85f;
@@ -811,6 +1100,7 @@ void main(){
     platform::clearFrameInput();
   }
 
+  app::finishSaves();
   app::saveNow();
   audio::shutdown();
   scene.release();
