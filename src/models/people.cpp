@@ -133,7 +133,7 @@ Geo headGeometry(bool female) {
   return g;
 }
 
-void face(Shape& h, const Outfit& o, bool female) {
+void face(Shape& h, const Outfit& o, bool female, bool grim = false) {
   const char* lid = o.skin;
   const char* lip = female ? "#b55a4f" : "#9c5a48";
   Geo head = headGeometry(female);
@@ -164,19 +164,20 @@ void face(Shape& h, const Outfit& o, bool female) {
         .ball("#7a5232", {x, 0.157f, 0.1335f}, {0.0075f, 0.0075f, 0.003f}, Z0, 2)
         .ball("#0b0705", {x, 0.158f, 0.135f}, {0.0045f, 0.0045f, 0.002f}, Z0, 2)
         .ball("#ffffff", {x + sx * 0.0035f, 0.1625f, 0.1365f}, {0.0024f, 0.0024f, 0.001f}, Z0, 1)
-        .ball(lid, {x, 0.1745f, 0.122f}, {0.026f, 0.0068f, 0.012f}, Z0, 2)
+        .ball(lid, {x, grim ? 0.1685f : 0.1745f, 0.122f}, {0.026f, grim ? 0.0095f : 0.0068f, 0.012f}, Z0, 2)  // grim: heavy lids, narrowed glare
         .ball(lid, {x, 0.1455f, 0.1235f}, {0.024f, 0.0055f, 0.0105f}, Z0, 2)
         .box("#1a100b", {x, 0.1685f, 0.1335f}, {0.044f, 0.0022f, 0.003f}, {0, 0, sx * 0.05f});
     float bx0 = sx * 0.02f, bx1 = sx * 0.046f, bx2 = sx * 0.068f;
-    float by0 = 0.1855f, by1 = 0.1935f, by2 = 0.188f;
-    h.rod(o.hair, {bx0, by0, surf(bx0, by0) + 0.003f}, {bx1, by1, surf(bx1, by1) + 0.003f}, 0.0042f, 0.0038f, 5)
-        .rod(o.hair, {bx1, by1, surf(bx1, by1) + 0.003f}, {bx2, by2, surf(bx2, by2) + 0.002f}, 0.0038f, 0.0022f, 5);
+    float by0 = grim ? 0.176f : 0.1855f, by1 = grim ? 0.186f : 0.1935f, by2 = grim ? 0.191f : 0.188f;  // grim: brows pulled down at the centre
+    float bw = grim ? 1.5f : 1.0f;
+    h.rod(o.hair, {bx0, by0, surf(bx0, by0) + 0.003f}, {bx1, by1, surf(bx1, by1) + 0.003f}, 0.0042f * bw, 0.0038f * bw, 5)
+        .rod(o.hair, {bx1, by1, surf(bx1, by1) + 0.003f}, {bx2, by2, surf(bx2, by2) + 0.002f}, 0.0038f * bw, 0.0022f * bw, 5);
     if (female) h.box("#0b0705", {x + sx * 0.024f, 0.1705f, 0.13f}, {0.012f, 0.0022f, 0.003f}, {0, 0, sx * 0.5f});
     float cx = sx * 0.06f, cy = 0.114f;
     if (female) h.add(circleGeo(0.016f, 14), "#d99482", {cx, cy, surf(cx, cy) + 0.0012f}, {0, sx * 0.45f, 0});
   }
   const int N = 8;
-  const float W = female ? 0.025f : 0.027f, LIFT = 0.009f;
+  const float W = female ? 0.025f : 0.027f, LIFT = grim ? -0.005f : 0.009f;  // grim: flat, down-turned mouth
   auto at = [&](float t, float base, float curve) {
     float x = (t * 2 - 1) * W;
     float y = base + curve * (x / W) * (x / W);
@@ -393,6 +394,10 @@ Mesh finish(Shape& s, void (*fn)(Shape&)) {
 }
 
 std::map<std::string, std::unique_ptr<PersonModel>> g_people;
+std::unique_ptr<PersonModel> g_bandit;
+Mesh g_bow;
+// bandits: the villagers' body, but in dark, worn clothes; the give-away is the blood-red cloth over the lower face
+const Outfit OUT_BANDIT{"#2b2622", "#151312", "#5a1f1a", "#3b2418", "#3a332d", "#7f1d1d", "#1a1714", {"#5a1f1a", "#44403c", "#1c1917"}, "#a8785a", "#0f0b09", "#3b3028", "#1a1410", false, "#0f0b09"};
 std::unique_ptr<ResidentKit> g_kit;
 
 }  // namespace
@@ -432,6 +437,64 @@ const PersonModel& person(const std::string& role) {
   return r;
 }
 
+const PersonModel& bandit() {
+  if (g_bandit) return *g_bandit;
+  const Outfit& o = OUT_BANDIT;
+  Shape t;
+  torsoMale(t, o);
+  shawl(t, o);
+  neck(t, o);
+  // quiver on the back with a strap across the chest
+  t.tube("#3b2418", {0.12f, 1.08f, -0.24f}, 0.065f, 0.055f, 0.55f, 9, {0.25f, 0, -0.35f})
+      .tube("#1c1410", {0.06f, 1.33f, -0.21f}, 0.068f, 0.068f, 0.03f, 9, {0.25f, 0, -0.35f})
+      .cone("#57534e", {0.21f, 1.42f, -0.29f}, 0.04f, 0.12f, 4, {0.25f, 0, -0.35f})
+      .cone("#1c1917", {0.17f, 1.4f, -0.26f}, 0.03f, 0.1f, 4, {0.25f, 0, -0.35f})
+      .cone("#57534e", {0.25f, 1.38f, -0.3f}, 0.035f, 0.11f, 4, {0.25f, 0, -0.35f})
+      .rod("#1c1410", {0.17f, 1.3f, 0.2f}, {-0.2f, 0.82f, 0.24f}, 0.016f, 0.016f, 6)
+      .rod("#1c1410", {0.17f, 1.3f, -0.2f}, {-0.2f, 0.82f, -0.24f}, 0.016f, 0.016f, 6)
+      .box("#6b7280", {-0.2f, 0.78f, 0.16f}, {0.03f, 0.2f, 0.05f}, {0.1f, 0, 0.15f});  // knife at the belt
+  Shape h;
+  face(h, o, false, true);
+  whiskers(h, o.beard, false);
+  // dark hood
+  h.ball("#1a1714", {0, 0.195f, -0.03f}, {0.142f, 0.152f, 0.142f}, Z0, 1)
+      .ball("#1a1714", {0, 0.12f, -0.1f}, {0.13f, 0.13f, 0.08f}, Z0, 1)
+      .tube("#2b2622", {0, 0.258f, 0.012f}, 0.147f, 0.147f, 0.03f, 14, {0.25f, 0, 0});
+  // blood-red face cloth over nose, mouth and chin, knotted at the back
+  h.ball("#7f1d1d", {0, 0.072f, 0.03f}, {0.128f, 0.072f, 0.118f}, Z0, 2)
+      .box("#7f1d1d", {0, 0.128f, 0.105f}, {0.17f, 0.012f, 0.06f})
+      .ball("#5a1414", {0, 0.1f, -0.125f}, {0.03f, 0.028f, 0.025f}, Z0, 0)
+      .box("#7f1d1d", {0.02f, 0.03f, -0.14f}, {0.04f, 0.12f, 0.015f}, {0.2f, 0, 0.2f})
+      .box("#7f1d1d", {-0.02f, 0.02f, -0.14f}, {0.04f, 0.14f, 0.015f}, {0.2f, 0, -0.15f});
+  g_bandit = std::make_unique<PersonModel>();
+  g_bandit->torso = finish(t, shapeTorso);
+  g_bandit->head = finish(h, shapeHead);
+  Shape arm = sleeve(o.coat, o.trim, o.skin);
+  g_bandit->arm = finish(arm, shapeArm);
+  Shape leg = legGeo(o.trousers, o.shoe, o.sash, true);
+  g_bandit->leg = finish(leg, shapeLeg);
+  return *g_bandit;
+}
+
+const Mesh& banditBow() {
+  if (g_bow.valid()) return g_bow;
+  // recurve bow in the left arm's space (after shapeArm): grip in the hand, limbs along the arm's z (vertical when
+  // the arm is raised forward), tips curving back toward the archer (+y), string straight between the tips
+  Shape b;
+  const V grip{0, -0.672f, 0.078f};
+  auto P = [&](float a) { return V{0, grip.y + 0.16f * (1 - std::cos(a)) - 0.03f * std::sin(std::fabs(a) * 2.2f), grip.z + 0.56f * std::sin(a)}; };
+  const int N = 10;
+  for (int i = 0; i < N; i++) {
+    float a0 = -1.0f + 2.0f * i / N, a1 = -1.0f + 2.0f * (i + 1) / N;
+    float r0 = 0.017f - 0.008f * std::fabs(a0), r1 = 0.017f - 0.008f * std::fabs(a1);
+    b.rod("#4a2a17", P(a0), P(a1), r0, r1, 5);
+  }
+  b.tube("#1c1410", grip, 0.022f, 0.022f, 0.1f, 7, {PI / 2, 0, 0});
+  b.rod("#d6d3d1", P(-1.0f), P(1.0f), 0.0035f, 0.0035f, 3);
+  g_bow = uploadMesh(b.build(true));
+  return g_bow;
+}
+
 const ResidentKit& residentKit() {
   if (g_kit) return *g_kit;
   const char* W = "#ffffff";
@@ -463,6 +526,8 @@ const ResidentKit& residentKit() {
 void shutdown() {
   for (auto& p : g_people) { p.second->torso.destroy(); p.second->head.destroy(); p.second->arm.destroy(); p.second->leg.destroy(); }
   g_people.clear();
+  if (g_bandit) { g_bandit->torso.destroy(); g_bandit->head.destroy(); g_bandit->arm.destroy(); g_bandit->leg.destroy(); g_bandit.reset(); }
+  g_bow.destroy();
   if (g_kit) {
     for (int i = 0; i < 3; i++) { g_kit->torsos[i].destroy(); g_kit->heads[i].destroy(); }
     g_kit->arm.destroy();

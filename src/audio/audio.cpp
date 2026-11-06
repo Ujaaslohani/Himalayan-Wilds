@@ -1,3 +1,4 @@
+#include "../render/envmap.h"
 #include "../render/sky.h"
 #define MINIAUDIO_IMPLEMENTATION
 #define MA_NO_ENCODING
@@ -585,12 +586,17 @@ void update(float dt) {
   float rd = q.d < 1e8f ? std::max(0.0f, q.d - q.hw) : 1e4f;
   float frozen = 1 - 0.75f * std::min(1.0f, season.snow);
   float nearAmt = std::pow(std::max(0.0f, 1 - rd / 75), 2.0f) * frozen * on * (1 + q.flow * 0.6f);
+  // lakes are still water: near a lake the rushing-river bed fades out and only a soft lapping remains
+  // (the river's ends run into the lakes, so its nearest point used to be right under the lake)
+  float lakeAmt = 0, lakeNear = 0;
   for (const Lake& L : world::LAKES) {
-    float ld = std::max(0.0f, hypot2(p.x - L.x, p.z - L.z) - L.r);
-    nearAmt = std::max(nearAmt, std::pow(std::max(0.0f, 1 - ld / 40), 2.0f) * 0.3f * frozen * on);
+    float ld = std::max(0.0f, world::lakeDist(L, p.x, p.z) - L.r);
+    lakeAmt = std::max(lakeAmt, std::pow(std::max(0.0f, 1 - ld / 40), 2.0f) * 0.3f * frozen * on);
+    lakeNear = std::max(lakeNear, 1 - clampf((ld - 25) / 45, 0, 1));
   }
+  nearAmt *= 1 - 0.9f * lakeNear;
   g_beds[1].target = nearAmt * 0.32f;
-  g_beds[2].target = nearAmt * 0.35f;
+  g_beds[2].target = nearAmt * 0.35f + lakeAmt * 0.25f;
   babbleT -= dt;
   if (babbleT <= 0) {
     babbleT = 0.08f + rnd() * 0.18f;
@@ -611,12 +617,18 @@ void update(float dt) {
   g_beds[4].target = std::pow(std::max(0.0f, 1 - fd / 130), 2.0f) * 0.5f * frozen * on;
   // rain: steady hiss + body, scaled by strength; heavier drips under tree canopy
   float rain = sky::rainAmount() * on;
-  float canopy = world::forestDensity(p.x, p.z);
+  float canopy = envmap::canopyAt(p.x, p.z);  // baked (envmap)
   float in = audio::g_indoor.load();  // under a roof: rain hiss and wind are muffled, the drum on the roof stays
   g_beds[5].target = rain * 0.22f * (1 - 0.85f * in);
   g_beds[6].target = rain * (0.1f + canopy * 0.08f) * (1 - 0.35f * in);
   g_beds[6].freqTarget = 700 - 350 * in;
   g_beds[0].target *= 1 - 0.7f * in;
+  {
+    // baked sound zones: open ridges and meadows catch the full wind, forest and gorges muffle it and cut its hiss
+    float open = envmap::openAt(p.x, p.z), cov = envmap::canopyAt(p.x, p.z);
+    g_beds[0].target *= (0.55f + 0.55f * open) * (1 - 0.4f * cov);
+    g_beds[0].freqTarget *= 1 - 0.3f * cov;
+  }
   if (rain > 0.05f && E.playing && in < 0.5f) {
     dropT -= dt;
     if (dropT < -0.25f) dropT = 0;  // after a hitch, don't fire a backlog of drops in one go
@@ -631,7 +643,7 @@ void update(float dt) {
 
   if (!E.playing || E.uiOpen) return;
   float day = E.daylight;
-  float forest = world::forestDensity(p.x, p.z);
+  float forest = envmap::canopyAt(p.x, p.z);
   nextEvent -= dt;
   if (nextEvent <= 0) {
     float r2 = rnd();
@@ -655,7 +667,7 @@ void update(float dt) {
       else if (r3 < 0.6f && (season.spring > 0.4f || season.dry > 0.4f)) cuckoo();
       else if (r3 < 0.75f && (p.y > 40 || forest < 0.3f)) eagle();
       else if (r3 < 0.9f && season.dry > 0.5f && forest < 0.5f) buzz();
-    } else if (day < 0.25f && nearAmt > 0.15f && (season.spring > 0.3f || season.dry > 0.3f)) frogs(std::min(1.0f, nearAmt * 2));
+    } else if (day < 0.25f && std::max(nearAmt, envmap::wetAt(p.x, p.z) * 0.5f) > 0.15f && (season.spring > 0.3f || season.dry > 0.3f)) frogs(std::min(1.0f, std::max(nearAmt, envmap::wetAt(p.x, p.z) * 0.5f) * 2));  // marshes croak too
   }
   extraT -= dt;
   if (extraT <= 0) {

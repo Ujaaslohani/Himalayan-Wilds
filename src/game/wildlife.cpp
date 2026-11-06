@@ -1,3 +1,5 @@
+#include "../render/skinned.h"
+#include "extras.h"
 #include "village.h"
 #include "../render/sky.h"
 #include "buildings.h"
@@ -85,10 +87,56 @@ bool walkable(float x, float z) {
   return sx * sx + sz * sz < 2.6f;
 }
 
+// habitat is precomputed once on a 4 m grid: herd placement and migration used to run ~10 terrain/river/path
+// queries per candidate spot, every time a herd moved
+struct HabCell { float h, f; bool ok; };
+const float HAB_STEP = 4.0f;
+const int HAB_N = (int)(MAP_HALF * 2 / HAB_STEP) + 1;
+std::vector<HabCell> g_hab;
+const HabCell& habAt(float x, float z) {
+  if (g_hab.empty()) {
+    g_hab.resize((size_t)HAB_N * HAB_N);
+    for (int j = 0; j < HAB_N; j++)
+      for (int i = 0; i < HAB_N; i++) {
+        float cx = -MAP_HALF + i * HAB_STEP, cz = -MAP_HALF + j * HAB_STEP;
+        HabCell& c = g_hab[(size_t)j * HAB_N + i];
+        c.ok = walkable(cx, cz) && world::riverMask(cx, cz) <= 0.02f && world::pathDistance(cx, cz) >= 4;
+        c.h = world::getTerrainHeight(cx, cz);
+        c.f = world::forestDensity(cx, cz);
+      }
+  }
+  int i = std::max(0, std::min(HAB_N - 1, (int)std::lround((x + MAP_HALF) / HAB_STEP)));
+  int j = std::max(0, std::min(HAB_N - 1, (int)std::lround((z + MAP_HALF) / HAB_STEP)));
+  return g_hab[(size_t)j * HAB_N + i];
+}
+
+// baked routine spots (from the habitat grid): drinking places on river banks and lake shores, beds in thick forest
+std::vector<std::pair<float, float>> g_drink, g_bed;
+void buildSpots() {
+  if (!g_drink.empty() || !g_bed.empty()) return;
+  habAt(0, 0);
+  for (int j = 2; j < HAB_N - 2; j += 2)
+    for (int i = 2; i < HAB_N - 2; i += 2) {
+      const HabCell& c = g_hab[(size_t)j * HAB_N + i];
+      if (!c.ok) continue;
+      float x = -MAP_HALF + i * HAB_STEP, z = -MAP_HALF + j * HAB_STEP;
+      bool water = false;
+      for (int k = 0; k < 8 && !water; k++) {
+        float a = k * 0.785f, wx = x + std::cos(a) * 7, wz = z + std::sin(a) * 7;
+        water = world::waterHeightAt(wx, wz) > world::getTerrainHeight(wx, wz) + 0.1f;
+      }
+      if (water) g_drink.push_back({x, z});
+      else if (c.f > 0.65f && world::slopeAt(x, z) < 0.35f && (i + j) % 6 == 0) g_bed.push_back({x, z});
+    }
+}
+const std::vector<std::pair<float, float>>& drinkSpots() { buildSpots(); return g_drink; }
+const std::vector<std::pair<float, float>>& bedSpots() { buildSpots(); return g_bed; }
+
 float habitatScore(Species sp, float x, float z) {
-  if (!walkable(x, z) || world::riverMask(x, z) > 0.02f || world::pathDistance(x, z) < 4) return -1;
-  float h = world::getTerrainHeight(x, z);
-  float f = world::forestDensity(x, z);
+  const HabCell& hc = habAt(x, z);
+  if (!hc.ok || !walkable(x, z)) return -1;  // grid for the cheap reject, exact check only for survivors
+  float h = hc.h;
+  float f = hc.f;
   if (sp == SP_DEER) return (1 - f) * 1.2f + (h < 24 ? 0.5f : 0);
   if (sp == SP_BOAR) return f * 1.4f + (h < 22 ? 0.3f : 0);
   float far = hypot2(x, z) > 95 ? 0 : -3;
@@ -137,6 +185,18 @@ Animal* makeAnimal(Species sp, Herd* herd, float x, float z, Rng* rnd) {
 const float PROBES[11] = {0, 0.45f, -0.45f, 0.9f, -0.9f, 1.4f, -1.4f, 2.0f, -2.0f, 2.7f, -2.7f};
 
 float steer(Animal* a, float want, float dt) {
+  // stuck check: wanting to move but barely moved for 1.5 s -> commit to a sideways detour for a moment
+  a->stuckT += dt;
+  if (a->stuckT > 1.5f) {
+    float moved = std::fabs(a->x - a->stuckX) + std::fabs(a->z - a->stuckZ);
+    bool pinned = std::fabs(a->speed) > 0.3f && moved < 0.35f;
+    a->stuckT = 0; a->stuckX = a->x; a->stuckZ = a->z;
+    if (pinned) {
+      a->steerYaw = want + (randf() < 0.5f ? 1.0f : -1.0f) * (1.6f + randf() * 0.9f);
+      a->steerT = 1.2f;
+      return a->steerYaw;
+    }
+  }
   a->steerT -= dt;
   if (a->steerT <= 0) {
     a->steerT = 0.25f;
@@ -144,7 +204,10 @@ float steer(Animal* a, float want, float dt) {
     a->steerYaw = want + PI;
     for (float off : PROBES) {
       float ang = want + off;
-      if (walkable(a->x + std::sin(ang) * look, a->z + std::cos(ang) * look)) {
+      float px = a->x + std::sin(ang) * look, pz = a->z + std::cos(ang) * look;
+      float mx = a->x + std::sin(ang) * look * 0.5f, mz = a->z + std::cos(ang) * look * 0.5f;
+      // terrain AND the trunks, rocks, stumps and fallen logs in the way (probe ahead and halfway)
+      if (walkable(px, pz) && !forest::obstacleAt(px, pz, 0.5f) && !forest::obstacleAt(mx, mz, 0.5f)) {
         a->steerYaw = ang;
         break;
       }
@@ -651,7 +714,7 @@ void endRaid(bool stole) {
     int take = std::min(food, 6 + n * 3);
     if (take > 0) actions::addItems({{"food", -take}});
     actions::notify(take > 0 ? "The wolves ran off with " + std::to_string(take) + " food. Build lantern posts, fences or a watchtower to protect the village." : "The wolves found nothing to steal and slunk away.");
-  } else actions::notify("The wolves saw the lanterns and turned back. The village is well defended.");
+  } else { extras::stat("raids"); actions::notify("The wolves saw the lanterns and turned back. The village is well defended."); }
 }
 
 void nightEvents(float dt) {
@@ -678,6 +741,7 @@ void nightEvents(float dt) {
       E.raid.active = false;
       if (killed) {
         int food = 4 * killed;
+        extras::stat("raids");
         actions::addItems({{"food", food}});
         actions::addScore(120 * killed);
         actions::notify("You drove off the raiding wolves! The grateful villagers share " + std::to_string(food) + " food.");
@@ -734,6 +798,20 @@ void migrate(Herd* h, float dt) {
         for (auto& o : herds)
           if (PRED(o->sp) && hypot2(o->ax - x, o->az - z) < 70) s -= 2;
       if (s > bs) { bs = s; h->tx = x; h->tz = z; }
+    }
+    // daily routine from baked spots: prey walk to water at dawn and dusk and bed down in thick forest at night
+    if (!PRED(h->sp)) {
+      float t = E.time;
+      bool drink = (t > 5.5f && t < 8.5f) || (t > 17.0f && t < 19.5f);
+      bool bed = t > 21.0f || t < 4.5f;
+      const std::vector<std::pair<float, float>>& spots = drink ? drinkSpots() : bed ? bedSpots() : std::vector<std::pair<float, float>>();
+      float best = 1e9f;
+      for (auto& sp : spots) {
+        float d = hypot2(sp.first - h->ax, sp.second - h->az);
+        if (d < 25 || d > 230 || hypot2(sp.first, sp.second) < VILLAGE_SAFE + 10) continue;
+        float score = d + 400 * dangerAt(sp.first, sp.second) + randf() * 40;
+        if (score < best) { best = score; h->tx = sp.first; h->tz = sp.second; bs = 1; }
+      }
     }
     if (bs < 0) { h->migT = 30; return; }
     h->migrating = true;
@@ -812,6 +890,7 @@ int nearPositions(float x, float z, float r, float* out, int maxN) {
 }
 
 void spawn(uint32_t seed) {
+  buildSpots();  // bake drink/bed spots at load, not on the first dusk
   raidPack.clear();
   raidRepelled = false;
   herds.clear();
@@ -870,11 +949,31 @@ void update(float dt) {
   updateHerds(dt);
 }
 
+// animated-model state per animal (pose cache + bone-driven hit spheres), filled by the draw code further down
+struct SkinState {
+  int cur = -1, prev = -1;
+  float t = 0, tp = 0, blend = 1;
+  skinned::Pose pose;
+  float poseClock = -1, hitClock = -1;
+  Vec3 head, b0, b1;
+};
+static std::unordered_map<int, SkinState> g_skin;
+
 bool arrowHitTest(const Vec3& p0, const Vec3& p1, ArrowHit& out) {
   for (auto& ap : animals) {
     Animal* a = ap.get();
     if (a->state == S_DOWNED) continue;
     if (std::fabs(a->x - p1.x) > 6 || std::fabs(a->z - p1.z) > 6) continue;
+    {
+      auto it = g_skin.find(a->id);
+      if (it != g_skin.end() && it->second.hitClock > E.clock - 0.5f) {  // animated model: hit spheres follow its bones
+        const SkinState& k = it->second;
+        float rh = a->sp == SP_WOLF ? 0.17f : 0.2f, rb = a->sp == SP_WOLF ? 0.27f : 0.34f;
+        if (segSphere(p0, p1, k.head, rh)) { out = {a, true}; return true; }
+        if (segSphere(p0, p1, k.b0, rb) || segSphere(p0, p1, k.b1, rb) || segSphere(p0, p1, (k.b0 + k.b1) * 0.5f, rb)) { out = {a, false}; return true; }
+        continue;
+      }
+    }
     const SpeciesModel& M = models::species(a->sp);
     float sy = std::sin(a->yaw), cy = std::cos(a->yaw);
     float lift = a->leap + a->rear * 0.4f;
@@ -905,6 +1004,7 @@ void damage(Animal* a, float dmg, bool headshot) {
   ev.headshot = headshot;
   if (D) {
     if (a->hp <= 0) {
+      extras::onKill(a->sp);
       a->state = S_DOWNED; a->speed = 0; a->downT = 0; a->leap = 0; a->prey = nullptr;
       ev.kill = true;
       emitEvent(ev);
@@ -928,6 +1028,7 @@ void damage(Animal* a, float dmg, bool headshot) {
     return;
   }
   if (a->hp <= 0) {
+    extras::onKill(a->sp);
     a->state = S_DOWNED;
     a->speed = 0;
     a->downT = 0;
@@ -996,6 +1097,7 @@ bool nearestHerd(Species sp, float x, float z, float& ox, float& oz) {
 
 void initRender() {
   registerMarkers("wildlife", [](std::vector<Marker>& out) {
+    { float bx, bz; if (extras::banditCamp(bx, bz)) out.push_back({bx, world::getTerrainHeight(bx, bz) + 3.0f, bz, MI_DANGER, "Bandit camp (level " + std::to_string(extras::banditLevel()) + ")"}); }
     const Vec3& p = E.player.pos;
     float r2 = E.world.bonus.animalRadar * E.world.bonus.animalRadar;
     for (auto& ap : animals) {
@@ -1063,6 +1165,83 @@ static void solveLeg(float l1, float l2, float tz, float ty, bool kneeForward, f
 
 static Mat4 rotAt(const Vec3& p, float a) { return Mat4::compose(p, Quat::axisAngle({1, 0, 0}, -a), {1, 1, 1}); }
 
+
+// ---- animated models (Quaternius Ultimate Animated Animals, CC0): deer (does and stags) and wolves ----
+struct SkinDraw { Animal* a; const skinned::Model* m; Mat4 xf; };
+static std::vector<SkinDraw> g_skinDraw, g_skinShadow;
+static const skinned::Model* skinFor(const Animal* a, float& scale) {
+  static const bool off = std::getenv("HW_NOSKIN") != nullptr;
+  static const skinned::Model* M[3] = {nullptr, nullptr, nullptr};
+  static bool init = false;
+  if (off) return nullptr;
+  if (!init) {
+    init = true;
+    M[0] = skinned::load("animals/deer.anim");
+    M[1] = skinned::load("animals/stag.anim");
+    M[2] = skinned::load("animals/wolf.anim");
+  }
+  if (a->sp == SP_DEER) {
+    bool stag = (a->id % 4) == 0 && M[1];
+    const skinned::Model* m = stag ? M[1] : M[0];
+    if (!m) return nullptr;
+    scale = (stag ? 1.95f : 1.45f) / m->height;  // stag height includes the antlers
+    return m;
+  }
+  if (a->sp == SP_WOLF && M[2]) { scale = 0.95f / M[2]->height; return M[2]; }
+  return nullptr;
+}
+static int chooseClip(const skinned::Model* m, const Animal* a, float& rate) {
+  float v = a->gaitV;
+  bool pred = a->sp == SP_WOLF;
+  rate = 1;
+  int c = -1;
+  if (a->state == S_DOWNED) c = m->clip("Death");
+  else if (a->lunge > 0.2f || a->state == S_ATTACK || a->state == S_POUNCE) c = m->clip(pred ? "Attack" : "Attack_Headbutt");
+  else if (v > 3.2f) { rate = clampf(v / (pred ? 7.5f : 8.0f), 0.6f, 1.6f); c = m->clip("Gallop"); }
+  else if (v > 0.15f) { rate = clampf(v / (pred ? 1.6f : 1.3f), 0.5f, 2.2f); c = m->clip("Walk"); }
+  else if (a->state == S_GRAZE || a->state == S_FEED) c = m->clip("Eating");
+  if (c < 0) c = m->clip("Idle");
+  return c < 0 ? 0 : c;
+}
+static void stepSkin(const Animal* a, const skinned::Model* m, float dt) {
+  SkinState& s = g_skin[a->id];
+  float rate;
+  int c = chooseClip(m, a, rate);
+  if (c != s.cur) {
+    s.prev = s.cur; s.tp = s.t;
+    s.cur = c;
+    const skinned::Clip& C = m->clips[c];
+    s.t = C.loop ? std::fmod(a->id * 0.618f, 1.0f) * C.duration() : 0;  // herds don't move in lockstep
+    s.blend = s.prev < 0 ? 1 : 0;
+  }
+  s.t += dt * rate;
+  s.tp += dt;
+  s.blend = std::min(1.0f, s.blend + dt / 0.25f);  // quarter-second crossfade between clips
+}
+static void drawSkinList(std::vector<SkinDraw>& L, bool shadow) {
+  if (L.empty()) return;
+  skinned::beginDraw(shadow);
+  glDisable(GL_CULL_FACE);
+  for (auto& d : L) {
+    SkinState& s = g_skin[d.a->id];
+    if (s.cur < 0) stepSkin(d.a, d.m, 0);
+    if (s.poseClock != E.clock) {
+      skinned::evaluate(*d.m, s.cur, s.t, s.prev, s.tp, 1 - s.blend, s.pose);
+      s.poseClock = E.clock;
+      auto at = [&](const char* jn, Vec3& out) {
+        int j = d.m->joint(jn);
+        if (j < 0) return;
+        Mat4 w = d.xf * s.pose.world[j];
+        out = {w.m[12], w.m[13], w.m[14]};
+      };
+      at("Head", s.head); at("Torso", s.b0); at("Torso3", s.b1);
+      s.hitClock = E.clock;
+    }
+    skinned::draw(*d.m, s.pose, d.xf, shadow);
+  }
+  glEnable(GL_CULL_FACE);
+}
+
 static void fill(bool shadow) {
   static float lastClock = 0;
   float dt = 0;
@@ -1074,6 +1253,7 @@ static void fill(bool shadow) {
     Batches& b = B[sp];
     for (DynBatch* d : {&b.body, &b.head, &b.upperF, &b.lowerF, &b.upperH, &b.lowerH, &b.footF, &b.footH}) d->clear();
   }
+  (shadow ? g_skinShadow : g_skinDraw).clear();
   for (auto& ap : animals) {
     Animal* a = ap.get();
     float v = a->state == S_DOWNED ? 0 : std::fabs(a->speed);
@@ -1088,6 +1268,19 @@ static void fill(bool shadow) {
     if (shadow && hypot2(a->x - p.x, a->z - p.z) > (SPEC[a->sp].hp < 100 ? 30.0f : 46.0f)) continue;  // deer and goral are small at range: shadows only within 30 m
     const SpeciesModel& M = models::species(a->sp);
     if (!shadow && !render::cam.sphere({a->x, a->y + 0.8f, a->z}, 2.2f)) continue;
+    {
+      float sc = 1;
+      if (const skinned::Model* sm = skinFor(a, sc)) {
+        Mat4 xf = Mat4::compose({a->x, a->y + a->leap + a->rear * 0.25f, a->z}, Quat::axisAngle({0, 1, 0}, a->yaw), {sc, sc, sc});
+        if (shadow) g_skinShadow.push_back({a, sm, xf});
+        else {
+          stepSkin(a, sm, dt);
+          g_skinDraw.push_back({a, sm, xf});
+          fx::blob(a->x, a->y + 0.04f, a->z, a->yaw, M.shadowRadius * (a->state == S_DOWNED ? 1.3f : 0.75f), M.shadowRadius * 1.25f);
+        }
+        continue;
+      }
+    }
     bool predator = a->sp == SP_WOLF || a->sp == SP_LEOPARD || a->sp == SP_BEAR;
     float sv = a->gaitV;
     float cyc = a->gaitT;
@@ -1233,6 +1426,7 @@ void draw() {
   interpEnd();
   glEnable(GL_CULL_FACE);
   drawBatches(g_batch, SP_COUNT * 2);
+  drawSkinList(g_skinDraw, false);
 }
 
 void drawShadow() {
@@ -1240,6 +1434,7 @@ void drawShadow() {
   fill(true);
   interpEnd();
   drawBatches(g_shadowBatch, SP_COUNT);
+  drawSkinList(g_skinShadow, true);
 }
 
 void drawBlobs() {}

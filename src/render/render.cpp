@@ -4,6 +4,7 @@
 #include <vector>
 #include <cmath>
 #include "render.h"
+#include "envmap.h"
 #include "glsl.h"
 #include "../platform/platform.h"
 #include <unordered_map>
@@ -185,7 +186,7 @@ Shader& object(VFmt fmt, InstMode inst, SeasonKind kind, int flags) {
     sh->set1i("u_ptexN", 9);
     sh->set1i("u_ptexW", 10);
     sh->set1i("u_shadowPrev", 11);
-  sh->set1i("u_shadowPrev", 11);
+    sh->set1i("u_envMap", 13); sh->set1i("u_horA", 14); sh->set1i("u_horB", 15); sh->set1i("u_detailMap", 16); sh->set1i("u_rockB", 17); sh->set1i("u_rockC", 18); sh->set1i("u_litter", 19); sh->set1i("u_ground", 20); sh->set1i("u_waterLv", 21);
     s = sh.get();
     g_objects[key] = std::move(sh);
   } else s = it->second.get();
@@ -239,6 +240,7 @@ Shader& program(const std::string& name, const char* vs, const char* fs, const s
   sh->set1i("u_ptexN", 9);
   sh->set1i("u_ptexW", 10);
   sh->set1i("u_shadowPrev", 11);
+  sh->set1i("u_envMap", 13); sh->set1i("u_horA", 14); sh->set1i("u_horB", 15); sh->set1i("u_detailMap", 16); sh->set1i("u_rockB", 17); sh->set1i("u_rockC", 18); sh->set1i("u_litter", 19); sh->set1i("u_ground", 20); sh->set1i("u_waterLv", 21);
   Shader& r = *sh;
   g_programs[name] = std::move(sh);
   return r;
@@ -305,6 +307,8 @@ void endShadowPass() {
 }
 
 static GLuint g_ptexA = 0, g_ptexN = 0, g_ptexW = 0;
+static GLuint g_rockB = 0, g_rockC = 0, g_litter = 0;
+static GLuint g_groundArr = 0;  // photo ground layers: 0 forest floor, 1 mud, 2 trail, 3 dirt, 4 scree, 5 leaf litter, 6 moss, 7-9 grass (lush, dry, meadow)  // extra photo materials (Rock030, Rock060, forest-floor litter)
 static const char* PT_VS = "out vec2 v_uv;\nvoid main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); v_uv = p; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }\n";
 // Expensive, tileable rock generator: fractured plates (periodic Voronoi), domain-warped fbm, ridged erosion, strata, lichen.
 static const char* PT_GEN = R"(in vec2 v_uv;
@@ -490,6 +494,60 @@ static void ptexEnsure() {
     t = nt.id;
   };
   squash(g_ptexA);  // wood stays RGBA8: its baked slope lives in b/a
+  {
+    // second and third rock surfaces (stored at half albedo like the generated one) and the leaf-litter floor
+    auto load = [](const char* f, float k, GLuint& t) {
+      int w = 0, h = 0;
+      std::vector<uint8_t> px = assets::loadImageRGBA(f, w, h);
+      if (px.empty()) return;
+      for (size_t i = 0; i < px.size(); i += 4) for (int c = 0; c < 3; c++) px[i + c] = (uint8_t)std::min(255.0f, px[i + c] * k);
+      Texture nt = uploadTextureRGBA(px.data(), w, h, true, true, false, true);
+      t = nt.id;
+      glBindTexture(GL_TEXTURE_2D, t);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+      if (gfx::maxAniso() > 1.0f) glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, std::min(4.0f, gfx::maxAniso()));
+    };
+    load("textures/rock_b_col.jpg", 0.88f, g_rockB);  // photo is ~40% as bright as rock A: lift to ~75% of it (still the darker rock)
+    load("textures/rock_c_col.jpg", 0.78f, g_rockC);
+    load("textures/litter.jpg", 1.0f, g_litter);
+    {
+      // ground photos (Poly Haven CC0 + ScatteredLeaves001) in one texture array: one sampler for the terrain shader
+      struct L { const char* f; float k; };
+      const int NL = 10;
+      const L layers[NL] = {{"textures/ground_forest.jpg", 1.0f}, {"textures/ground_mud.jpg", 0.95f}, {"textures/ground_trail.jpg", 0.85f},
+                            {"textures/ground_dirt.jpg", 0.68f}, {"textures/ground_scree.jpg", 1.0f}, {"textures/litter.jpg", 1.0f},
+                            {"textures/ground_moss.jpg", 1.0f}, {"textures/ground_grass_lush.jpg", 1.0f}, {"textures/ground_grass_dry.jpg", 1.0f},
+                            {"textures/ground_grass_meadow.jpg", 1.0f}};
+      const int GS = 1024;
+      std::vector<uint8_t> all((size_t)GS * GS * 4 * NL, 128);
+      bool any = false;
+      for (int i = 0; i < NL; i++) {
+        int w = 0, h = 0;
+        std::vector<uint8_t> px = assets::loadImageRGBA(layers[i].f, w, h);
+        if (px.empty() || w != GS || h != GS) continue;
+        any = true;
+        for (size_t k = 0; k < px.size(); k++) all[(size_t)i * GS * GS * 4 + k] = (k & 3) == 3 ? 255 : (uint8_t)std::min(255.0f, px[k] * layers[i].k);
+      }
+      if (any) {
+        glGenTextures(1, &g_groundArr);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, g_groundArr);
+        // block-compressed (DXT1, sRGB) when the GPU supports it: 32 MB -> ~4 MB, read directly by the GPU
+        GLenum fmt = gfx::hasS3TC() ? 0x8C4C /* GL_COMPRESSED_SRGB_S3TC_DXT1_EXT */ : GL_SRGB8_ALPHA8;
+        glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, fmt, GS, GS, NL, 0, GL_RGBA, GL_UNSIGNED_BYTE, all.data());
+        glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        if (gfx::maxAniso() > 1.0f) glTexParameterf(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_ANISOTROPY, std::min(4.0f, gfx::maxAniso()));
+        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+        gfx::addBufferBytes((long long)GS * GS * NL * (gfx::hasS3TC() ? 1 : 8) / 2 * 4 / 3);
+      }
+    }
+    if (!g_rockB) g_rockB = g_ptexA;
+    if (!g_rockC) g_rockC = g_ptexA;
+  }
   if (std::getenv("HW_DBGTEX")) {
     std::vector<uint8_t> px((size_t)N * N * 4);
     glBindTexture(GL_TEXTURE_2D, g_ptexW);
@@ -566,9 +624,18 @@ void bindShadow() {
   glBindTexture(GL_TEXTURE_2D, g_ptexW);
   glActiveTexture(GL_TEXTURE11);
   glBindTexture(GL_TEXTURE_2D, g_prevTex);
+  glActiveTexture(GL_TEXTURE17);
+  glBindTexture(GL_TEXTURE_2D, g_rockB);
+  glActiveTexture(GL_TEXTURE18);
+  glBindTexture(GL_TEXTURE_2D, g_rockC);
+  glActiveTexture(GL_TEXTURE19);
+  glBindTexture(GL_TEXTURE_2D, g_litter);
+  glActiveTexture(GL_TEXTURE20);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, g_groundArr);
   glActiveTexture(GL_TEXTURE7);
   glBindTexture(GL_TEXTURE_2D, g_shadowTex);
   glActiveTexture(GL_TEXTURE0);
+  envmap::bind();
 }
 
 }  // namespace render

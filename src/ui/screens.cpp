@@ -2,6 +2,7 @@
 #include "../game/tutorial.h"
 #include "../game/relics.h"
 #include "../game/events.h"
+#include "../game/extras.h"
 #include "../core/version.h"
 #include "../render/render.h"
 #include "../world/forest.h"
@@ -40,7 +41,7 @@ uint32_t g_hitCol = 0xffffffff;
 std::vector<Marker> g_markers;
 bool g_stats = false;
 FrameStats g_fs;
-Texture g_mapTex;
+Texture g_mapTex, g_mapTexWinter, g_mapTexAutumn;  // seasonal map images, all precomputed at load
 float g_scroll = 0, g_contentH = 0;
 Tab g_lastTab = Tab::None;
 int g_openKind = -1, g_openUid = -1;
@@ -288,7 +289,7 @@ const Quest* activeQuest() {
 void buildMap() {
   if (g_mapTex.id) return;
   const int N = 256;
-  std::vector<uint8_t> px((size_t)N * N * 4);
+  std::vector<uint8_t> px((size_t)N * N * 4 * 3);
   float step = MAP_HALF * 2 / N;
   for (int j = 0; j < N; j++)
     for (int i = 0; i < N; i++) {
@@ -298,16 +299,25 @@ void buildMap() {
       float hz = world::getTerrainHeight(x, z + step) - world::getTerrainHeight(x, z - step);
       float ny = 1 / std::sqrt(1 + (hx / (2 * step)) * (hx / (2 * step)) + (hz / (2 * step)) * (hz / (2 * step)));
       Color col = world::terrainColor(x, z, h, ny);
-      if (world::riverMask(x, z) > 0.5f || world::lakeAt(x, z) >= 0) col = Color::hex("#4f9cc4");
+      bool water = world::riverMask(x, z) > 0.5f || world::lakeAt(x, z) >= 0;
+      if (water) col = Color::hex("#4f9cc4");
       float shade = clampf(1 + (hz - hx) * 0.025f, 0.7f, 1.3f);
-      uint32_t c = (col * shade).packSrgb();
-      uint8_t* d = &px[((size_t)j * N + i) * 4];
-      d[0] = c & 255;
-      d[1] = (c >> 8) & 255;
-      d[2] = (c >> 16) & 255;
-      d[3] = 255;
+      // winter: snow everywhere but steep rock, iced water; autumn: the forests turn amber
+      Color win = water ? Color::hex("#a9c9dc") : col.lerp(Color::hex("#e8eef3"), ny > 0.75f ? 0.85f : 0.35f);
+      Color aut = water ? col : col.lerp(Color::hex("#b8742c"), 0.55f * world::forestDensity(x, z));
+      const Color* cs[3] = {&col, &win, &aut};
+      for (int k = 0; k < 3; k++) {
+        uint32_t c = (*cs[k] * shade).packSrgb();
+        uint8_t* d = &px[((size_t)k * N * N + (size_t)j * N + i) * 4];
+        d[0] = c & 255;
+        d[1] = (c >> 8) & 255;
+        d[2] = (c >> 16) & 255;
+        d[3] = 255;
+      }
     }
   g_mapTex = uploadTextureRGBA(px.data(), N, N, false, false, false, false);
+  g_mapTexWinter = uploadTextureRGBA(px.data() + (size_t)N * N * 4, N, N, false, false, false, false);
+  g_mapTexAutumn = uploadTextureRGBA(px.data() + (size_t)N * N * 8, N, N, false, false, false, false);
   glActiveTexture(GL_TEXTURE0);
 }
 
@@ -442,7 +452,7 @@ void drawCompass(float W) {
   for (auto& m : g_markers) {
     if (m.icon != MI_RECRUIT && m.icon != MI_CLUE && m.icon != MI_HARVEST && m.icon != MI_DANGER) continue;
     float d = hypot2(m.x - p.x, m.z - p.z);
-    if (m.icon == MI_DANGER && d > 45) continue;
+    if (m.icon == MI_DANGER && d > 45 && m.label.rfind("Bandit", 0) != 0) continue;  // the bandit camp shows at any range
     if (m.icon == MI_HARVEST && d > 90) continue;
     show(relativeBearing(m.x, m.z), m.icon, d);
   }
@@ -625,6 +635,14 @@ void drawTopBar(float W) {
     float tw = textWidth(lab, 12) + textWidth(tabs[i].key, 7.5f, SANS) + 8 + 5 + 18;
     rx -= tw;
     if (button({rx, iy + 3, tw, ih - 6}, lab, A.tab == tabs[i].t ? ST_GHOSTON : ST_GHOST, 12, tabs[i].key)) actions::openTab(tabs[i].t);
+    rx -= 4;
+  }
+  {
+    // lantern toggle, lit (amber) while it burns; same as pressing L
+    std::string lab = labels ? "Lantern" : "La";
+    float tw = textWidth(lab, 12) + textWidth("L", 7.5f, SANS) + 8 + 5 + 18;
+    rx -= tw;
+    if (button({rx, iy + 3, tw, ih - 6}, lab, E.lanternOn ? ST_GHOSTON : ST_GHOST, 12, "L")) { E.lanternOn = !E.lanternOn; audio::crispClick(); }
     rx -= 4;
   }
 
@@ -900,6 +918,66 @@ float tabQuests(float x, float y, float w) {
     text(std::to_string(relics::count()) + " / " + std::to_string(relics::total()) + " found — hidden off the roads: high, deep and out of the way", x + w - 16, y + 22, 11, C("#d6d3d1"), SANS, 2);
     y += 54;
   }
+  {
+    // bounty board
+    const auto& bs = extras::bounties();
+    int acc = 0;
+    for (auto& b : bs) acc += b.accepted;
+    float h = 40 + std::max(1, acc) * 34;
+    card({x, y, w, h}, "#78350f", "#0c0a09", 0.75f);
+    text("Today's tasks", x + 14, y + 20, 14, C("#fbbf24"));
+    text("Take and turn in tasks at the notice board by the hearth", x + w - 14, y + 20, 10.5f, C("#a8a29e"), SANS, 2);
+    if (!acc) text("No tasks taken. Read the notice board by the hearth [E] to pick some.", x + 14, y + 46, 11, C("#a8a29e"), SANS);
+    int row = 0;
+    for (size_t i = 0; i < bs.size(); i++) {
+      const auto& b = bs[i];
+      if (!b.accepted) continue;
+      float by = y + 38 + (row++) * 34;
+      bool ready = b.kind == 0 ? invCount(b.item) >= b.need : b.have >= b.need;
+      std::string prog = b.kind == 0 ? std::to_string(std::min(invCount(b.item), b.need)) + "/" + std::to_string(b.need) : std::to_string(b.have) + "/" + std::to_string(b.need);
+      text(b.text + "  (" + prog + ")", x + 14, by + 14, 12, ready ? C("#6ee7b7") : C("#e7e5e4"), SANS);
+      text("+" + std::to_string(b.renown) + " renown, " + costText(b.bonus), x + w - 190, by + 14, 10.5f, C("#a8a29e"), SANS, 2);
+      text(ready ? "ready: turn in at the board" : "in progress", x + w - 14, by + 14, 10.5f, ready ? C("#6ee7b7") : C("#78716c"), SANS, 2);
+    }
+    y += h + 10;
+  }
+  {
+    // trophy rack
+    const char* T[5] = {"deer_pelt", "boar_hide", "goral_horn", "wolf_fur", "bear_hide"};
+    float h = 76;
+    card({x, y, w, h}, "#292524", "#0c0a09", 0.7f);
+    text("Trophy rack by the hearth", x + 14, y + 20, 14, C("#fbbf24"));
+    text("Each mounted trophy: +2 village appeal (" + std::to_string(extras::trophyAppeal()) + " now)", x + w - 14, y + 20, 11, C("#a8a29e"), SANS, 2);
+    float bw = (w - 28 - 4 * 8) / 5;
+    for (int i = 0; i < 5; i++) {
+      Rect br{x + 14 + i * (bw + 8), y + 36, bw, 30};
+      bool ok = invCount(T[i]) > 0;
+      std::string lab = std::string(itemLabel(T[i])) + " (" + std::to_string(extras::mounted(T[i])) + ")";
+      if (button(br, ok ? "Mount " + lab : lab, ok ? ST_STONE : ST_OFF, 10.5f)) if (ok) extras::mount(T[i]);
+    }
+    y += h + 10;
+  }
+  {
+    // achievements and stats
+    auto ach = extras::achievements();
+    int got = 0;
+    for (auto& a : ach) got += a.got;
+    int cols = w > 640 ? 2 : 1, rows = ((int)ach.size() + cols - 1) / cols;
+    float h = 40 + rows * 20 + 46;
+    card({x, y, w, h}, "#292524", "#0c0a09", 0.7f);
+    text("Achievements " + std::to_string(got) + "/" + std::to_string(ach.size()), x + 14, y + 20, 14, C("#fbbf24"));
+    float cw = (w - 28) / cols;
+    for (size_t i = 0; i < ach.size(); i++) {
+      float ax = x + 14 + (i % cols) * cw, ay = y + 40 + (i / cols) * 20;
+      text(std::string(ach[i].got ? "[*] " : "[ ] ") + ach[i].name, ax, ay + 8, 11.5f, ach[i].got ? C("#fde047") : C("#78716c"), SANS);
+      text(ach[i].desc, ax + 170, ay + 8, 10.5f, ach[i].got ? C("#d6d3d1") : C("#57534e"), SANS);
+    }
+    char st[300];
+    std::snprintf(st, sizeof st, "Animals hunted %.0f  ·  Wolves %.0f  ·  Distance walked %.1f km  ·  Nights slept %.0f  ·  Festivals %.0f  ·  Raids repelled %.0f  ·  Bounties %.0f",
+                  extras::getStat("kills"), extras::getStat("kill_wolf"), extras::getStat("walked") / 1000, extras::getStat("slept"), extras::getStat("festivals"), extras::getStat("raids"), extras::getStat("bounties"));
+    text(ellipsize(st, 10.5f, w - 28, SANS), x + 14, y + h - 18, 10.5f, C("#a8a29e"), SANS);
+    y += h + 10;
+  }
   const Quest* aq = activeQuest();
   for (auto& q : A.quests) {
     bool act = &q == aq;
@@ -1144,7 +1222,7 @@ float tabMap(float x, float y, float w) {
   buildMap();
   float s = std::min(w, 460.0f);
   float mx = x + (w - s) / 2, my = y;
-  image(g_mapTex.id, {mx, my, s, s});
+  image((season.snow > 0.5f ? g_mapTexWinter : season.autumn > 0.5f ? g_mapTexAutumn : g_mapTex).id, {mx, my, s, s});
   border({mx, my, s, s}, C("#78350f", 0.6f), 2, 10);
   auto P = [&](float wx, float wz) { return Vec2{mx + (0.5f + wx / MAP_HALF * 0.5f) * s, my + (0.5f + wz / MAP_HALF * 0.5f) * s}; };
   {
@@ -1170,7 +1248,7 @@ float tabMap(float x, float y, float w) {
     if (b.built) { Vec2 p = P(b.pos[0], b.pos[2]); rect({p.x - 5, p.y - 5, 10, 10}, C("#1c1917")); rect({p.x - 4, p.y - 4, 8, 8}, C("#fef3c7")); }
   std::string tip;
   for (auto& m : ms)
-    if (m.icon == MI_RECRUIT || m.icon == MI_CLUE || m.icon == MI_HARVEST) {
+    if (m.icon == MI_RECRUIT || m.icon == MI_CLUE || m.icon == MI_HARVEST || (m.icon == MI_DANGER && m.label.rfind("Bandit", 0) == 0)) {
       Vec2 p = P(m.x, m.z);
       glyph(m.icon, p.x, p.y, 9);
       if (hypot2(mouse().x - p.x, mouse().y - p.y) < 9) tip = m.label;
@@ -1470,6 +1548,8 @@ void drawOptions(float W, float H) {
     g_settingsDirty = true;
   }
   y += 44;
+  if (toggle(x2, y, colW, "Ambient occlusion (SSAO)", st.ssao)) { st.ssao = !st.ssao; g_settingsDirty = true; }
+  y += 44;
   {
     float tb = st.triBudget / 1000.0f;
     if (slider(x2, y, colW, "Forest triangle budget (k, 0 = off)", tb, 0, 1500, "%.0fk")) { st.triBudget = (int)(std::round(tb / 50) * 50) * 1000; g_settingsDirty = true; }
@@ -1636,6 +1716,7 @@ bool escape() {
   if (g_options) { platform::saveSettings(); g_options = false; return true; }
   if (A.status == Status::Start && g_titlePage) { g_titlePage = 0; return true; }
   if (A.dialogue >= 0) { A.dialogue = -1; return true; }
+  if (A.boardOpen) { A.boardOpen = false; return true; }
   if (A.tab != Tab::None) { A.tab = Tab::None; return true; }
   if (A.menuOpen) { A.menuOpen = false; return true; }
   if (A.status == Status::Playing && !E.world.placing.empty()) { actions::cancelPlacement(); return true; }
@@ -1643,8 +1724,42 @@ bool escape() {
   return false;
 }
 
+// ---------------------------------------------------------------- notice board
+static void drawBoard(float W, float H) {
+  backdrop(W, H, 0.55f);
+  const auto& bs = extras::bounties();
+  float mh = 150 + std::max(1, (int)bs.size()) * 74;
+  Rect r = modal(W, H, 640, mh, "#92400e");
+  text("NOTICE BOARD", r.x + 28, r.y + 38, 22, C("#fbbf24"));
+  text("New tasks every morning · take any you like, then come back here to turn them in", r.x + 28, r.y + 62, 11, C("#a8a29e"), SANS);
+  if (bs.empty()) text("Every notice has been taken care of today. New ones go up at dawn.", r.x + 28, r.y + 104, 12, C("#d6d3d1"), SANS);
+  for (size_t i = 0; i < bs.size(); i++) {
+    const auto& b = bs[i];
+    Rect c{r.x + 24, r.y + 84 + i * 74, r.w - 48, 64};
+    rect(c, C("#f5f0e1", b.accepted ? 0.14f : 0.09f), 8);
+    border(c, b.accepted ? C("#f59e0b", 0.7f) : C("#57534e", 0.7f), 1, 8);
+    bool ready = b.kind == 0 ? invCount(b.item) >= b.need : b.have >= b.need;
+    std::string prog = b.kind == 0 ? "You have " + std::to_string(std::min(invCount(b.item), 999)) + "/" + std::to_string(b.need)
+                                   : (b.accepted ? "Hunted " + std::to_string(b.have) + "/" + std::to_string(b.need) : "Hunts count once you take the task");
+    text(b.text, c.x + 14, c.y + 20, 14, C("#fde68a"));
+    text("Reward: " + std::to_string(b.renown) + " renown + " + costText(b.bonus) + "   ·   " + prog, c.x + 14, c.y + 44, 10.5f, ready && b.accepted ? C("#6ee7b7") : C("#a8a29e"), SANS);
+    Rect br{c.x + c.w - 128, c.y + 16, 114, 32};
+    if (!b.accepted) { if (button(br, "Take task", ST_AMBER, 12)) extras::accept((int)i); }
+    else if (button(br, ready ? "Turn in" : "In progress", ready ? ST_AMBER : ST_OFF, 12)) { if (ready) { extras::deliver((int)i); return; } }
+  }
+  if (button({r.x + r.w - 28 - 120, r.y + r.h - 28 - 40, 120, 40}, "Close", ST_STONE, 13)) A.boardOpen = false;
+}
+
 static bool g_photoWas = false;
-void draw(float, bool cursorFree) {
+static void drawInner(float dt, bool cursorFree);
+void draw(float dt, bool cursorFree) {
+  drawInner(dt, cursorFree);
+  if (float f = extras::sleepFade()) {  // sleeping: fade to black and back
+    rect({0, 0, width(), height()}, C("#000000", f), 0);
+    if (f > 0.6f) text("Zzz", width() / 2, height() / 2, 28, C("#fde68a", (f - 0.6f) * 2.5f), SERIF, 1);
+  }
+}
+static void drawInner(float, bool cursorFree) {
   float W = width(), H = height();
   if (E.photo && A.status == Status::Playing) {
     // photo mode: no HUD, just a fading key reminder
@@ -1660,7 +1775,7 @@ void draw(float, bool cursorFree) {
   bool playing = A.status == Status::Playing;
   bool cut = E.cutscene.dur > 0;
   drawCutscene(W, H);
-  bool modalOpen = A.tab != Tab::None || A.dialogue >= 0 || A.menuOpen || A.howToOpen || A.status != Status::Playing;
+  bool modalOpen = A.tab != Tab::None || A.dialogue >= 0 || A.boardOpen || A.menuOpen || A.howToOpen || A.status != Status::Playing;
   setTextShadow(0.09f);
   if (playing && !cut && !modalOpen) drawHud(W, H);
   else E.events.clear();
@@ -1691,6 +1806,7 @@ void draw(float, bool cursorFree) {
     bool b = g_block;
     g_block = b || A.menuOpen || A.howToOpen || g_options;
     if (A.dialogue >= 0) drawDialogue(W, H);
+    if (A.boardOpen) drawBoard(W, H);
     drawTabs(W, H);
     g_block = b;
     if (A.menuOpen) {
@@ -1712,6 +1828,6 @@ void draw(float, bool cursorFree) {
 }
 
 void prebuildMap() { buildMap(); }
-void shutdown() { g_mapTex.destroy(); }
+void shutdown() { g_mapTex.destroy(); g_mapTexWinter.destroy(); g_mapTexAutumn.destroy(); }
 
 }  // namespace screens

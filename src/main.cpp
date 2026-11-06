@@ -1,3 +1,5 @@
+#include "render/envmap.h"
+#include "game/extras.h"
 #include "game/events.h"
 #include "game/relics.h"
 #include "core/crashlog.h"
@@ -372,7 +374,7 @@ SceneTarget* g_scene = nullptr;
 struct AOTarget { GLuint fbo = 0, tex = 0; int w = 0, h = 0; } g_ao;
 void ssaoPass() {
   SceneTarget* sc = g_scene;
-  if (!sc || !sc->fbo || std::getenv("HW_NOAO")) return;
+  if (!sc || !sc->fbo || !g_settings.ssao || std::getenv("HW_NOAO")) return;
   GLint cur = 0;
   glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &cur);
   if ((GLuint)cur != sc->drawFbo()) return;  // only when the world is rendered into the scene target
@@ -467,11 +469,13 @@ void drawWorld(float dt, bool viewModel) {
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   glEnable(GL_DEPTH_TEST);
   glDepthMask(GL_TRUE);
+  envmap::hazeCullDistance(render::cam.pos.x, render::cam.pos.z, dt);
   PROF(render::bindShadow());
   PROF(grass::draw());
   PROF(forest::drawOpaque());
   PROF(props::draw());
   PROF(relics::draw());
+  PROF(extras::draw());
   PROF(events::drawCaravan());
   PROF(buildings::draw());
   PROF(village::drawStructures());
@@ -547,11 +551,13 @@ int main(int argc, char** argv) {
 
   mem("assets");
   loadingFrame("Painting the ground...", 0.45f);
+  envmap::build();
   terrain_render::init();
   loadingFrame("Filling the rivers...", 0.5f);
   water::init();
   sky::init();
   loadingFrame("Planting the forest...", 0.55f);
+  forest::precomputeItems();
   forest::init();
   loadingFrame("Growing the grass...", 0.65f);
   grass::init();
@@ -585,6 +591,34 @@ int main(int argc, char** argv) {
         {30, "", [=] { screens::setTitlePage(0); app::newGame(); }},
         {200, "village", look(0, 14, 0, -0.08f)},
         {206, "summertrees", [=] { restoreSeason(1, 2, 12.0f); forest::seasonJumped(); E.time = 12.0f; E.cutscene.dur = 0; look(68.6f, -39.1f, 3.6f, -0.02f)(); }},
+        {210, "", [=] { E.time = 6.3f; E.cutscene.dur = 0; look(68.6f, -39.1f, 3.6f, -0.02f)(); }},
+        {216, "t_dawn", [=] {}},
+        {219, "", [=] { E.time = 9.0f; E.cutscene.dur = 0; look(68.6f, -39.1f, 3.6f, -0.02f)(); }},
+        {225, "t_morning", [=] {}},
+        {228, "", [=] { E.time = 15.5f; E.cutscene.dur = 0; look(68.6f, -39.1f, 3.6f, -0.02f)(); }},
+        {234, "t_afternoon", [=] {}},
+        {237, "", [=] { E.time = 18.3f; E.cutscene.dur = 0; look(68.6f, -39.1f, 3.6f, -0.02f)(); }},
+        {243, "t_dusk", [=] {}},
+        {246, "", [=] { E.time = 22.5f; E.cutscene.dur = 0; look(68.6f, -39.1f, 3.6f, -0.02f)(); }},
+        {252, "t_night", [=] {}},
+        {255, "", [=] { restoreSeason(1, 2, 7.0f); E.time = 7.0f; E.cutscene.dur = 0; const auto& R = world::RIVER; size_t i = R.pts.size() * 35 / 100; float tx = R.pts[i + 1][0] - R.pts[i][0], tz = R.pts[i + 1][1] - R.pts[i][1]; float l = std::sqrt(tx * tx + tz * tz) + 1e-4f; tx /= l; tz /= l; float x = R.pts[i][0] - tz * (R.hw[i] + 9) - tx * 12, z = R.pts[i][1] + tx * (R.hw[i] + 9) - tz * 12; look(x, z, std::atan2(-(R.pts[i][0] + tx * 25 - x), -(R.pts[i][1] + tz * 25 - z)), -0.12f)(); }},
+        {258, "river", [=] {}},
+        {263, "", [=] { restoreSeason(1, 2, 17.5f); E.time = 17.5f; E.cutscene.dur = 0; if (!world::LAKES.empty()) { const Lake& L = world::LAKES[0]; float x = L.x + L.r + 8, z = L.z + 4; look(x, z, std::atan2(-(L.x - x), -(L.z - z)), -0.1f)(); } }},
+        {266, "lake", [=] {}},
+        {268, "", [=] { restoreSeason(1, 2, 21.0f); E.time = 21.0f; E.cutscene.dur = 0; look(0, 14, 0, -0.12f)(); }},
+        {274, "vnight", [=] {}},
+        {276, "", [=] { restoreSeason(1, 2, 15.4f); E.time = 15.4f; E.cutscene.dur = 0; float x = -184.3f, z = -67.4f, bx = x, bz = z - 30, bd = 1e9f; for (const Lake& L : world::LAKES) { float d = hypot2(L.x - x, L.z - z); if (d < bd) { bd = d; bx = L.x; bz = L.z; } } look(x, z, std::atan2(-(bx - x), -(bz - z)), -0.05f)(); }},
+        {278, "lake2", [=] {}},
+        {284, "", [=] { restoreSeason(1, 2, 22.5f); E.time = 22.5f; E.cutscene.dur = 0; E.lanternOn = true; look(68.6f, -39.1f, 3.6f, -0.15f)(); }},
+        {288, "lantern", [=] {}},
+        {800, "", [=] { restoreSeason(1, 2, 12.0f); forest::seasonJumped(); E.time = 12.0f; E.cutscene.dur = 0; look(68.6f, -39.1f, 3.6f, -0.02f)(); }},
+        {900, "m_meadow", [=] {}},
+        {905, "", [=] { E.time = 12.0f; look(40, -60, 2.2f, -0.05f)(); }},
+        {1005, "m_forest", [=] {}},
+        {1010, "", [=] { E.time = 12.0f; look(0, 14, 0, -0.08f)(); }},
+        {1110, "m_village", [=] {}},
+        {296, "", [=] { restoreSeason(2, 1, 17.5f); E.time = 17.0f; E.cutscene.dur = 0; float x = -71.4f, z = -233.7f; RiverHit q = world::riverQuery(x, z); float tx = x + q.tx * 14, tz = z + q.tz * 14; look(x, z, std::atan2(-(tx - x), -(tz - z)), -0.3f)(); }},
+        {300, "rv2", [=] {}},
         {205, "res", [=] { A.tab = Tab::None; A.population = 12; village::syncResidents(); E.cutscene.dur = 0; restoreSeason(1, 2, 11.0f); E.time = 11.0f; look(0, 44, 0.0f, -0.1f)(); }},
         {260, "forest", look(40, -60, 2.2f, -0.05f)},
         {262, "sun", [=] { E.time = 9.5f; float ang = (9.5f - 6) / 24 * TAU; Vec3 sd = Vec3(std::cos(ang), std::sin(ang), -0.32f).normalized(); look(4, 18, std::atan2(-sd.x, -sd.z), std::asin(sd.y) * 0.85f)(); }},
@@ -641,6 +675,9 @@ int main(int argc, char** argv) {
         {575, "", [=] { restoreSeason(0, 1, 11.0f); E.time = 11.0f; std::vector<float> t; forest::nearTrees(40, -60, 80, t, 1); float tx = t.size() ? t[0] : 40, tz = t.size() ? t[2] : -60; float x = tx + 58.0f, z = tz; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.12f)(); }},
         {589, "sw58", [=] {}},
         {306, "fdusk2", [=] {}},
+        {940, "board", [=] { A.tab = Tab::None; E.time = 11; look(3.0f, 1.0f, std::atan2(-(6.0f - 3.0f), -(-5.0f - 1.0f)), -0.05f)(); }},
+        {945, "boardui", [=] { A.boardOpen = true; }},
+        {935, "nightsky", [=] { A.tab = Tab::None; E.time = 23.0f; E.cutscene.dur = 0; restoreSeason(3, 3, 23.0f); E.time = 23.0f; E.player.yaw = 0; E.player.pitch = 0.45f; }},
         {920, "caravan", [=] { Structure st; st.uid = 9001; st.kind = SK_MARKET_STALL; st.x = 4; st.z = 3; st.y = world::getTerrainHeight(4, 3); st.rot = 0; st.look = app::defaultLookFor(SK_MARKET_STALL); A.structures.push_back(st); village::structuresChanged(); events::restore(0, 0); look(0, 14, 0, -0.08f)(); }},
         {925, "photo", [=] { E.photo = true; E.photoStart = true; }},
         {930, "blizzard", [=] { E.photo = false; putenv((char*)"HW_BLIZZARD=1"); restoreSeason(3, 2, 13.0f); E.time = 13.0f; look(-30, 50, 0.6f, -0.04f)(); }},
@@ -665,8 +702,18 @@ int main(int argc, char** argv) {
         {680, "winter", [=] { E.time = 11; restoreSeason(3, 2, 11); look(-30, 50, 0.6f, -0.04f)(); }},
         {760, "mountain", [=] { restoreSeason(2, 0, 9); E.time = 9; look(160, -40, -0.8f, 0.05f)(); }},
         {820, "menu", [=] { A.menuOpen = true; }},
-        {840, "deer", [=] { screens::openOptions(false); A.menuOpen = false; A.status = Status::Playing; float hx, hz; if (wildlife::nearestHerd(SP_DEER, 0, 0, hx, hz)) { float x = hx + 5, z = hz + 4; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.4f, z}; E.player.yaw = std::atan2(-(hx - x), -(hz - z)); E.player.pitch = -0.15f; } }},
+        {840, "deer", [=] { screens::openOptions(false); A.menuOpen = false; A.status = Status::Playing; E.time = 10.0f; float hx, hz; if (wildlife::nearestHerd(SP_DEER, 0, 0, hx, hz)) { float x = hx + 5, z = hz + 4; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.4f, z}; E.player.yaw = std::atan2(-(hx - x), -(hz - z)); E.player.pitch = -0.15f; } }},
         {846, "deer2", [=] {}},
+        {1000, "", [=] { screens::openOptions(false); A.menuOpen = false; A.tab = Tab::None; A.status = Status::Playing; restoreSeason(2, 2, 11); E.time = 11.0f; look(4, 16, 0.3f, -0.05f)(); E.player.hp = 1e6f; E.player.maxHp = 1e6f; extras::debugBandits(4 - std::sin(0.3f) * 30, 16 - std::cos(0.3f) * 30, 6); }},
+        {1090, "bandits", [=] { E.player.hp = 1e6f; }},
+        {1094, "", [=] { E.player.hp = 1e6f; float bx, bz; extras::banditCamp(bx, bz); look(bx + 3, bz + 3, std::atan2(3.0f, 3.0f), -0.05f)(); }},
+        {1100, "bandits2", [=] {}},
+        {1110, "", [=] { screens::openOptions(false); A.menuOpen = false; A.tab = Tab::None; restoreSeason(0, 3, 10); E.time = 10.0f; const float* F = grass::flowerFields(); float cx = F[0], cz = F[1], r = F[2]; float L = std::sqrt(cx * cx + cz * cz); float x = cx - cx / L * (r + 14), z = cz - cz / L * (r + 14); look(x, z, std::atan2(-(cx - x), -(cz - z)), -0.12f)(); }},
+        {1170, "flowers", [=] {}},
+        {1174, "", [=] { const float* F = grass::flowerFields(); float cx = F[0], cz = F[1]; look(cx + 3, cz + 2, std::atan2(-3.0f, -2.0f) + 0.6f, -0.3f)(); }},
+        {1200, "flowers2", [=] {}},
+        {1210, "", [=] { screens::openOptions(false); A.menuOpen = false; A.tab = Tab::None; restoreSeason(2, 3, 8); E.time = 8.0f; look(-39.2f, 1.7f, 2.9f, -0.35f)(); }},
+        {1260, "riverleaf", [=] { float wl = world::waterHeightAt(-39.2f, 1.7f), g = world::getTerrainHeight(-39.2f, 1.7f); RiverHit q = world::riverQuery(-39.2f, 1.7f); std::printf("riverleaf: water %.2f ground %.2f river d %.1f hw %.1f wy %.2f\n", wl, g, q.d, q.hw, q.wy); }},
         {852, "", [=] { E.time = 12.0f; float hx, hz; if (wildlife::nearestHerd(SP_LEOPARD, 0, 0, hx, hz)) { float x = hx + 2.2f, z = hz + 1.6f; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.0f, z}; E.player.velY = 0; E.player.yaw = std::atan2(-(hx - x), -(hz - z)); E.player.pitch = -0.25f; } }},
         {853, "leo", [=] {}},
         {850, "wolf", [=] { float hx, hz; if (wildlife::nearestHerd(SP_WOLF, 0, 0, hx, hz)) { float x = hx + 6, z = hz + 5; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.5f, z}; E.player.yaw = std::atan2(-(hx - x), -(hz - z)); E.player.pitch = -0.15f; E.player.hp = 1e6f; } }},
@@ -700,12 +747,19 @@ int main(int argc, char** argv) {
     }
     std::string only = platform::argValue("--shots");
     if (!only.empty()) {
-      std::vector<Shot> keep;
+      // keep a setup step only when the shot it prepares was asked for (unrequested setups used to run anyway and
+      // added hundreds of software-rendered frames to every test)
+      std::vector<Shot> keep, pending;
       int f = 0;
       for (auto& s : shots) {
-        bool want = s.name.empty() || s.name == "end" || ("," + only + ",").find("," + s.name + ",") != std::string::npos;
-        if (!want) continue;
-        f = s.name.empty() ? std::max(s.frame, f + 2) : f + 70;
+        if (s.name.empty() && s.frame <= 60) { f = std::max(s.frame, f + 2); keep.push_back({f, s.name, s.setup}); continue; }  // boot: new game etc.
+        if (s.name.empty()) { pending.push_back(s); continue; }
+        bool want = s.name == "end" || ("," + only + ",").find("," + s.name + ",") != std::string::npos;
+        if (!want) { pending.clear(); continue; }
+        if (s.name == "end") pending.clear();
+        for (auto& p : pending) { f += 2; keep.push_back({f, p.name, p.setup}); }
+        pending.clear();
+        f = std::max(f + 70, 200);  // the first shot waits for the world to finish loading, as before
         keep.push_back({f, s.name, s.setup});
       }
       shots = keep;
@@ -784,6 +838,7 @@ int main(int argc, char** argv) {
     if (in.focusLost) needClick = true;
     if (in.pressed[K_F11]) platform::toggleFullscreen();
     if (in.pressed[K_F3]) screens::toggleStats();
+    if (in.pressed[K_L] && E.playing && !E.uiOpen && !E.photo) { E.lanternOn = !E.lanternOn; audio::crispClick(); }
     bool takeShot = in.pressed[K_F2];
     if (in.pressed[K_ESC]) { if (E.photo) E.photo = false; else screens::escape(); }
     else {
@@ -955,6 +1010,11 @@ void main(){
 
     if (takeShot) screenshot(timestampName());
     if (test && shotIdx < shots.size() && frames == shots[shotIdx].frame) {
+      if (!shots[shotIdx].name.empty() && shots[shotIdx].name != "end") {
+        int sf = statFrames + 1;
+        std::printf("STAT %s tris=%lld draws=%d inst=%d cull=%.0f haze=%.2f\n", shots[shotIdx].name.c_str(), gfx::triangles / sf, gfx::drawCalls / sf, forest::instanceCount(), envmap::g_cullQ, envmap::hazeAt(render::cam.pos.x, render::cam.pos.z));
+        std::fflush(stdout);
+      }
       if (!shots[shotIdx].name.empty() && shots[shotIdx].name != "end") screenshot(selftest + "/" + shots[shotIdx].name + ".png");
       if (shots[shotIdx].name == "end") {
         std::printf("selftest: %d draws/frame, %dk tris/frame\n", lastFs.drawCalls, lastFs.tris / 1000);
@@ -1042,9 +1102,12 @@ void main(){
         auto ms = [&](const char* k) { auto it = g_pp.gAcc.find(k); return it == g_pp.gAcc.end() ? 0.0 : it->second / g_pp.frames; };
         double tr = ms("forest::drawOpaque()"), gr = ms("grass::draw()");
         float budget = 1000.0f / std::max(30.0f, (float)platform::refreshRate());
+        // target fps: the player's cap (or the display); missing it for any reason (GPU, driver, laptop
+        // copy-to-display) now also trims detail, not only a busy GPU timer
+        float target = g_settings.fpsLimit > 0 ? std::min((float)g_settings.fpsLimit, (float)platform::refreshRate()) : (float)platform::refreshRate();
         static float over = 0, under = 0;
-        if (fs.gpuMs > budget * 0.85f) { over += (float)statT; under = 0; }
-        else if (fs.gpuMs < budget * 0.6f) { under += (float)statT; over = 0; }
+        if (fs.gpuMs > budget * 0.85f || fs.fps < target * 0.9f) { over += (float)statT; under = 0; }
+        else if (fs.gpuMs < budget * 0.6f && fs.fps > target * 0.97f) { under += (float)statT; over = 0; }
         else over = under = 0;
         if (over >= 1.0f) {
           over = 0;
@@ -1061,27 +1124,33 @@ void main(){
       if (g_settings.adaptiveDetail && !test && E.playing && fs.gpuMs > 0 && !g_pp.on) {
         static float dSlow = 0, dFast = 0;
         float budget = 1000.0f / (g_settings.fpsLimit > 0 ? std::min(g_settings.fpsLimit, platform::refreshRate()) : platform::refreshRate());
-        if (fs.gpuMs > budget * 0.85f) dSlow += (float)statT, dFast = 0;
-        else if (fs.gpuMs < budget * 0.6f) dFast += (float)statT, dSlow = 0;
+        float target = g_settings.fpsLimit > 0 ? std::min((float)g_settings.fpsLimit, (float)platform::refreshRate()) : (float)platform::refreshRate();
+        if (fs.gpuMs > budget * 0.85f || fs.fps < target * 0.9f) dSlow += (float)statT, dFast = 0;  // GPU busy or fps below the cap
+        else if (fs.gpuMs < budget * 0.6f && fs.fps > target * 0.97f) dFast += (float)statT, dSlow = 0;
         else dSlow = dFast = 0;
         float& ds = g_settings.detailScale;
-        if (dSlow >= 1.0f && ds > 0.45f) { ds = std::max(0.45f, ds - 0.1f); dSlow = 0; forest::markDirty(); }
+        if (dSlow >= 3.0f && ds > 0.6f) { ds = std::max(0.6f, ds - 0.1f); dSlow = 0; forest::markDirty(); }  // slower, shallower: no detail churn
         else if (dFast >= 4.0f && ds < 1.0f) { ds = std::min(1.0f, ds + 0.05f); dFast = 0; forest::markDirty(); }
       }
       if (g_settings.adaptiveQuality && !test && E.playing) {
         float budget = 1000.0f / (g_settings.fpsLimit > 0 ? g_settings.fpsLimit : 60);
-        if (fs.gpuMs > budget * 0.78f || fs.fps < (g_settings.fpsLimit > 0 ? g_settings.fpsLimit : 60) * 0.92f) slowT += (float)statT, fastT = 0;
-        else if (fs.gpuMs < budget * 0.55f) fastT += (float)statT, slowT = 0;
-        bool gpuBound = fs.gpuMs > fs.cpuMs * 0.8f;
-        if (slowT > 2 && gpuBound && renderScale > 0.72f) {
-          renderScale = std::max(0.72f, renderScale - 0.05f);
+        // only the GPU's own time decides: a low fps from vsync misses, driver stalls or the CPU no longer
+        // makes the picture blurrier (it used to drop render scale to ~68% on frames the GPU finished in 8 ms)
+        if (fs.gpuMs > budget * 0.85f) slowT += (float)statT, fastT = 0;
+        else if (fs.gpuMs < budget * 0.6f) fastT += (float)statT, slowT = 0;
+        else slowT = fastT = 0;
+        bool gpuBound = fs.gpuMs > fs.cpuMs * 1.2f;
+        float floorS = std::min(0.8f, g_settings.renderScale);  // auto never goes below 80% (or the player's own lower setting)
+        if (renderScale < floorS) renderScale = floorS;
+        if (slowT > 3 && gpuBound && renderScale > floorS) {
+          renderScale = std::max(floorS, renderScale - 0.05f);
           slowT = 0;
         } else if (slowT > 2 && g_settings.grassRadius > baseGrass * 0.55f) {
           g_settings.grassRadius *= 0.85f;
           g_settings.undergrowthRadius *= 0.88f;
           forest::markDirty();
           slowT = 0;
-        } else if (fastT > 6 && renderScale < g_settings.renderScale) {
+        } else if (fastT > 3 && renderScale < g_settings.renderScale) {
           renderScale = std::min(g_settings.renderScale, renderScale + 0.1f);
           fastT = 0;
         } else if (fastT > 8 && g_settings.grassRadius < baseGrass) {

@@ -20,6 +20,7 @@ struct Animal {
   float leap, rear, hunger, lunge;
   bool raid;
   float gaitT, gaitV;
+  float stuckT = 0, stuckX = 0, stuckZ = 0;  // progress check: pinned against something -> detour
   // fixed-step interpolation: state at the previous simulation step
   float px = 0, py = 0, pz = 0, pyaw = 0, pphase = 0;
   bool pv = false;

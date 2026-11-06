@@ -1,3 +1,5 @@
+#include "../render/envmap.h"
+#include "extras.h"
 #include "../ui/screens.h"
 #include "events.h"
 #include "player.h"
@@ -156,6 +158,9 @@ std::string promptText() {
   }
   if (wildlife::findCarcass(p.x, p.z, 3.2f)) return "[E] Harvest";
   { float tx, ty, tz, tw; if (events::traderPos(tx, ty, tz, tw) && hypot2(tx - p.x, tz - p.z) < 3.2f) return "[E] Trade with the caravan"; }
+  { std::string who = village::residentInfo(p.x, p.z, false); if (!who.empty()) return "[E] Talk to " + who; }
+  if (extras::nearBoard(p.x, p.z)) return "[E] Read the notice board";
+  if (extras::sleepSpot(p.x, p.z) && extras::sleepBlocked().empty()) return "[E] Sleep until dawn";
   NpcRt* npc = npcs::find(p.x, p.z, 3.6f);
   ResNode* node = resources::find(p.x, p.z, 3.0f);
   if (node && !(npc && hypot2(npc->x - p.x, npc->z - p.z) < hypot2(node->x - p.x, node->z - p.z) + 0.8f))
@@ -218,6 +223,9 @@ void interact() {
   const Shrine* sh = temple::nearShrine(p.x, p.z, 12);
   if (sh && p.y > sh->y) { startSync(*sh); return; }
   { float tx, ty, tz, tw; if (events::traderPos(tx, ty, tz, tw) && hypot2(tx - p.x, tz - p.z) < 3.2f) { screens::openMarket(); audio::coinPickup(); return; } }
+  { std::string info = village::residentInfo(p.x, p.z, true); if (!info.empty()) { actions::notify(info); audio::crispClick(); return; } }
+  if (extras::nearBoard(p.x, p.z)) { A.boardOpen = true; audio::crispClick(); return; }
+  if (extras::sleepSpot(p.x, p.z) && extras::sleepBlocked().empty()) { extras::sleep(); return; }
   if (Animal* carcass = wildlife::findCarcass(p.x, p.z, 3.2f)) {
     CarcassYield r = wildlife::harvestCarcass(carcass);
     actions::addItems(r.yields);
@@ -400,7 +408,9 @@ void update(float dt) {
     speed *= 1.0f - 0.25f * std::min(1.0f, (season.snow - 0.45f) * 3);  // deep snow drags without snowshoes (trails are trodden down)
   if (B.drawing || B.aiming) speed *= 0.6f;
   float ground0 = walkHeight(P.pos.x, P.pos.z);
-  if (ground0 < world::waterHeightAt(P.pos.x, P.pos.z) - 0.2f) speed *= 0.6f;
+  float water0 = world::waterHeightAt(P.pos.x, P.pos.z);
+  if (ground0 < water0 - 0.2f) speed *= 0.6f;
+  if (ground0 < water0 - 1.15f) speed *= 0.6f;  // swimming
   g_vel = Vec3::lerp(g_vel, move * speed, std::min(1.0f, dt * (P.onGround ? 12 : 7)));
 
   float px0 = P.pos.x, pz0 = P.pos.z;
@@ -463,6 +473,15 @@ void update(float dt) {
   g_eyeH += ((P.crouching ? 1.05f : 1.65f) - g_eyeH) * std::min(1.0f, dt * 10);
   float headBob = P.moving && P.onGround ? std::sin(E.clock * (P.sprinting ? 12 : 8.5f)) * (P.sprinting ? 0.05f : 0.025f) : 0;
   P.pos.y = g_feetY + g_eyeH + headBob;
+  {
+    // deep water: swim with the head above the surface instead of walking along the lake bed with the eyes under it
+    float wl = world::waterHeightAt(P.pos.x, P.pos.z);
+    float swimEye = wl + 0.42f + std::sin(E.clock * 1.7f) * 0.03f;
+    static float s_swim = 0;
+    float want = P.pos.y < swimEye ? 1.0f : 0.0f;
+    s_swim += (want - s_swim) * std::min(1.0f, dt * 4);
+    if (s_swim > 0.001f) P.pos.y = lerpf(P.pos.y, std::max(P.pos.y, swimEye), s_swim);
+  }
 
   if (P.moving && P.onGround && active) {
     g_footT += dt * (P.sprinting ? 3.3f : P.crouching ? 1.2f : 2.0f);
@@ -474,8 +493,12 @@ void update(float dt) {
       if (ground < world::waterHeightAt(P.pos.x, P.pos.z) + 0.2f && !onFloor) audio::footstepWater();
       else if (onFloor) audio::footstepWood();
       else if (season.snow > 0.45f) audio::footstepSnow();
-      else if (ground > 60 || world::pathMask(P.pos.x, P.pos.z) > 0.4f) audio::footstepStone();
-      else if (!P.crouching) audio::footstepGrass();
+      else {
+        envmap::Surface sf = envmap::surfaceAt(P.pos.x, P.pos.z);  // baked surface map
+        if (sf == envmap::SURF_STONE) audio::footstepStone();
+        else if (sf == envmap::SURF_EARTH) { if (!P.crouching) audio::footstepStone(); }  // packed earth: firmer, duller step
+        else if (!P.crouching) audio::footstepGrass();
+      }
     }
   }
 

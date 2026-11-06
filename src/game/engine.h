@@ -86,6 +86,7 @@ enum class Tab { None, Inventory, Quests, Buildings, Map };
 
 struct Engine {
   bool playing = false;
+  bool lanternOn = false;  // hand lantern, toggled with L
   bool photo = false;  // photo mode: free camera, frozen world, no HUD
   bool photoStart = false;
   bool uiOpen = false;
@@ -155,7 +156,7 @@ struct App {
   Tab tab = Tab::None;
   int buildSection = 1;
   int dialogue = -1;
-  bool menuOpen = false, howToOpen = false, showStyle = false;
+  bool menuOpen = false, howToOpen = false, showStyle = false, boardOpen = false;
   bool musicMuted = false, sfxMuted = false;
   std::string notification;
   double notifyAt = -100;

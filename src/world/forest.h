@@ -1,4 +1,6 @@
 #pragma once
+#include <functional>
+#include <string>
 #include "../assets/assets.h"
 #include "../core/math.h"
 #include <vector>
@@ -26,4 +28,8 @@ bool treeTrunkAt(float x, float y, float z);
 std::vector<AssetRequest> requiredFiles();
 void shutdown();
 int instanceCount();
+// every placed item of a layer (0 grass, 1 undergrowth, 2 rocks, 3 trees) over the whole map, ignoring blockers' draw-time culling
+bool obstacleAt(float x, float z, float r);  // would something r wide overlap a trunk, rock, stump or log here?
+void precomputeItems();  // whole-map tree/rock/undergrowth tables (call once terrain and water exist)
+void forEachItem(int layer, const std::function<void(float x, float y, float z, float scale, const std::string& file)>& f);
 }

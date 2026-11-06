@@ -195,6 +195,7 @@ void buildRiver() {
     float bx = R.pts[b][0] - R.pts[i][0], bz = R.pts[b][1] - R.pts[i][1];
     float curv = std::fabs(std::atan2(ax * bz - az * bx, ax * bx + az * bz));
     hw += curv * 6.0f;
+    hw *= 0.82f + 0.4f * valueNoise(s * 0.021f, 3.7f, 211);  // pools and narrows along the course
     float depth = 0.72f + 0.3f * std::sin(s * 0.023f + 0.4f) + curv * 1.2f;
     if (s < 34) { hw = lerpf(9.5f, hw, sstep(s, 18, 34)); depth = lerpf(1.3f, depth, sstep(s, 22, 34)); }
     float kb = sstep(std::fabs(s - sBridge), 6, 34);
@@ -274,10 +275,20 @@ float riverMask(float x, float z) {
   return 1.0f - sstep(q.d, q.hw - 2.0f, q.hw + 5.0f);
 }
 
+
+// lake shores: bays and points around the rim plus a ragged waterline, so no lake is a perfect circle.
+// Returns distance to the lake centre adjusted so the shoreline sits at d == L.r.
+float lakeDist(const Lake& L, float x, float z) {
+  float dx = x - L.x, dz = z - L.z, d = hypot2(dx, dz);
+  float a = std::atan2(dz, dx);
+  float off = L.r * (0.14f * std::sin(2 * a + L.x * 0.1f) + 0.09f * std::sin(3 * a + 1.3f + L.z * 0.07f) + 0.05f * std::sin(5 * a + L.x * 0.03f));
+  off += (valueNoise(x * 0.18f, z * 0.18f, 207) - 0.5f) * 2.2f * sstep(d, L.r * 0.5f, L.r * 0.8f);
+  return std::max(0.0f, d - off);
+}
 int lakeAt(float x, float z, float margin) {
   for (size_t i = 0; i < LAKES.size(); i++) {
     const Lake& L = LAKES[i];
-    if (hypot2(x - L.x, z - L.z) < L.r + margin) return (int)i;
+    if (lakeDist(L, x, z) < L.r + margin) return (int)i;
   }
   return -1;
 }
@@ -286,7 +297,7 @@ float waterHeightAt(float x, float z) {
   float w = -1e9f;
   RiverHit q = riverQuery(x, z);
   if (q.d < q.hw + 0.5f) w = q.wy;
-  for (const Lake& L : LAKES) if (hypot2(x - L.x, z - L.z) < L.r + 0.5f) w = std::max(w, L.level);
+  for (const Lake& L : LAKES) if (lakeDist(L, x, z) < L.r + 0.5f) w = std::max(w, L.level);
   return w;
 }
 
@@ -429,10 +440,18 @@ void mountainLift(float x, float z, float r, float rv, float& u, float& m) {
   }
 }
 
+
+// ragged river banks: small inlets, gravel points and undercut bays instead of parallel curves
+// (kept off the bridge and ford sites, where structures sit on the banks)
+float bankNoise(float x, float z) {
+  float k = sstep(hypot2(x - BRIDGE_SITE[0], z - BRIDGE_SITE[1]), 18, 40) * sstep(hypot2(x - FORD_SITE[0], z - FORD_SITE[1]), 14, 34);
+  if (k <= 0) return 0;
+  return k * (fbm(x * 0.06f + 2.3f, z * 0.06f - 4.1f, 2, 201) * 3.0f + (valueNoise(x * 0.22f, z * 0.22f, 203) - 0.5f) * 1.6f);
+}
 float applyWater(float x, float z, float h) {
   RiverHit q = riverQuery(x, z);
   if (q.d < q.hw + RIVER_REACH) {
-    float d = q.d;
+    float d = std::max(0.0f, q.d + clampf(bankNoise(x, z), -0.45f * q.hw, 0.3f * q.hw));  // narrow streams keep their water
     float t = sstep(d, q.hw + 1.5f, q.hw + 34);
     float bank = q.wy + 0.5f + std::max(0.0f, d - q.hw) * 0.05f;
     if (h > bank) h = bank + (h - bank) * (0.1f + 0.9f * t);
@@ -444,7 +463,7 @@ float applyWater(float x, float z, float h) {
     h = lerpf(h, std::min(h, bed + std::max(0.0f, d - q.hw) * 0.35f), k);
   }
   for (const Lake& L : LAKES) {
-    float d = hypot2(x - L.x, z - L.z);
+    float d = lakeDist(L, x, z);
     if (d > L.r + 30) continue;
     float t = sstep(d, L.r + 2, L.r + 28);
     float bank = L.level + 0.45f;
@@ -482,6 +501,18 @@ float naturalHeight(float x, float z) {
     h += hills * hill;
   }
   h += (mesaLift(x, z) + featureLift(x, z, r)) * (1 - u) + m;
+  {
+    // rolling ground: low swells, knolls and hollows across the whole valley floor, like a real forest floor
+    // (trails, roads, river, lakes, the village and summit plateaus are flattened back afterwards in baseHeight)
+    float roll = sstep(r, SETTLEMENT_RADIUS + 6, SETTLEMENT_RADIUS + 45) * (1 - u) * (1 - cliffMask(x, z));
+    if (roll > 0) {
+      float swell = fbm(x * 0.026f + 5.3f, z * 0.026f - 3.1f, 3, 91) * 3.4f;                // 25-40 m swells, +-3 m
+      float knoll = ridged(x * 0.045f - 2.2f, z * 0.045f + 6.4f, 2, 92) * 1.6f - 0.8f;     // rounded knolls and saddles
+      float hollow = valueNoise(x * 0.055f + 9.1f, z * 0.055f - 1.7f, 93);
+      hollow = -sstep(hollow, 0.62f, 0.9f) * 1.5f;                                          // scattered shallow hollows
+      h += roll * (swell + knoll + hollow);
+    }
+  }
   float cm = cliffMask(x, z);
   if (cm > 0) {
     const P2& hd = RIVER.head;
@@ -724,13 +755,14 @@ float baseHeight(float x, float z) {
   h = lerpf(h, 0.1f, 1 - sstep(r, SETTLEMENT_RADIUS, SETTLEMENT_RADIUS + 22));
   if (q.rd < 4) h -= (1 - sstep(q.rd, 1.2f, 3.2f)) * 0.1f;
   RiverHit rq = riverQuery(x, z);
-  if (rq.d < rq.hw + 3) {
-    float u = clampf(rq.d / std::max(0.5f, rq.hw), 0, 1);
+  float rqd = rq.d < 1e8f ? std::max(0.0f, rq.d + clampf(bankNoise(x, z), -0.45f * rq.hw, 0.3f * rq.hw)) : rq.d;
+  if (rqd < rq.hw + 3) {
+    float u = clampf(rqd / std::max(0.5f, rq.hw), 0, 1);
     float bed = rq.wy - rq.depth * (1 - u * u) - 0.06f;
-    h = lerpf(h, std::min(h, bed), 1 - sstep(rq.d, rq.hw - 0.5f, rq.hw + 2.5f));
+    h = lerpf(h, std::min(h, bed), 1 - sstep(rqd, rq.hw - 0.5f, rq.hw + 2.5f));
   }
   for (const Lake& L : LAKES) {
-    float d = hypot2(x - L.x, z - L.z);
+    float d = lakeDist(L, x, z);
     if (d < L.r + 1) {
       float u = clampf(d / L.r, 0, 1);
       h = std::min(h, lerpf(L.level - L.depth * (1 - u * u) - 0.15f, h, sstep(d, L.r - 1.5f, L.r + 1)));
@@ -1200,7 +1232,7 @@ Color terrainColor(float x, float z, float h, float normalY) {
     out = out.lerp(mud, bank * (1 - bar) * 0.25f);
   }
   for (const Lake& L : LAKES) {
-    float d = hypot2(x - L.x, z - L.z);
+    float d = lakeDist(L, x, z);
     if (d > L.r + 12) continue;
     float lm = 1 - sstep(d, L.r - 1.5f, L.r + 1.5f);
     out = out.lerp(wet, lm * 0.9f);

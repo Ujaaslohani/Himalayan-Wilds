@@ -10,7 +10,8 @@ struct Settings {
   bool vsync = true;
   int msaa = 0;
   bool fxaa = true;
-  int shadowSize = 2048;
+  bool ssao = false;  // screen-space contact shadows: off by default (baked AO now covers trees, rocks, buildings and the forest floor)
+  int shadowSize = 1536;  // medium
   float mouseSensitivity = 0.0024f;
   float playerSpeed = 4.8f;
   float sprintMultiplier = 1.75f;
@@ -42,7 +43,7 @@ extern Settings g_settings;
 
 enum Key {
   K_W, K_A, K_S, K_D, K_Q, K_E, K_R, K_F, K_C, K_J, K_B, K_M, K_I, K_TAB, K_SPACE, K_SHIFT, K_CTRL,
-  K_ESC, K_ENTER, K_UP, K_DOWN, K_LEFT, K_RIGHT, K_1, K_2, K_3, K_4, K_5, K_6, K_F2, K_F3, K_F4, K_F11, K_P, K_COUNT
+  K_ESC, K_ENTER, K_UP, K_DOWN, K_LEFT, K_RIGHT, K_1, K_2, K_3, K_4, K_5, K_6, K_F2, K_F3, K_F4, K_F11, K_P, K_L, K_COUNT
 };
 
 struct Input {

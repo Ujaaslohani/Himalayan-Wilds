@@ -28,7 +28,7 @@ const ItemDef ITEMS[] = {
     {"recurve_bow", "Recurve Bow", "Recurve Bow", "Arrows hit 30% harder.", "bow"},
     {"quiver", "Hunter's Quiver", "Quiver", "More arrows from every timber.", "arrow"},
     {"snowshoes", "Snowshoes", "Snowshoes", "No slowdown in deep snow.", "wood"},
-    {"lantern", "Hand Lantern", "Lantern", "Lights your way at night.", "herb"},
+    {"lantern", "Hand Lantern", "Lantern", "Press L to light it or put it out.", "herb"},
 };
 const ItemDef* findItem(const std::string& id) {
   for (auto& i : ITEMS)

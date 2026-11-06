@@ -1,3 +1,5 @@
+#include "../assets/bakeao.h"
+#include "../render/envmap.h"
 #include "events.h"
 #include "../render/sky.h"
 #include "village.h"
@@ -368,6 +370,7 @@ SpotCheck checkStructureSpot(StructureKind kind, float x, float z, float rot, in
   float y = info.group == KG_DECOR ? world::getTerrainHeight(x, z) : mn;
   auto res = [&](const std::string& reason) { return SpotCheck{reason.empty(), reason, x, y, z, rot}; };
   if (hypot2(x, z) > settlementLimit()) return res("Too far from the village edge");
+  if (hypot2(x - 6.0f, z + 5.0f) < structureRadius(kind) + 1.4f) return res("Too close to the notice board");
   if (world::riverMask(x, z) > 0.02f || y < -0.3f || world::lakeAt(x, z, 2) >= 0) return res("Too close to the water");
   if (info.group != KG_DECOR && mx - y > 1.6f) return res("Ground is too steep");
   bool isDecor = info.group == KG_DECOR;
@@ -491,7 +494,45 @@ void syncResidents() {
   assignJobs();
 }
 
-void resetResidents() { g_res.clear(); }
+void resetResidents() { g_res.clear(); g_nextResident = 1; }
+
+// names and traits come from the villager's id, so they stay the same after loading a save
+static const char* RNAMES[24] = {"Asha", "Bhim", "Chandni", "Dorje", "Gauri", "Hari", "Ishaan", "Jamuna", "Kesang", "Lata", "Mohan", "Nima",
+                                 "Parvati", "Ramesh", "Sonam", "Tara", "Uma", "Vikram", "Yangchen", "Zara", "Pema", "Kunal", "Dechen", "Meera"};
+struct TraitDef { const char* name; const char* blurb; float work; };
+static const TraitDef TRAITS[5] = {{"Hard worker", "gets 20% more done", 1.2f}, {"Early riser", "starts work at first light (+10%)", 1.1f},
+                                   {"Easy-going", "works at their own pace (-15%)", 0.85f}, {"Cheerful", "lifts everyone's spirits", 1.0f}, {"Steady", "reliable, no surprises", 1.0f}};
+static uint32_t rhash(int id, uint32_t salt) { uint32_t h = (uint32_t)id * 2654435761u ^ salt; h ^= h >> 15; h *= 2246822519u; h ^= h >> 13; return h; }
+static const char* residentName(int id) { return RNAMES[rhash(id, 7) % 24]; }
+static int residentTrait(int id) { return (int)(rhash(id, 91) % 5); }
+
+float traitMult(int j) {
+  float sum = 0;
+  int n = 0;
+  for (auto& r : g_res)
+    if (r.job == JOB_KEYS[j] || r.autoJob == JOB_KEYS[j]) { sum += TRAITS[residentTrait(r.id)].work; n++; }
+  return n ? sum / n : 1.0f;
+}
+
+std::string residentInfo(float x, float z, bool full) {
+  const Resident* best = nullptr;
+  float bd = 2.6f;
+  for (auto& r : g_res) {
+    if (r.mode == RM_INSIDE) continue;
+    float d = hypot2(r.x - x, r.z - z);
+    if (d < bd) { bd = d; best = &r; }
+  }
+  if (!best) return "";
+  const Resident& r = *best;
+  std::string nm = residentName(r.id);
+  if (!full) return nm;
+  const char* JOBN[4] = {"woodcutter", "quarry worker", "herbalist", "hunter"};
+  std::string job = "helping wherever needed";
+  for (int k = 0; k < 4; k++) if (r.job == JOB_KEYS[k] || r.autoJob == JOB_KEYS[k]) job = JOBN[k];
+  std::string mood = r.hunger > 0.7f ? "hungry" : r.tired > 0.75f ? "tired" : r.lonely > 0.65f ? "lonely" : A.coldDays > 0 ? "cold" : A.hungerDays > 0 ? "worried about food" : "content";
+  const TraitDef& t = TRAITS[residentTrait(r.id)];
+  return nm + " — " + job + ", feeling " + mood + ". " + t.name + ": " + t.blurb + ".";
+}
 
 // villagers with no job set by the player pick whatever the village is shortest of (timber, slate, herbs, food)
 void refreshAutoJobs() {
@@ -743,12 +784,14 @@ static void rebuildStructures() {
     const BuiltModel& m = structureModel(s.kind, s.look);
     if (!m.data || m.data->fmt != VFmt::P3C4) { md.verts.clear(); break; }
     const MeshData& src = *m.data;
-    uint32_t base = (uint32_t)md.vertexCount;
-    size_t off = md.verts.size();
-    md.verts.insert(md.verts.end(), src.verts.begin(), src.verts.end());
+    MeshData t;  // this structure in world space
+    t.fmt = VFmt::P3C4;
+    t.verts = src.verts;
+    t.idx = src.idx;
+    t.vertexCount = src.vertexCount;
     float c = std::cos(s.rot), sn = std::sin(s.rot);
-    for (int i = 0; i < src.vertexCount; i++) {
-      VtxP3C4* v = (VtxP3C4*)(md.verts.data() + off) + i;
+    for (int i = 0; i < t.vertexCount; i++) {
+      VtxP3C4* v = (VtxP3C4*)t.verts.data() + i;
       float lx = v->p[0], lz = v->p[2];
       v->p[0] = s.x + lx * c + lz * sn;
       v->p[1] += s.y;
@@ -756,8 +799,19 @@ static void rebuildStructures() {
       md.bmin = {std::min(md.bmin.x, v->p[0]), std::min(md.bmin.y, v->p[1]), std::min(md.bmin.z, v->p[2])};
       md.bmax = {std::max(md.bmax.x, v->p[0]), std::max(md.bmax.y, v->p[1]), std::max(md.bmax.z, v->p[2])};
     }
-    for (uint32_t ix : src.idx) md.idx.push_back(ix + base);
-    md.vertexCount += src.vertexCount;
+    {
+      // baked AO per building: shade under eaves, inside porches and where walls meet the ground
+      AOGrid g;
+      g.add(t);
+      g.groundAt = [](float x, float z) { return world::getTerrainHeight(x, z) - 0.05f; };
+      g.build(96, 0.12f);
+      g.maxDist = 2.5f;
+      g.applyColour(t, 0.75f);
+    }
+    uint32_t base = (uint32_t)md.vertexCount;
+    md.verts.insert(md.verts.end(), t.verts.begin(), t.verts.end());
+    for (uint32_t ix : t.idx) md.idx.push_back(ix + base);
+    md.vertexCount += t.vertexCount;
   }
   if (!md.verts.empty() && md.vertexCount > 0) g_merged = uploadMesh(md);
 }
@@ -894,8 +948,32 @@ void drawShadow() {
   g_sLegs.draw();
 }
 
+// baked ground shade and firelight: hand the fixed occluders and lamps to the detail map (rebakes only on change)
+static void feedDetailMap() {
+  static std::vector<envmap::Stamp> occ;
+  static std::vector<envmap::FireLight> lights;
+  occ.clear();
+  lights.clear();
+  for (auto& s : A.structures) {
+    const BuiltModel& m = structureModel(s.kind, s.look);
+    if (!m.data) continue;
+    const Vec3 &lo = m.data->bmin, &hi = m.data->bmax;
+    float cx = (lo.x + hi.x) * 0.5f, cz = (lo.z + hi.z) * 0.5f, c = std::cos(s.rot), sn = std::sin(s.rot);
+    float hx = (hi.x - lo.x) * 0.5f, hz = (hi.z - lo.z) * 0.5f;
+    if (hx < 0.3f || hz < 0.3f || hi.y - lo.y < 0.8f) continue;  // fences and flat things cast no real contact shade
+    occ.push_back({s.x + cx * c + cz * sn, s.z - cx * sn + cz * c, hx * 0.9f, hz * 0.9f, s.rot, 0.42f, false});
+  }
+  for (auto& l : g_staticLights) lights.push_back({l.x, l.y, l.z, 0.85f, 7.0f});
+  static std::vector<Vec3> templeSpots = temple::lightSpots();
+  for (auto& l : templeSpots) lights.push_back({l.x, l.y, l.z, 0.7f, 5.5f});
+  for (auto& b : A.buildings)
+    if (b.built && b.type == "campfire") lights.push_back({b.pos[0], b.pos[1] + 0.6f, b.pos[2], 1.0f, 10.0f});
+  envmap::setDetailSources(occ, lights);
+}
+
 void addLights() {
   if (g_structDirty) rebuildStructures();
+  feedDetailMap();
   const Vec3& p = E.player.pos;
   auto spot = [&](const Vec3& s, float size, float poolR) {
     // flame flicker: every light breathes on its own rhythm
@@ -903,10 +981,11 @@ void addLights() {
     float fl = 1.0f;  // steady light (flicker removed)
     (void)ph;
     if (size > 0) fx::glow(s.x, s.y, s.z, size * fl);
+    if (size > 0) fx::halo(s.x, s.y, s.z, size * 5.5f);  // the lamp lights the misty air around it
     if (poolR > 0 && hypot2(s.x - p.x, s.z - p.z) < 450) fx::pool(s.x, world::getTerrainHeight(s.x, s.z) + 0.06f, s.z, poolR * (0.94f + 0.06f * fl));
   };
   // lamps are lit at dusk and put out at dawn
-  if (E.daylight < 0.55f) for (auto& l : g_staticLights) spot(l, 1.1f, 3.2f);
+  if (E.daylight < 0.55f) for (auto& l : g_staticLights) spot(l, 1.1f, 0.0f);  // ground pool is baked (envmap detail map)
   // seasonal festivals: Losar rings the hearth with butter lamps, the harvest festival hangs marigold-glow garlands
   if (int fk = events::festival()) {
     int n = fk == 1 ? 18 : 12;
@@ -921,12 +1000,18 @@ void addLights() {
   if (E.daylight < 0.25f && A.population >= 3 && !g_res.empty() && g_res[0].mode != RM_INSIDE)
     spot({g_res[0].x + std::sin(g_res[0].yaw) * 0.3f, g_res[0].y + 1.9f, g_res[0].z + std::cos(g_res[0].yaw) * 0.3f}, 0.6f, 4.5f);
   // hand lantern: a warm pool around the player after dark
-  if (invCount("lantern") > 0 && E.daylight < 0.45f) {
+  {
+    static bool hinted = false;  // once per session, at the first dusk: tell the player about the lantern
+    if (!hinted && E.playing && E.daylight < 0.3f && !E.lanternOn) { hinted = true; actions::notify("It's getting dark. Press L to light your lantern."); }
+  }
+  if (E.lanternOn && !E.photo) {  // the flame itself; the light it casts is real (u_lantern in the frame data)
     Vec3 f = render::cam.forward();
-    spot({p.x + f.x * 0.5f + 0.25f, p.y - 0.55f, p.z + f.z * 0.5f}, 0.35f, 6.5f);
+    Vec3 r = Vec3(-f.z, 0, f.x).normalized();
+    Vec3 lp = render::cam.pos + Vec3(f.x, 0, f.z).normalized() * 0.45f - r * 0.3f + Vec3(0, -0.6f, 0);
+    (void)lp;  // no visible flame sprite: held low it read as a glare on the ground; the light itself is real (u_lantern)
   }
   static std::vector<Vec3> templeSpots = temple::lightSpots();
-  for (auto& l : templeSpots) spot(l, 1.3f, 2.4f);  // butter lamps cast warm pools
+  for (auto& l : templeSpots) spot(l, 1.3f, 0.0f);  // butter lamps: warm pools are baked into the detail map
   std::vector<Vec3> win;
   for (auto& b : A.buildings) {
     if (!b.built) continue;

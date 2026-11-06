@@ -41,6 +41,7 @@ PlacementCheck checkPlacement(const Building& b, float x, float z, float rot) {
   float y = mn;
   auto res = [&](const std::string& reason) { return PlacementCheck{reason.empty(), reason, x, y, z, rot}; };
   if (hypot2(x, z) > settlementLimit()) return res("Too far from the village edge");
+  if (hypot2(x - 6.0f, z + 5.0f) < r + 1.6f) return res("Too close to the notice board");
   if (world::riverMask(x, z) > 0.02f || y < -0.3f || world::lakeAt(x, z, 2) >= 0) return res("Too close to the water");
   if (mx - y > 1.5f) return res("Ground is too steep");
   for (auto& o : A.buildings) {

@@ -1,3 +1,4 @@
+#include "extras.h"
 #include "events.h"
 #include "../world/terrain.h"
 #include "../render/render.h"
@@ -98,6 +99,7 @@ void dawn() {
   if ((season.index == 3 && season.dayOfSeason == 1) || (season.index == 2 && season.dayOfSeason == 4)) {
     bool losar = season.index == 3;
     g_active = losar ? EV_LOSAR : EV_HARVESTFEST;
+    extras::stat("festivals");
     g_days = 0;
     g_work = 1.2f;
     E.festival.t = 400;
@@ -119,7 +121,7 @@ void dawn() {
   for (int tries = 0; tries < 12 && pick < 0; tries++) {
     int e = (int)(randf() * EV_COUNT) % EV_COUNT;
     if (A.stage >= 3 && randf() < 0.25f) e = EV_TRADER;  // market towns draw more traders
-    if (e == EV_TRADER && !hasKind(SK_MARKET_STALL)) continue;
+    if (e == EV_TRADER && (!hasKind(SK_MARKET_STALL) || extras::banditsActive())) continue;  // bandits scare traders off
     if (e == EV_SICK && !hasKind(SK_ANIMAL_SHELTER)) continue;
     if (e == EV_STORM && season.snow > 0.4f) continue;
     if (e == EV_WANDERER && A.population >= app::capacity()) continue;
@@ -152,6 +154,7 @@ void dawn() {
     case EV_FESTIVAL:
       g_work = 1.25f;
       E.festival.t = 150;
+      extras::stat("festivals");
       audio::victoryFanfare();
       actions::notify("Festival day! Spirits are high: all work +25% today.");
       break;

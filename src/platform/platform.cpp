@@ -36,7 +36,7 @@ int mapKey(int k) {
     case GLFW_KEY_UP: return K_UP; case GLFW_KEY_DOWN: return K_DOWN; case GLFW_KEY_LEFT: return K_LEFT; case GLFW_KEY_RIGHT: return K_RIGHT;
     case GLFW_KEY_1: return K_1; case GLFW_KEY_2: return K_2; case GLFW_KEY_3: return K_3;
     case GLFW_KEY_4: return K_4; case GLFW_KEY_5: return K_5; case GLFW_KEY_6: return K_6;
-    case GLFW_KEY_F2: return K_F2; case GLFW_KEY_F3: return K_F3; case GLFW_KEY_F4: return K_F4; case GLFW_KEY_F11: return K_F11; case GLFW_KEY_P: return K_P;
+    case GLFW_KEY_F2: return K_F2; case GLFW_KEY_F3: return K_F3; case GLFW_KEY_F4: return K_F4; case GLFW_KEY_F11: return K_F11; case GLFW_KEY_P: return K_P; case GLFW_KEY_L: return K_L;
     default: return -1;
   }
 }
@@ -179,6 +179,7 @@ void loadSettings() {
       else if (k == "vsync") s.vsync = bv;
       else if (k == "msaa") s.msaa = iv;
       else if (k == "fxaa") s.fxaa = bv;
+      else if (k == "ssao") s.ssao = bv;
       else if (k == "shadow_size") s.shadowSize = iv;
       else if (k == "mouse_sensitivity") s.mouseSensitivity = fv;
       else if (k == "player_speed") s.playerSpeed = fv;
@@ -319,8 +320,8 @@ bool saveSettings() {
   const Settings& s = g_settings;
   char b[2048];
   std::snprintf(b, sizeof b,
-                "; Himalayan Wilds settings (also editable from Options in game)\n[video]\nwidth = %d\nheight = %d\nfullscreen = %s\nvsync = %s\nmsaa = %d\nfxaa = %s\nshadow_size = %d\ntexture_size = %d\nadaptive_quality = %s\nadaptive_detail = %s\ntri_budget = %d\nui_scale = %.2f\nrender_scale = %.2f\ndraw_distance = %.2f\nfull_map = %s\nfps_limit = %d\nmenu_fps = %d\n\n[world]\n; weather: auto (showers come and go), rain (always raining, except in snow), clear (never rains)\nweather = %s\ngrass_radius = %.0f\nundergrowth_radius = %.0f\ntree_radius = %.0f\nrock_radius = %.0f\n\n[player]\nfov = %.0f\nmouse_sensitivity = %.4f\nplayer_speed = %.2f\nsprint_multiplier = %.2f\ngravity = %.1f\n\n[audio]\nmusic_volume = %.2f\nsfx_volume = %.2f\n",
-                s.width, s.height, g_fullscreen ? "true" : "false", s.vsync ? "true" : "false", s.msaa, s.fxaa ? "true" : "false", s.shadowSize, s.textureSize, s.adaptiveQuality ? "true" : "false", s.adaptiveDetail ? "true" : "false", s.triBudget, s.uiScale, s.renderScale, s.drawDistance, s.fullMap ? "true" : "false", s.fpsLimit, s.menuFps,
+                "; Himalayan Wilds settings (also editable from Options in game)\n[video]\nwidth = %d\nheight = %d\nfullscreen = %s\nvsync = %s\nmsaa = %d\nfxaa = %s\n; SSAO: soft screen-space contact shadows (costs ~0.3-0.6 ms; baked AO already covers most of it)\nssao = %s\nshadow_size = %d\ntexture_size = %d\nadaptive_quality = %s\nadaptive_detail = %s\ntri_budget = %d\nui_scale = %.2f\nrender_scale = %.2f\ndraw_distance = %.2f\nfull_map = %s\nfps_limit = %d\nmenu_fps = %d\n\n[world]\n; weather: auto (showers come and go), rain (always raining, except in snow), clear (never rains)\nweather = %s\ngrass_radius = %.0f\nundergrowth_radius = %.0f\ntree_radius = %.0f\nrock_radius = %.0f\n\n[player]\nfov = %.0f\nmouse_sensitivity = %.4f\nplayer_speed = %.2f\nsprint_multiplier = %.2f\ngravity = %.1f\n\n[audio]\nmusic_volume = %.2f\nsfx_volume = %.2f\n",
+                s.width, s.height, g_fullscreen ? "true" : "false", s.vsync ? "true" : "false", s.msaa, s.fxaa ? "true" : "false", s.ssao ? "true" : "false", s.shadowSize, s.textureSize, s.adaptiveQuality ? "true" : "false", s.adaptiveDetail ? "true" : "false", s.triBudget, s.uiScale, s.renderScale, s.drawDistance, s.fullMap ? "true" : "false", s.fpsLimit, s.menuFps,
                 s.weather == 1 ? "rain" : s.weather == 2 ? "clear" : "auto", s.grassRadius, s.undergrowthRadius, s.treeRadius, s.rockRadius, s.fov, s.mouseSensitivity, s.playerSpeed, s.sprintMultiplier, s.gravity, s.musicVolume, s.sfxVolume);
   return writeFile(g_exeDir + "/config.ini", b);
 }

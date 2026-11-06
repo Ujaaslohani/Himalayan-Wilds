@@ -6,6 +6,7 @@
 #include <cmath>
 #include "../game/season.h"
 #include "render.h"
+#include "grass.h"
 
 namespace {
 
@@ -50,10 +51,21 @@ vec3 groundShade(vec3 sc, vec3 wp, float ny, float road){
   }
   float sFlat = smoothstep(0.68, 0.92, ny);
   float sDry = step(-0.55, wp.y);
-  float sPatch = u_snow > 0.01 ? smoothstep(0.3, 0.7, vnoise(wp.xz * 0.045) * 0.7 + (sNear ? vnoise(wp.xz * 0.31) : 0.5) * 0.3) : 0.0;
-  float sAmt = u_snow * sFlat * sDry * mix(0.55, 1.0, sPatch) * mix(0.8, 1.0, sG);
-  vec3 sCol = mix(vec3(0.72, 0.77, 0.85), vec3(0.88, 0.91, 0.96), sPatch) * (0.92 + 0.08 * sN1);
-  sc = mix(sc, sCol, sAmt);
+  // snow settles unevenly: drifts on flats, thin or bare on bumps and slopes, with grass tufts, earth and rock
+  // showing through and a dirty, trodden fringe where it thins out (never one flat white sheet)
+  float sAmt = 0.0;
+  if (u_snow > 0.01) {
+    float f1 = vnoise(wp.xz * 0.045), f2 = vnoise(wp.xz * 0.21 + 3.0), f3 = sNear ? vnoise(wp.xz * 0.9 + 7.0) : 0.5;
+    float field = f1 * 0.45 + f2 * 0.33 + f3 * 0.22 + sFlat * 0.3 - (1.0 - ny) * 0.8;
+    float cover = clamp(u_snow, 0.0, 1.0) * 0.72 * sDry;          // even deep winter leaves bare patches (~25% of flats)
+    float thr = 1.15 - cover;
+    sAmt = smoothstep(thr, thr + 0.16, field);
+    float fringe = sAmt * (1.0 - sAmt) * 4.0;                      // where the snow thins
+    vec3 sCol = mix(vec3(0.70, 0.75, 0.83), vec3(0.9, 0.92, 0.96), f2) * (0.92 + 0.08 * sN1);
+    sCol = mix(sCol, vec3(0.5, 0.48, 0.45), fringe * 0.45);       // slushy, earthy edge
+    vec3 bare = mix(sc, mix(vec3(0.3, 0.25, 0.18), vec3(0.42, 0.38, 0.24), f3), 0.45 * u_snow);  // frozen earth and dead grass between drifts
+    sc = mix(bare, sCol, sAmt);
+  }
   return sc;
 }
 float mountainDetailK(vec3 wp, float ny, float k){
@@ -206,6 +218,24 @@ void main(){
   vec3 rockT = mix(vec3(0.72, 0.69, 0.64), vec3(1.22, 1.15, 1.03), smoothstep(0.25, 0.75, rb)) * (1.0 - 0.45 * smoothstep(0.86, 0.97, rc)) * mix(0.9, 1.08, streak);
   sc *= mix(vec3(1.0), rockT, steep * 0.85 * max(smoothstep(70.0, 125.0, h), 1.0 - smoothstep(0.42, 0.66, n.y)));
   sc *= ao * mix(1.0, cav, 0.8);
+  {
+    float grassy = smoothstep(0.7, 0.9, n.y) * (1.0 - smoothstep(70.0, 120.0, h));
+    float m1 = vnoise(wp3.xz * 0.009), m2 = vnoise(wp3.xz * 0.031 + 7.0), m3 = vnoise(wp3.xz * 0.11 + 3.0);
+    vec3 tint = mix(vec3(0.86, 1.04, 0.8), vec3(1.14, 1.06, 0.74), smoothstep(0.35, 0.75, m1));  // lush vs sun-dried
+    tint = mix(tint, vec3(0.78, 0.92, 0.72), smoothstep(0.62, 0.85, m2) * 0.7);                   // mossy hollows
+    tint *= 0.9 + 0.2 * m3;                                                                       // fine mottling
+    sc *= mix(vec3(1.0), tint, grassy * (1.0 - u_snow));
+    // real ground is never one green: bare earth, dry golden tufts, needle litter and stony scree mixed through it
+    float e1 = vnoise(wp3.xz * 0.05 + 11.0) * 0.6 + vnoise(wp3.xz * 0.27 + 2.0) * 0.4;
+    float earth = smoothstep(0.6, 0.72, e1) * (1.0 - u_snow);
+    sc = mix(sc, vec3(0.2, 0.15, 0.1) * (0.85 + 0.3 * m3), earth * 0.75);
+    float dryT = smoothstep(0.58, 0.7, vnoise(wp3.xz * 0.6 + 5.0)) * (1.0 - earth) * (1.0 - u_snow);
+    sc = mix(sc, sc * vec3(1.35, 1.12, 0.62), dryT * 0.55);
+    float litter = smoothstep(0.5, 0.8, vnoise(wp3.xz * 0.018 + 9.0)) * smoothstep(0.55, 0.85, m3) * (1.0 - u_snow);
+    sc = mix(sc, vec3(0.24, 0.15, 0.08), litter * 0.45);
+    float scree = smoothstep(0.66, 0.74, vnoise(wp3.xz * 0.9 + 17.0)) * smoothstep(0.5, 0.8, 1.0 - n.y + e1 * 0.3);
+    sc = mix(sc, vec3(0.34, 0.33, 0.31) * (0.8 + 0.4 * m3), scree * 0.6);
+  }
   sc = mix(sc, sc * vec3(0.9, 1.12, 0.82), (1.0 - smoothstep(70.0, 130.0, h)) * 0.6 * smoothstep(0.5, 0.75, n.y));
   fragColor = vec4(sqrt(max(sc, vec3(0.0))), t.a);
 }
@@ -266,9 +296,8 @@ void main(){
   if (fine) {
     v_nrm = normalize(vec3(-hc.y, u_grid.y, -hc.z));
   } else {
-    ivec2 ci = ivec2(floor(cell + 0.5));
-    float hl = hAt(ci - ivec2(1, 0)), hr = hAt(ci + ivec2(1, 0)), hd = hAt(ci - ivec2(0, 1)), hu = hAt(ci + ivec2(0, 1));
-    v_nrm = normalize(vec3(hl - hr, 2.0 * u_grid.y, hd - hu));
+    ivec2 ci = clamp(ivec2(floor(cell + 0.5)), ivec2(0), ivec2(int(u_grid.z) - 1));
+    v_nrm = texelFetch(u_height, ci, 0).gba;  // precomputed normal
   }
   v_wpos = vec3(w.x, h, w.y);
   v_cell = cell;
@@ -297,10 +326,45 @@ uniform vec4 u_grid;
 in vec3 v_farCol;
 uniform sampler2D u_bake;
 uniform sampler2D u_height;
+uniform sampler2D u_litter;
+uniform sampler2DArray u_ground;  // photo ground layers (render.cpp)
+uniform vec4 u_fields[4];         // spring flower fields: x, z, radius (grass.cpp); u_fields[0].w = bloom strength
+vec3 flowerPal(float k){
+  if (k < 0.16) return vec3(0.62, 0.04, 0.04);
+  if (k < 0.32) return vec3(0.86, 0.62, 0.03);
+  if (k < 0.45) return vec3(0.82, 0.8, 0.75);
+  if (k < 0.58) return vec3(0.28, 0.07, 0.55);
+  if (k < 0.7) return vec3(0.08, 0.16, 0.68);
+  if (k < 0.84) return vec3(0.86, 0.26, 0.42);
+  return vec3(0.88, 0.28, 0.02);
+}
+uniform sampler2D u_waterLv;      // r water surface (ground where dry), g 1 lake / 0.6 river / 0 dry (envmap.cpp)
+// photo grass as detail: texture / its own mean colour, so the season colour underneath stays and only the
+// blade-and-clump pattern is added. Lush near water, dry up high and in patches, meadow elsewhere.
+vec3 grassRatio(vec2 xz, float y, float wet){
+  vec2 uv = xz * 0.35;
+  float wl = smoothstep(0.12, 0.45, wet);
+  float wd = clamp(smoothstep(70.0, 150.0, y) * 0.7 + smoothstep(0.55, 0.8, vnoise(xz * 0.02)) * 0.6 + u_dry * 0.5, 0.0, 1.0) * (1.0 - wl);
+  vec3 t = texture(u_ground, vec3(uv, 9.0)).rgb / vec3(0.1204, 0.2168, 0.0235);
+  if (wl > 0.01) t = mix(t, texture(u_ground, vec3(uv, 7.0)).rgb / vec3(0.0418, 0.0734, 0.0181), wl);
+  if (wd > 0.01) t = mix(t, texture(u_ground, vec3(uv, 8.0)).rgb / vec3(0.0557, 0.0702, 0.0139), wd);
+  float l = dot(t, vec3(0.3, 0.59, 0.11));
+  return clamp(mix(vec3(l), t, 0.35), vec3(0.4), vec3(1.9));
+}
 out vec4 fragColor;
 void main(){
   float fd = distance(v_wpos.xz, u_camPos.xz);
-  if (fd > 50.0) { fragColor = vec4(v_farCol, 1.0); return; }
+  if (fd > 50.0) {
+    // far ground: per-pixel grass texture (clumps, dry tufts, darker hollows) instead of flat vertex colour;
+    // finer layers fade out with distance so nothing shimmers
+    vec3 c = v_farCol;
+    float green = clamp((c.g - max(c.r, c.b)) * 10.0, 0.0, 1.0);
+    vec2 q = v_wpos.xz;
+    float amp = green * (1.0 - smoothstep(250.0, 650.0, fd));
+    if (amp > 0.01) c *= mix(vec3(1.0), grassRatio(q, v_wpos.y, envAt(q).g), amp);  // photo grass texture
+    fragColor = vec4(c, 1.0);
+    return;
+  }
   vec4 b = texture(u_bake, v_cell / (u_grid.z - 1.0));
   vec3 sc = b.rgb * b.rgb;
   float road = b.a;
@@ -324,6 +388,38 @@ void main(){
       sc = mix(sc, sc * mix(vec3(1.03, 1.03, 1.04), vec3(0.84, 0.9, 1.0), hol), snowy);
       vec2 g = vec2(vnoise(vec2((q.x + 0.4) * 0.35, q.y * 1.4)) - rip, vnoise(vec2(q.x * 0.35, (q.y + 0.3) * 1.4)) - rip) * 2.0;
       nb = normalize(nb + vec3(-g.x, 0.0, -g.y) * 0.35 * snowy);
+    }
+  }
+  if (fd < 50.0) {
+    // photographed ground up close (Poly Haven CC0): each material goes where the baked maps say it belongs.
+    // Only layers with weight are sampled, so most pixels read one or two textures.
+    float fadeG = (1.0 - smoothstep(30.0, 45.0, fd)) * (1.0 - u_snow);
+    vec4 dm = texture(u_detailMap, envUV(v_wpos.xz));
+    float wet = envAt(v_wpos.xz).g;
+    vec2 uv = v_wpos.xz * 0.5;  // ~2 m per tile
+    float macro = 0.85 + 0.3 * vnoise(v_wpos.xz * 0.13);
+    vec2 wv = texture(u_waterLv, envUV(v_wpos.xz)).rg;
+    float uw = wv.g > 0.3 ? smoothstep(0.03, 0.3, wv.r - v_wpos.y) : 0.0;  // under a lake or river
+    float dryG = 1.0 - uw;
+    float green0 = clamp((sc.g - max(sc.r, sc.b)) / max(sc.g, 1e-3) * 3.0, 0.0, 1.0);
+    float wForest = (1.0 - smoothstep(0.6, 0.92, dm.r)) * (1.0 - road) * dryG;
+    float wTrail = smoothstep(0.05, 0.5, road) * dryG;
+    float wMud = smoothstep(0.35, 0.7, wet) * (1.0 - road) * (1.0 - wForest * 0.5) * dryG;
+    float wDirt = smoothstep(0.6, 0.74, dm.a) * (1.0 - road) * (1.0 - wForest) * dryG;
+    float wScree = smoothstep(0.93, 0.78, n.y) * (1.0 - road) * mix(0.5, 1.0, smoothstep(40.0, 110.0, v_wpos.y)) * dryG;
+    {
+      if (wForest > 0.01 && fadeG > 0.01) {
+        float k = smoothstep(0.35, 0.65, vnoise(v_wpos.xz * 0.21));  // patches of fresh litter among the older floor
+        vec3 f = mix(texture(u_ground, vec3(uv, 0.0)).rgb, texture(u_ground, vec3(v_wpos.xz * 0.6, 5.0)).rgb, k) * mix(1.0, 1.15, u_autumn);
+        sc = mix(sc, f * macro, wForest * 0.85 * fadeG);
+      }
+      if (wMud > 0.01) sc = mix(sc, texture(u_ground, vec3(uv, 1.0)).rgb * macro, wMud * 0.8 * fadeG);
+      if (wTrail > 0.01) sc = mix(sc, texture(u_ground, vec3(uv, 2.0)).rgb * macro, wTrail * 0.75 * fadeG);
+      if (wDirt > 0.01) sc = mix(sc, texture(u_ground, vec3(uv, 3.0)).rgb * macro, wDirt * 0.8 * fadeG);
+      if (wScree > 0.01) sc = mix(sc, texture(u_ground, vec3(uv * 0.8, 4.0)).rgb * macro, wScree * 0.8 * fadeG);
+      if (uw > 0.01) sc = mix(sc, texture(u_ground, vec3(uv * 0.7, 6.0)).rgb * macro * 0.8, uw * (wv.g > 0.8 ? 0.85 : 0.5) * fadeG);  // moss on lake beds, lighter in rivers
+      float rest = (1.0 - max(max(max(wForest, wMud), max(wTrail, wDirt)), max(wScree, uw))) * green0;
+      if (rest > 0.01) sc *= mix(vec3(1.0), grassRatio(v_wpos.xz, v_wpos.y, wet), rest * 0.9 * (1.0 - u_snow));  // all the way to the far ground (same texture there)
     }
   }
   float steepN = (1.0 - smoothstep(0.4, 0.82, n.y)) * (1.0 - smoothstep(20.0, 32.0, fd)) * mix(0.35, 1.0, max(smoothstep(70.0, 125.0, v_wpos.y), 1.0 - smoothstep(0.4, 0.62, n.y)));
@@ -357,6 +453,29 @@ void main(){
       nb = normalize(nb + vec3(dir.x, 0.0, dir.y) * ring * 0.6 * puddle);
     }
   }
+  // spring flower fields: colour speckle under the flower cards up close, drifts of colour from afar
+  float fieldK = 0.0, fcov = 0.0;
+  vec3 fcol = vec3(0.0);
+  if (u_fields[0].w > 0.01) {
+    for (int i = 0; i < 4; i++) {
+      if (u_fields[i].z <= 0.0) continue;
+      float dd = distance(v_wpos.xz, u_fields[i].xy) + (vnoise(v_wpos.xz * 0.08) - 0.5) * u_fields[i].z * 0.5;
+      fieldK = max(fieldK, 1.0 - smoothstep(u_fields[i].z * 0.7, u_fields[i].z, dd));
+    }
+    fieldK *= u_fields[0].w;
+    if (fieldK > 0.01) {
+      // up close: small round blossoms (one per 20 cm cell at a random offset, ~half the cells), far: colour drifts
+      vec2 sp = v_wpos.xz * 5.0, cid = floor(sp), fr = fract(sp) - 0.5;
+      float hh = fract(sin(dot(cid, vec2(12.9898, 78.233))) * 43758.55);
+      vec2 off = (vec2(fract(hh * 13.1), fract(hh * 7.7)) - 0.5) * 0.45;
+      float dotK = 1.0 - smoothstep(0.16, 0.24, length(fr - off));
+      float drift = fract(vnoise(v_wpos.xz * 0.35) * 2.7);
+      float nearK = 1.0 - smoothstep(18.0, 45.0, fd);
+      fcol = mix(flowerPal(drift), flowerPal(fract(hh * 7.13 + drift)), nearK);
+      fcov = fieldK * mix(0.45, step(0.45, hh) * dotK * 0.95, nearK);
+      sc = mix(sc, fcol, fcov);
+    }
+  }
   vec3 litT = lambert(sc, nb, sh);
   if (wetG > 0.01 && fd < 35.0) {
     // puddle sky reflection and wet sheen folded into the same lighting (single tone-map)
@@ -369,6 +488,7 @@ void main(){
   vec3 c = outColor(litT);
   c = mix(c, fogTint(v_wpos), fogGround(v_wpos, v_depth));
   if (fd > 40.0) c = mix(c, v_farCol, smoothstep(40.0, 50.0, fd));
+  if (fd > 40.0 && fcov > 0.0) c = mix(c, mix(outColor(lambert(fcol, vec3(0.0, 1.0, 0.0), sh)), fogTint(v_wpos), fogGround(v_wpos, v_depth)), fcov * smoothstep(40.0, 50.0, fd));
   fragColor = vec4(c, 1.0);
 }
 )";
@@ -396,12 +516,37 @@ in vec3 v_wpos;
 in vec3 v_col;
 in vec3 v_nrm;
 in float v_depth;
+uniform float u_trailMat;          // 1 = trail stonework (stairs, stepping pillars): the rocky-trail photo
+uniform sampler2DArray u_ground;   // photo ground layers (render.cpp)
 out vec4 fragColor;
 void main(){
   vec3 n = normalize(v_nrm);
   vec3 sc = groundShade(v_col, v_wpos, n.y, 0.0);
+  if (u_trailMat > 0.5) {
+    // same rocky-trail texture as the paths, projected from three sides so step faces and pillar sides tile too
+    vec3 an = abs(n) + 1e-4;
+    vec3 tw = an / (an.x + an.y + an.z);
+    vec3 t = texture(u_ground, vec3(v_wpos.zy * 0.5, 2.0)).rgb * tw.x + texture(u_ground, vec3(v_wpos.xz * 0.5, 2.0)).rgb * tw.y
+           + texture(u_ground, vec3(v_wpos.xy * 0.5, 2.0)).rgb * tw.z;
+    sc = mix(sc, t * (0.85 + 0.3 * vnoise(v_wpos.xz * 0.13)), 0.9);
+  } else
   sc *= mountainDetail(v_wpos, n.y);
   vec3 nb = groundBump(n, v_wpos, 0.0);
+  {
+    // rough crags at a distance: two scales of ridged noise bend the normals and shade the clefts, so far
+    // ridges read as broken rock instead of smooth low-poly slopes
+    float steep = 1.0 - smoothstep(0.55, 0.9, n.y);
+    float k = steep * smoothstep(40.0, 140.0, v_wpos.y);
+    if (k > 0.01) {
+      vec2 p1 = vec2(v_wpos.x + v_wpos.z, v_wpos.y * 1.6) * 0.05;
+      vec2 p2 = v_wpos.xz * 0.11 + v_wpos.y * 0.07;
+      float r0 = 1.0 - abs(vnoise(p1) * 2.0 - 1.0), r1 = 1.0 - abs(vnoise(p2) * 2.0 - 1.0);
+      float gx = (1.0 - abs(vnoise(p1 + vec2(0.15, 0.0)) * 2.0 - 1.0)) - r0 + (1.0 - abs(vnoise(p2 + vec2(0.15, 0.0)) * 2.0 - 1.0)) - r1;
+      float gz = (1.0 - abs(vnoise(p1 + vec2(0.0, 0.15)) * 2.0 - 1.0)) - r0 + (1.0 - abs(vnoise(p2 + vec2(0.0, 0.15)) * 2.0 - 1.0)) - r1;
+      nb = normalize(nb + vec3(gx, 0.0, gz) * 3.5 * k);
+      sc *= mix(1.0, 0.62 + 0.5 * (r0 * 0.6 + r1 * 0.4), k);
+    }
+  }
   if (v_wpos.y > 120.0) {
     // alpine look: snow clings to gentler faces above the snowline, steep faces show streaked rock
     vec2 sp = vec2(v_wpos.x + v_wpos.z * 0.6, v_wpos.y);
@@ -410,7 +555,11 @@ void main(){
     float alt = smoothstep(line - 40.0, line + 30.0, v_wpos.y + gul * 30.0);
     float slope = smoothstep(0.42, 0.72, n.y + (gul - 0.5) * 0.45 + vnoise(sp * 0.02) * 0.2);
     float snow = alt * slope;
-    vec3 rockc = mix(vec3(0.16, 0.15, 0.14), vec3(0.34, 0.31, 0.28), vnoise(sp * vec2(0.02, 0.05))) * mix(0.75, 1.15, gul);
+    vec3 rockc = mix(vec3(0.17, 0.15, 0.13), vec3(0.38, 0.33, 0.27), vnoise(sp * vec2(0.02, 0.05))) * mix(0.75, 1.15, gul);
+    // sedimentary bands across the cliffs, bent by the gullies: the faces read as layered rock, not flat grey
+    float band = 0.5 + 0.5 * sin(v_wpos.y * 0.2 + gul * 7.0 + vnoise(sp * 0.008) * 9.0 + vnoise(sp * 0.03) * 3.0);
+    band *= smoothstep(0.25, 0.6, vnoise(sp * vec2(0.006, 0.02) + 5.0));  // strata show in patches, not as a regular stripe pattern
+    rockc *= mix(0.92, 1.08, band) * mix(vec3(1.0), vec3(1.06, 0.99, 0.9), band);
     vec3 big = texture(u_ptexA, sp * 0.004).rgb * 2.0;
     rockc *= mix(vec3(1.0), big, 0.3);
     float rocky = smoothstep(165.0, 230.0, v_wpos.y);
@@ -621,7 +770,27 @@ namespace terrain_render {
 
 void init() {
   const auto& H = world::heightGrid();
-  g_heightTex = createFloatTexture(H.data(), GRID_N, GRID_N);
+  {
+    // height + precomputed normal in one texel (r = height, gba = normal): far vertices read one texel instead of five
+    std::vector<float> HN((size_t)GRID_N * GRID_N * 4);
+    auto at = [&](int i, int j) { i = std::max(0, std::min(GRID_N - 1, i)); j = std::max(0, std::min(GRID_N - 1, j)); return H[(size_t)j * GRID_N + i]; };
+    for (int j = 0; j < GRID_N; j++)
+      for (int i = 0; i < GRID_N; i++) {
+        Vec3 n = Vec3(at(i - 1, j) - at(i + 1, j), 2 * GRID_STEP, at(i, j - 1) - at(i, j + 1)).normalized();
+        float* o = &HN[((size_t)j * GRID_N + i) * 4];
+        o[0] = H[(size_t)j * GRID_N + i]; o[1] = n.x; o[2] = n.y; o[3] = n.z;
+      }
+    g_heightTex.w = g_heightTex.h = GRID_N;
+    glGenTextures(1, &g_heightTex.id);
+    glBindTexture(GL_TEXTURE_2D, g_heightTex.id);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, GRID_N, GRID_N, 0, GL_RGBA, GL_FLOAT, HN.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    g_heightTex.bytes = HN.size() * 4;
+    gfx::addBufferBytes((long long)g_heightTex.bytes);
+  }
   const auto& C = world::colorGrid();
   g_colorTex = createRGBA8Texture((const uint8_t*)C.data(), GRID_N, GRID_N, true);
   buildPatchMesh();
@@ -666,7 +835,7 @@ GLuint colorTexture() { return g_colorTex.id; }
 const char* groundCommon() { return GROUND_COMMON; }
 int patchCount() { return g_lastCount; }
 
-const int BAKE_N = 3072, BAKE_T = 512;
+const int BAKE_N = 2048, BAKE_T = 512;  // far ground (>50 m) colour bake: 0.6 m texels (was 3072: 2.25x the memory)
 int g_bakeNext = -1;
 float g_bakeSig = -1, g_bakePending = 0;
 
@@ -762,6 +931,12 @@ void draw() {
     glActiveTexture(GL_TEXTURE5);
     glBindTexture(GL_TEXTURE_2D, g_mdetTex);
     s.set4f("u_grid", GRID_MIN, GRID_STEP, (float)GRID_N, 0);
+    {
+      float ff[16];
+      std::memcpy(ff, grass::flowerFields(), sizeof ff);
+      ff[3] = grass::bloom();
+      glUniform4fv(s.loc("u_fields"), 4, ff);
+    }
     g_range[6] = FINE_R[0] / 0.92f; g_range[7] = FINE_R[1] / 0.92f;
     glUniform1fv(s.loc("u_range"), 8, g_range);
     glActiveTexture(GL_TEXTURE4);
@@ -793,10 +968,11 @@ void draw() {
   drawGroundMesh(g_backdrop);
 }
 
-void drawGroundMesh(const Mesh& m) {
+void drawGroundMesh(const Mesh& m, bool trail) {
   if (!m.valid()) return;
   static const std::string fsM = std::string(GROUND_COMMON) + MESH_FS;
   Shader& g = render::program("groundmesh", MESH_VS, fsM.c_str());
+  g.set1f("u_trailMat", trail ? 1.0f : 0.0f);
   g.set1i("u_gdet", 3);
   glActiveTexture(GL_TEXTURE3);
   glBindTexture(GL_TEXTURE_2D, g_gdetTex);

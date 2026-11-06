@@ -1,3 +1,5 @@
+#include <chrono>
+#include "../render/envmap.h"
 #include "../game/engine.h"
 #include "../render/sky.h"
 #include <cstdio>
@@ -79,7 +81,19 @@ bool blocked(float x, float z, const std::vector<Blocker>& list = g_blockers) {
 
 uint32_t cellSeed(int cx, int cz, uint32_t seed) { return (uint32_t)std::floor(hash2(cx, cz, seed) * 4294967296.0); }
 
+// whole-map item tables for trees, rocks and undergrowth, generated once at load (grass stays lazy: millions of clumps)
+const int PRE_N = (int)(MAP_HALF / CELL) + 1;  // cells -PRE_N .. PRE_N-1 on each axis
+std::vector<std::vector<Item>> g_pre[4];
+std::atomic<bool> g_preReady{false};
+inline const std::vector<Item>* preCell(int layer, int cx, int cz) {
+  if (layer == L_GRASS || !g_preReady.load(std::memory_order_acquire)) return nullptr;
+  static const std::vector<Item> empty;
+  if (cx < -PRE_N || cz < -PRE_N || cx >= PRE_N || cz >= PRE_N) return &empty;
+  return &g_pre[layer][(size_t)(cz + PRE_N) * (2 * PRE_N) + (cx + PRE_N)];
+}
+
 const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
+  if (const std::vector<Item>* pre = preCell(layer, cx, cz)) return *pre;
   CellKey key{layer, cx, cz};
   auto it = C.cells.find(key);
   if (it != C.cells.end()) {
@@ -108,7 +122,13 @@ const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
         acc += L.files[fi].second;
         if (target < acc) break;
       }
-      items.push_back({x, y, z, rot * TAU, L.scaleLo + sc * (L.scaleHi - L.scaleLo), keep, (uint16_t)fi});
+      float scl = L.scaleLo + sc * (L.scaleHi - L.scaleLo);
+      if (layer == L_ROCK && L.files[fi].first.rfind("Rock", 0) != 0) {  // stumps and logs only where trees grow
+        if (world::forestDensity(x, z) < 0.3f || world::slopeAt(x, z) > 0.6f) fi = (size_t)(pick * 4) % 4;
+        else scl = 0.75f + sc * 0.5f;
+      }
+      if (layer == L_TREE) scl *= 0.9f + 0.25f * (sc * sc);  // a few giants among the ordinary trees
+      items.push_back({x, y, z, rot * TAU, scl, keep, (uint16_t)fi});
     }
   items.shrink_to_fit();
   C.lru.push_back(key);
@@ -181,6 +201,7 @@ struct Garden {
   std::vector<InstBatch> batches, farBatches;
   uint64_t sig = 0;
 };
+#define HAZE_CULL (envmap::g_cullQ)  // beyond this the regional haze is ~97% opaque: nothing in the forest is drawn
 const float G_MID = 14, G_BAND = 6, G_OUT = 110;
 std::vector<Garden> g_garden;
 
@@ -281,7 +302,7 @@ void defineLayers() {
                       return 0.35f + 0.5f * world::forestDensity(x, z);
                     },
                     0.45f, 0.9f, [] { return g_settings.fullMap ? 260.0f : g_settings.undergrowthRadius; }, 32, 0.3f, 0.6f});
-  LAYERS.push_back({L_ROCK, 303, {{"Rock Medium.glb", 1}}, 2,
+  LAYERS.push_back({L_ROCK, 303, {{"Rock Medium.glb", 0.3f}, {"Rock Slab.glb", 0.18f}, {"Rock Jagged.glb", 0.14f}, {"Rock Boulder.glb", 0.18f}, {"Stump.glb", 0.08f}, {"Stump Broken.glb", 0.06f}, {"Log Fallen.glb", 0.06f}}, 3,
                     [](float x, float z, float h) -> float {
                       if (h < -0.8f || world::pathDistance(x, z) < 3.5f || hypot2(x, z) < 14) return 0;
                       if (world::nearRoute(x, z) < 5.5f) return 0;
@@ -289,7 +310,7 @@ void defineLayers() {
                       if (world::lakeAt(x, z, 1) >= 0) return 0;
                       return (world::pathDistance(x, z) < 6 ? 0.45f : 0.22f) + std::min(0.45f, world::slopeAt(x, z) * 0.35f);
                     },
-                    0.3f, 1.0f, [] { return g_settings.rockRadius * g_settings.drawDist(); }, 70, 0.6f, -1});
+                    0.25f, 1.45f, [] { return std::min(HAZE_CULL, g_settings.rockRadius * g_settings.drawDist()); }, 70, 0.6f, -1});
   LAYERS.push_back({L_TREE, 404,
                     {{"ptree:oak", 0.24f}, {"ptree:maple", 0.2f}, {"ptree:birch", 0.16f}, {"ptree:Pine-cedar", 0.28f}, {"ptree:rhodo", 0.12f}},
                     3,
@@ -301,7 +322,7 @@ void defineLayers() {
                       if (hypot2(x, z) < SETTLEMENT_RADIUS + 6) return 0;
                       return 0.05f + world::forestDensity(x, z) * 0.3f;
                     },
-                    0.75f, 1.1f, [] { return g_settings.treeRadius * g_settings.drawDist(); }, 55, 0.55f, -1});
+                    0.62f, 1.32f, [] { return std::min(HAZE_CULL, g_settings.treeRadius * g_settings.drawDist()); }, 55, 0.55f, -1});
 }
 
 const char* LAYER_NAMES[4] = {"grass", "under", "rock", "tree"};
@@ -347,11 +368,11 @@ const float IMP_BAND = 16;
 const float MID_BAND = 2.5f, CANOPY_BAND = 30;  // shorter crossfade: near and mid versions overlap less
 std::atomic<float> g_budgetScale{1.0f};
 float effScale() { return std::min(g_settings.detailScale, g_budgetScale.load()); }
-float midNearS(float ds) { return clampf(11 * g_settings.drawDist(), 18, 40) * ds; }
+float midNearS(float ds) { return clampf(4.5f * g_settings.drawDist(), 10, 14) * ds; }  // single-leaf trees only within ~12 m; leaf-cluster cards beyond (Far Cry-style)
 float impostorNearS(float ds) { return clampf(16 * g_settings.drawDist(), 28, 90) * (0.5f + 0.5f * ds); }
 float midNear() { return midNearS(effScale()); }
 float impostorNear() { return impostorNearS(effScale()); }
-float canopyNear() { return clampf(140 * g_settings.drawDist(), 200, 420) * (1.0f - 0.25f * sky::rainAmount()); }  // rain: far canopy ends sooner (hidden in the fog)
+float canopyNear() { return std::min(HAZE_CULL - CANOPY_BAND, clampf(140 * g_settings.drawDist(), 200, 420)) * (1.0f - 0.25f * sky::rainAmount()); }  // rain: far canopy ends sooner (hidden in the fog)
 float impostorOuter() { return canopyNear() + CANOPY_BAND; }
 
 struct LodCfg { float mid, imp, outer; bool canopy; };
@@ -359,10 +380,10 @@ LodCfg lodForS(int layer, float ds) {
   float dd = g_settings.drawDist();
   if (layer == L_TREE) return {midNearS(ds), impostorNearS(ds), impostorOuter(), true};
   if (layer == L_ROCK) {
-    float o = g_settings.fullMap ? 700.0f : std::max(260.0f, g_settings.rockRadius * dd * 1.6f);
+    float o = g_settings.fullMap ? 700.0f : HAZE_CULL;
     return {clampf(14 * dd, 18, 45) * ds, clampf(40 * dd, 50, 140) * (0.5f + 0.5f * ds), o, false};
   }
-  float o = g_settings.fullMap ? 320.0f : std::max(90.0f, g_settings.undergrowthRadius * std::max(1.0f, dd));
+  float o = g_settings.fullMap ? 320.0f : std::min(HAZE_CULL, std::max(90.0f, g_settings.undergrowthRadius * std::max(1.0f, dd)));
   return {std::max(10.0f, clampf(8 * dd, 10, 24) * ds), std::max(16.0f, clampf(20 * dd, 25, 60) * (0.5f + 0.5f * ds)), o, false};
 }
 LodCfg lodFor(int layer) { return lodForS(layer, effScale()); }
@@ -373,7 +394,28 @@ struct BuildJob {
   std::vector<std::vector<InstLite>> items, shadow, far, mid;
   std::vector<CastInstance> casts;
   std::vector<std::vector<FileSlot::Range>> rN, rF, rM;
+  float eyeY = 1e9f;  // camera height: cells hidden behind a ridge from here are skipped
 };
+
+// hill culling: a far cell is skipped when the terrain between the eye and the top of its tallest trees blocks
+// every sight line (centre and the two side edges). Checked once per cell per rebuild, on the worker thread.
+bool cellHidden(float ex, float ey, float ez, int cx, int cz) {
+  static const bool off = std::getenv("HW_NOHILL") != nullptr;  // A/B measurement switch
+  if (off) return false;
+  float x0 = cx * CELL, z0 = cz * CELL;
+  float tops[3][2] = {{x0 + CELL * 0.5f, z0 + CELL * 0.5f}, {x0, z0}, {x0 + CELL, z0 + CELL}};
+  for (auto& t : tops) {
+    float ty = world::getTerrainHeight(t[0], t[1]) + 18.0f;  // tallest cedar crowns
+    bool blocked = false;
+    for (int k = 1; k < 14 && !blocked; k++) {
+      float f = k / 14.0f;
+      float x = ex + (t[0] - ex) * f, z = ez + (t[1] - ez) * f, y = ey + (ty - ey) * f;
+      if (world::getTerrainHeight(x, z) > y + 1.0f) blocked = true;
+    }
+    if (!blocked) return false;
+  }
+  return true;
+}
 
 std::thread g_worker;
 std::mutex g_jobMtx;
@@ -391,6 +433,14 @@ void compute(BuildJob& J) {
   std::unordered_map<const FileSlot*, size_t> index;
   for (size_t i = 0; i < ns; i++) index[g_slots[i].get()] = i;
   float px = J.px, pz = J.pz;
+  std::unordered_map<int64_t, bool> hidden;  // per cell, shared by all layers
+  auto isHidden = [&](int cx, int cz) {
+    if (J.eyeY > 1e8f) return false;
+    int64_t k = ((int64_t)cx << 32) ^ (uint32_t)cz;
+    auto it = hidden.find(k);
+    if (it != hidden.end()) return it->second;
+    return hidden[k] = cellHidden(px, J.eyeY, pz, cx, cz);
+  };
   for (const LayerDef& layer : LAYERS) {
     if (layer.id == L_GRASS) continue;
     float R = layer.id == L_GRASS ? std::max(16.0f, layer.radius() * (1 - 0.45f * season.snow)) : layer.radius();
@@ -408,6 +458,7 @@ void compute(BuildJob& J) {
       for (int cz = c0z; cz <= c1z; cz++) {
         float ccx = (cx + 0.5f) * CELL - px, ccz = (cz + 0.5f) * CELL - pz;
         if (ccx * ccx + ccz * ccz > (R + CELL) * (R + CELL)) continue;
+        if (ccx * ccx + ccz * ccz > 75.0f * 75.0f && isHidden(cx, cz)) continue;
         const auto& cell = getCell(g_workCache, layer.id, cx, cz);
         for (const Item& it : cell) {
           float dx = it.x - px, dz = it.z - pz;
@@ -704,7 +755,8 @@ void cullVisible() {
 }
 
 
-const int IMP_CELL_W = 128, IMP_CELL_H = 256, IMP_VIEWS = 16, IMP_ATLAS = IMP_CELL_W * IMP_VIEWS;
+const int IMP_CELL_W = 96, IMP_CELL_H = 192, IMP_VIEWS = 16,  // distant-tree images: seen only past ~48 m, so 3/4 size (56% of the memory)
+ IMP_ATLAS = IMP_CELL_W * IMP_VIEWS;
 int IMP_ATLAS_H = 256, g_impRows = 1;
 GLuint g_impFbo = 0, g_impTex = 0, g_impDepth = 0, g_impNrm = 0;
 Mesh g_impQuad;
@@ -781,7 +833,7 @@ void main(){
   }
   if (u_dbg == 1) { fragColor = vec4(1.0, 0.0, 1.0, 1.0); return; }
   vec3 nl = (farI ? texture(u_nrm, uvA).xyz : mix(texture(u_nrm, v_uv0).xyz, texture(u_nrm, v_uv1).xyz, v_blend)) * 2.0 - 1.0;
-  float shT = farI ? 1.0 : shadowAt(v_wpos, vec3(0.0, 1.0, 0.0));  // shadow map does not reach that far anyway
+  float shT = farI ? envLight(v_wpos) : shadowAt(v_wpos, vec3(0.0, 1.0, 0.0));  // shadow map does not reach that far anyway
   vec3 n = normalize(vec3(v_rot.x * nl.x + v_rot.y * nl.z, nl.y, -v_rot.y * nl.x + v_rot.x * nl.z));
   n = normalize(mix(n, vec3(0.0, 1.0, 0.0), 0.75));
   vec3 alb = t.rgb * t.rgb;
@@ -1029,7 +1081,7 @@ void main(){
   float snowP = smoothstep(0.35, 0.75, fract(sin(dot(floor(v_wpos.xz * 0.6), vec2(17.1, 93.7))) * 3758.5));
   alb = mix(alb, vec3(0.8, 0.83, 0.88), u_snow * smoothstep(0.55, 0.95, n.y) * mix(0.15, 0.45, snowP) * (1.0 - 0.5 * pine));
   alb *= (0.62 + 0.3 * n1);
-  vec3 c = outColor(lambert(alb, n, 1.0) * mix(0.7, 1.0, cov));  // cloud shadows reach the far forest too
+  vec3 c = outColor(lambert(alb, n, envLight(v_wpos)) * mix(0.7, 1.0, cov));  // cloud shadows reach the far forest too
   c = mix(c, fogTint(v_wpos), fogGround(v_wpos, v_depth));
   fragColor = vec4(c, 1.0);
 }
@@ -1278,11 +1330,12 @@ void update(const Vec3& cam, const Vec3& fwd) {
     apply(J);
     lk.lock();
   }
-  if (!g_jobPending && (g_dirty || moved > 9)) {  // rebuild visible cells every ~9 m of travel (fade bands cover the gap)
+  if (!g_jobPending && (g_dirty || moved > 9 || std::fabs(cam.y - g_lastPos.y) > 5)) {  // rebuild every ~9 m of travel or 5 m of climb (hill culling)
     g_dirty = false;
     g_lastPos = cam;
     g_lastYaw = yaw;
     g_job = BuildJob{cam.x, cam.z, d.x, d.z, g_blockers, {}, {}, {}, {}, {}};
+    g_job.eyeY = cam.y;
     g_jobPending = true;
     g_jobCv.notify_one();
   }
@@ -1498,6 +1551,42 @@ void drawBlobs() { drawCasts(g_casts); }
 
 int instanceCount() { return g_instances; }
 
+void precomputeItems() {
+  if (LAYERS.empty()) defineLayers();
+  auto t0 = std::chrono::steady_clock::now();
+  const int W = 2 * PRE_N;
+  for (int L = L_UNDER; L <= L_TREE; L++) g_pre[L].assign((size_t)W * W, {});
+  unsigned nt = std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
+  std::vector<std::thread> th;
+  std::atomic<int> next{0};
+  for (unsigned t = 0; t < nt; t++)
+    th.emplace_back([&] {
+      CellCache C;
+      C.limit = 1;
+      for (int row; (row = next.fetch_add(1)) < W;)
+        for (int L = L_UNDER; L <= L_TREE; L++)
+          for (int i = 0; i < W; i++) g_pre[L][(size_t)row * W + i] = getCell(C, L, i - PRE_N, row - PRE_N);
+    });
+  for (auto& t : th) t.join();
+  size_t n = 0;
+  for (int L = L_UNDER; L <= L_TREE; L++) for (auto& c : g_pre[L]) { c.shrink_to_fit(); n += c.size(); }
+  g_preReady.store(true, std::memory_order_release);
+  std::printf("forest items precomputed: %zu in %.0f ms (%.1f MB)\n", n, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(), n * sizeof(Item) / 1048576.0);
+}
+
+void forEachItem(int layer, const std::function<void(float, float, float, float, const std::string&)>& f) {
+  if (LAYERS.empty()) defineLayers();
+  CellCache C;
+  C.limit = 1;
+  int n = (int)std::ceil(MAP_HALF / CELL);
+  for (int cz = -n; cz < n; cz++)
+    for (int cx = -n; cx < n; cx++) {
+      const std::vector<Item> items = getCell(C, layer, cx, cz);
+      for (const Item& it : items)
+        if (!blocked(it.x, it.z)) f(it.x, it.y, it.z, it.scale, LAYERS[layer].files[it.file].first);
+    }
+}
+
 void resolveTreeCollision(float& x, float& z, float radius) {
   static unsigned s_frame = ~0u;
   static int s_new = 0;
@@ -1507,7 +1596,7 @@ void resolveTreeCollision(float& x, float& z, float radius) {
   int ccx = (int)std::floor(x / CELL), ccz = (int)std::floor(z / CELL);
   for (int cx = ccx - 1; cx <= ccx + 1; cx++)
     for (int cz = ccz - 1; cz <= ccz + 1; cz++) {
-      if (!nearPlayer && !g_mainCache.cells.count(CellKey{L_TREE, cx, cz})) {
+      if (!nearPlayer && !preCell(L_TREE, cx, cz) && !g_mainCache.cells.count(CellKey{L_TREE, cx, cz})) {
         if (s_new >= 3) continue;
         s_new++;
       }
@@ -1523,35 +1612,57 @@ void resolveTreeCollision(float& x, float& z, float radius) {
         }
       }
     }
-  static float rockR = -1;
-  if (rockR < 0) {
-    rockR = 0;
+  // rocks, stumps and fallen logs: each file gets its own footprint (logs are capsules along their length)
+  static std::vector<float> fileR;
+  static std::vector<char> isLog;
+  if (fileR.empty()) {
+    const LayerDef& L = LAYERS[L_ROCK];
+    fileR.assign(L.files.size(), 0);
+    isLog.assign(L.files.size(), 0);
     for (auto& sp : g_slots)
       if (sp->layer == L_ROCK)
-        for (auto& p : sp->parts) rockR = std::max(rockR, std::max(std::max(std::fabs(p.mesh->bmin.x), std::fabs(p.mesh->bmax.x)), std::max(std::fabs(p.mesh->bmin.z), std::fabs(p.mesh->bmax.z))));
-    rockR *= 0.8f;
-    if (rockR <= 0) rockR = -1;
+        for (size_t fi = 0; fi < L.files.size(); fi++)
+          if (L.files[fi].first == sp->file)
+            for (auto& p : sp->parts) {
+              float r = std::max(std::max(std::fabs(p.mesh->bmin.x), std::fabs(p.mesh->bmax.x)), std::max(std::fabs(p.mesh->bmin.z), std::fabs(p.mesh->bmax.z)));
+              isLog[fi] = sp->file.find("Log") != std::string::npos;
+              fileR[fi] = std::max(fileR[fi], isLog[fi] ? std::min(std::fabs(p.mesh->bmax.z), std::fabs(p.mesh->bmin.z)) : r * 0.8f);
+            }
   }
-  if (rockR <= 0) return;
   for (int cx = ccx - 1; cx <= ccx + 1; cx++)
     for (int cz = ccz - 1; cz <= ccz + 1; cz++) {
-      if (!g_mainCache.cells.count(CellKey{L_ROCK, cx, cz})) {
+      if (!preCell(L_ROCK, cx, cz) && !g_mainCache.cells.count(CellKey{L_ROCK, cx, cz})) {
         if (!nearPlayer || s_new >= 3) continue;
         s_new++;
       }
       for (const Item& it : getCell(g_mainCache, L_ROCK, cx, cz)) {
-        float rr = it.scale * rockR;
-        if (rr < 0.3f) continue;
+        if (it.file >= fileR.size()) continue;
+        float rr = it.scale * fileR[it.file];
+        if (rr < 0.3f || blocked(it.x, it.z)) continue;
+        float px = it.x, pz = it.z;
+        if (isLog[it.file]) {
+          // closest point on the log's axis (it lies along local x, length 5.5 m before scaling)
+          float hl = 2.75f * it.scale, ax = std::cos(it.rot), az = -std::sin(it.rot);
+          float t = clampf((x - it.x) * ax + (z - it.z) * az, -hl, hl);
+          px = it.x + ax * t;
+          pz = it.z + az * t;
+        }
         float r = rr + radius;
-        float dx = x - it.x, dz = z - it.z;
+        float dx = x - px, dz = z - pz;
         float d2 = dx * dx + dz * dz;
         if (d2 < r * r && d2 > 1e-6f) {
           float d = std::sqrt(d2);
-          x = it.x + (dx / d) * r;
-          z = it.z + (dz / d) * r;
+          x = px + (dx / d) * r;
+          z = pz + (dz / d) * r;
         }
       }
     }
+}
+
+bool obstacleAt(float x, float z, float r) {
+  float tx = x, tz = z;
+  resolveTreeCollision(tx, tz, r);  // same footprints as collision: trunks, rocks, stumps and log capsules
+  return std::fabs(tx - x) + std::fabs(tz - z) > 0.01f;
 }
 
 void nearTrees(float x, float z, float r, std::vector<float>& out, int max) {
@@ -1581,7 +1692,7 @@ bool nearestRock(float x, float z, float& ox, float& oz, float& os) {
   for (int cx = cx0; cx <= cx1; cx++)
     for (int cz = cz0; cz <= cz1; cz++)
       for (const Item& it : getCell(g_mainCache, L_ROCK, cx, cz)) {
-        if (it.scale < 0.7f) continue;
+        if (it.scale < 0.7f || LAYERS[L_ROCK].files[it.file].first.rfind("Rock", 0) != 0) continue;
         float d = hypot2(it.x - x, it.z - z);
         if (d < best) { best = d; ox = it.x; oz = it.z; os = it.scale; }
       }

@@ -69,8 +69,10 @@ out float v_kind;
 void main(){
   vec4 mv = u_view * vec4(a_pos.xyz, 1.0);
   float size = abs(a_pos.w);
-  v_kind = a_pos.w < 0.0 ? 1.0 : 0.0;
-  float ps = v_kind > 0.5 ? clamp(size * u_viewH * 0.55 / -mv.z, 1.0, 400.0) : clamp(size * u_viewH * 0.55 / -mv.z, u_viewH * 0.009, 220.0);
+  v_kind = a_pos.w < 0.0 ? 1.0 : a_pos.w >= 100.0 ? 2.0 : 0.0;
+  if (v_kind > 1.5) size -= 100.0;
+  float ps = v_kind > 1.5 ? clamp(size * u_viewH * 0.55 / -mv.z, 2.0, 900.0)
+           : v_kind > 0.5 ? clamp(size * u_viewH * 0.55 / -mv.z, 1.0, 400.0) : clamp(size * u_viewH * 0.55 / -mv.z, u_viewH * 0.009, 220.0);
   if (v_kind < 0.5) mv.xyz *= max(0.0, 1.0 - 0.45 / length(mv.xyz));
   gl_Position = u_proj * mv;
   gl_PointSize = ps;
@@ -83,6 +85,12 @@ out vec4 fragColor;
 void main(){
   float d = length(gl_PointCoord - 0.5) * 2.0;
   if (d > 1.0) discard;
+  if (v_kind > 1.5) {
+    // light scattered in the haze around a fire or lamp: a wide, soft warm bloom that lights the air nearby
+    float a = exp(-d * d * 3.2) * (1.0 - d);
+    fragColor = vec4(vec3(1.0, 0.62, 0.3) * a * 0.2 * u_nightAmt, 1.0);
+    return;
+  }
   if (v_kind > 0.5) {
     vec3 c0 = vec3(1.0, 0.86, 0.55), c1 = vec3(1.0, 0.59, 0.2), c2 = vec3(1.0, 0.43, 0.08);
     vec3 c = d < 0.35 ? mix(c0, c1, d / 0.35) : mix(c1, c2, (d - 0.35) / 0.65);
@@ -284,7 +292,11 @@ void beginFrame() {
 }
 
 void blob(float x, float y, float z, float yaw, float sx, float sz) { g_blobs.push_back({x, y, z, 0, yaw, sx, sz, 0}); }
-void campfire(float x, float y, float z, float s) { if (render::sphereVisible({x, y + s, z}, s * 2 + 1)) g_fires.push_back({x, y, z, s}); }
+void campfire(float x, float y, float z, float s) {
+  if (render::sphereVisible({x, y + s, z}, s * 2 + 1)) g_fires.push_back({x, y, z, s});
+  if (render::sphereVisible({x, y + 1.5f, z}, 14 * s + 1)) g_glows.insert(g_glows.end(), {x, y + 1.2f * s, z, 100.0f + 13.0f * s});  // firelight glowing in the haze
+}
+void halo(float x, float y, float z, float size) { if (render::sphereVisible({x, y, z}, size + 1)) g_glows.insert(g_glows.end(), {x, y, z, 100.0f + size}); }
 void glow(float x, float y, float z, float size) { if (render::sphereVisible({x, y, z}, std::fabs(size) * 1.5f + 1)) g_glows.insert(g_glows.end(), {x, y, z, size}); }
 void pool(float x, float y, float z, float r) { if (render::sphereVisible({x, y, z}, r + 1)) g_pools.insert(g_pools.end(), {x, y, z, r}); }
 void ghost(const Mesh* mesh, const Mat4& m, bool ok, bool custom) { g_ghosts.push_back({mesh, m, ok, custom}); }

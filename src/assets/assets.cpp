@@ -5,6 +5,7 @@
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 #include "assets.h"
+#include "bakeao.h"
 #include "../platform/platform.h"
 #include "stb_image.h"
 #include <unordered_map>
@@ -447,7 +448,7 @@ void thinCanopy(MeshData& d, float innerKeep, float outerKeep, float grow) {
   d.idx.swap(oi);
 }
 
-MeshData makeLod(const MeshData& d, bool cutout, bool under) {
+MeshData makeLod(const MeshData& d, bool cutout, bool under, float cellDiv = 14.0f) {
   MeshData out;
   out.fmt = d.fmt;
   if (d.fmt != VFmt::GLB || d.idx.empty()) return out;
@@ -468,7 +469,9 @@ MeshData makeLod(const MeshData& d, bool cutout, bool under) {
     for (size_t t = 0; t < nt; t++) comps[find(d.idx[t * 3])].push_back(t);
     bool perTri = comps.size() < 24;
     if (perTri && under) return out;
-    const float keep = under ? 0.62f : 0.36f, grow = under ? 1.2f : 1.45f;  // mid trees: fewer, slightly larger cards
+    // mid trees: fewer, slightly larger cards. Undergrowth plants have only a handful of big leaf heads, so dropping
+    // any of them made whole branches vanish at mid distance: keep every one (only very dense plants thin a little)
+    float keep = under ? (comps.size() < 120 ? 1.0f : 0.85f) : 0.5f, grow = under ? (keep >= 1.0f ? 1.0f : 1.08f) : 1.3f;  // trees keep half their clusters at mid range
     auto emitScaled = [&](const std::vector<size_t>& tris) {
       Vec3 c{0, 0, 0};
       int n = 0;
@@ -498,7 +501,7 @@ MeshData makeLod(const MeshData& d, bool cutout, bool under) {
   } else {
     Vec3 mn = d.bmin, mx = d.bmax;
     float ext = std::max(mx.x - mn.x, std::max(mx.y - mn.y, mx.z - mn.z));
-    float cell = std::max(1e-3f, ext / 14.0f);
+    float cell = std::max(1e-3f, ext / cellDiv);
     std::unordered_map<uint64_t, uint32_t> cellIdx;
     std::vector<uint32_t> map(nv);
     for (size_t i = 0; i < nv; i++) {
@@ -980,10 +983,10 @@ struct SpecDef {
   int prim, sec;
 };
 const SpecDef SPD[T_COUNT] = {
-    {6.2f, 0.62f, 0.5f, 0.72f, 0.42f, 0.45f, 1.7f, 4.2f, 8, 4},   // oak: compact rounded crown: wide spreading crown
-    {7.0f, 0.52f, 0.52f, 0.55f, 0.42f, 0.6f, 1.8f, 4.0f, 7, 4},     // maple: rounded, upright
-    {9.0f, 0.3f, 0.35f, 0.55f, 0.32f, 0.2f, 1.3f, 3.6f, 11, 3},   // birch: tall, slim, light crown
-    {12.5f, 0.5f, 0.12f, 1.45f, 0.0f, -0.15f, 2.3f, 2.0f, 16, 0},  // cedar: conical whorls
+    {7.2f, 0.66f, 0.5f, 0.72f, 0.42f, 0.45f, 1.7f, 4.2f, 8, 4},   // oak: compact rounded crown: wide spreading crown
+    {8.6f, 0.55f, 0.52f, 0.55f, 0.42f, 0.6f, 1.8f, 4.0f, 7, 4},     // maple: rounded, upright
+    {12.5f, 0.34f, 0.35f, 0.55f, 0.32f, 0.2f, 1.3f, 3.6f, 11, 3},   // birch: tall, slim, light crown
+    {17.5f, 0.62f, 0.12f, 1.45f, 0.0f, -0.15f, 2.3f, 2.0f, 16, 0},  // cedar: conical whorls
     {2.6f, 0.26f, 0.2f, 0.75f, 0.95f, 0.5f, 1.3f, 4.0f, 5, 3},      // rhododendron: shrubby small tree
 };
 
@@ -1546,7 +1549,7 @@ MeshData buildBushLeaves(uint32_t seed, float R0, float H, int cards, float card
 
 
 // Boulder: displaced icosphere, flattened, slightly sunk
-MeshData buildRock(uint32_t seed) {
+MeshData buildRock(uint32_t seed, Vec3 shape = Vec3(1.25f, 0.72f, 1.0f), int cuts = 4, float rough = 0.35f) {
   std::vector<Vec3> P;
   std::vector<uint32_t> I;
   float t = (1 + std::sqrt(5.0f)) / 2;
@@ -1570,11 +1573,21 @@ MeshData buildRock(uint32_t seed) {
     }
     I.swap(J);
   }
+  // random fracture planes: real rock breaks along flat faces at odd angles, so no two boulders share a silhouette
+  PRng FR(seed * 31 + 7);
+  std::vector<std::pair<Vec3, float>> planes;
+  for (int k = 0; k < cuts; k++) {
+    Vec3 n(FR.r(-1, 1), FR.r(-0.3f, 1.0f), FR.r(-1, 1));
+    planes.push_back({n.normalized(), FR.r(0.55f, 0.85f)});
+  }
   for (auto& p : P) {
-    float d = 0.75f + 0.35f * pfbm(p.x * 1.7f + 3, p.z * 1.7f + p.y * 1.3f, (int)seed, 3);
+    float d = 0.75f + rough * pfbm(p.x * 1.7f + 3, p.z * 1.7f + p.y * 1.3f, (int)seed, 3);
+    d += 0.12f * pfbm(p.x * 5.1f + 1, p.y * 5.1f + p.z * 3.3f, (int)seed + 4, 2);  // small knobs and pits
     float facet = std::floor(pfbm(p.x * 2.2f, p.y * 2.2f + p.z, (int)seed + 9, 2) * 4) / 4;  // fractured planes
     d *= 0.9f + 0.12f * facet;
-    p = Vec3(p.x * d * 1.25f, p.y * d * 0.72f, p.z * d * 1.0f);
+    p = p * d;
+    for (auto& pl : planes) { float k = p.dot(pl.first) - pl.second; if (k > 0) p = p - pl.first * k; }
+    p = Vec3(p.x * shape.x, p.y * shape.y, p.z * shape.z);
     if (p.y < -0.1f) p.y = -0.1f + (p.y + 0.1f) * 0.3f;
     p.y += 0.25f;
   }
@@ -1584,11 +1597,102 @@ MeshData buildRock(uint32_t seed) {
   for (size_t i = 0; i < I.size(); i += 3) {
     Vec3 a = P[I[i]], b = P[I[i + 1]], d = P[I[i + 2]];
     Vec3 n = (b - a).cross(d - a).normalized();
-    float k = 0.85f + 0.2f * pfbm(a.x * 3, a.z * 3, 5, 2);
+    float k = 0.8f + 0.28f * pfbm(a.x * 3 + seed, a.z * 3 + a.y * 2, 5, 2) - 0.12f * std::max(0.0f, -n.y);
     uint32_t base = (uint32_t)g.v.size();
     for (Vec3 q : {a, b, d}) { g.vert(q, n, 0, 0, 1); g.v.back().c = packCol(c, k); }
     g.idx.insert(g.idx.end(), {base, base + 1, base + 2});
   }
+  return g.data();
+}
+
+
+// Tree stump: flared root base, ragged broken or sawn top
+MeshData buildStump(uint32_t seed, float r, float h, bool broken) {
+  GeoB g;
+  PRng R(seed);
+  const int S = 10, Y = 5;
+  Color bark = Color::hex("4e3c2c"), wood = Color::hex("a88a62");
+  std::vector<float> jag(S);
+  for (int i = 0; i < S; i++) jag[i] = broken ? R.r(-0.35f, 0.45f) * h : R.r(-0.03f, 0.03f);
+  for (int y = 0; y <= Y; y++) {
+    float t = (float)y / Y;
+    for (int i = 0; i <= S; i++) {
+      float a = TAU * i / S;
+      float flare = 1 + 0.7f * std::pow(1 - t, 3) * (0.6f + 0.4f * std::sin(a * 3 + seed));  // root buttresses
+      float rr = r * flare * (0.92f + 0.08f * std::sin(a * 5 + seed * 2));
+      float yy = -0.15f + (h + jag[i % S] * t) * t;
+      Vec3 p(std::cos(a) * rr, yy, std::sin(a) * rr);
+      g.vert(p, Vec3(std::cos(a), 0.25f * (1 - t), std::sin(a)), (float)i / S, t, 0.55f + 0.45f * t);
+      g.v.back().c = packCol(bark, 0.8f + 0.25f * t + 0.1f * std::sin(a * 7));
+    }
+  }
+  for (int y = 0; y < Y; y++)
+    for (int i = 0; i < S; i++) {
+      uint32_t a = y * (S + 1) + i, b = a + 1, c = a + S + 1, d = c + 1;
+      g.idx.insert(g.idx.end(), {a, c, b, b, c, d});
+    }
+  uint32_t ctr = (uint32_t)g.v.size();
+  g.vert(Vec3(0, -0.15f + h + (broken ? 0.1f * h : 0), 0), Vec3(0, 1, 0), 0.5f, 0.5f, 1);
+  g.v.back().c = packCol(wood, broken ? 0.85f : 1.05f);
+  for (int i = 0; i <= S; i++) {
+    float a = TAU * i / S;
+    Vec3 p(std::cos(a) * r * 0.97f, -0.15f + h + jag[i % S], std::sin(a) * r * 0.97f);
+    g.vert(p, Vec3(0, 1, 0), 0.5f + 0.5f * std::cos(a), 0.5f + 0.5f * std::sin(a), 1);
+    g.v.back().c = packCol(wood, 0.9f + 0.1f * std::sin(a * 4));
+  }
+  for (int i = 0; i < S; i++) g.idx.insert(g.idx.end(), {ctr, ctr + 2 + i, ctr + 1 + i});
+  return g.data();
+}
+
+// Fallen log: a sagging, slightly bent trunk with a stub branch and pale cut ends, half sunk in the ground
+MeshData buildLog(uint32_t seed, float len, float r) {
+  GeoB g;
+  PRng R(seed);
+  const int S = 9, L = 8;
+  Color bark = Color::hex("4a3a2b"), moss = Color::hex("4d6b2c"), wood = Color::hex("9c805a");
+  float bend = R.r(-0.25f, 0.25f);
+  auto ctrAt = [&](float t) { return Vec3((t - 0.5f) * len, r * 0.55f, bend * std::sin(t * PI) * len * 0.3f); };
+  for (int l = 0; l <= L; l++) {
+    float t = (float)l / L;
+    Vec3 c = ctrAt(t);
+    float rr = r * (1.08f - 0.25f * t);
+    for (int i = 0; i <= S; i++) {
+      float a = TAU * i / S;
+      Vec3 n(0, std::cos(a), std::sin(a));
+      Vec3 p = c + n * rr * (0.94f + 0.06f * std::sin(a * 3 + l));
+      g.vert(p, n, t * 3, (float)i / S, 0.6f + 0.4f * std::max(0.0f, n.y));
+      float mk = std::max(0.0f, n.y) * (0.5f + 0.5f * std::sin(t * 9 + seed));  // moss along the top
+      g.v.back().c = packCol(Color{bark.r + (moss.r - bark.r) * mk, bark.g + (moss.g - bark.g) * mk, bark.b + (moss.b - bark.b) * mk}, 0.85f + 0.15f * std::sin(a * 5 + t * 7));
+    }
+  }
+  for (int l = 0; l < L; l++)
+    for (int i = 0; i < S; i++) {
+      uint32_t a = l * (S + 1) + i, b = a + 1, c = a + S + 1, d = c + 1;
+      g.idx.insert(g.idx.end(), {a, b, c, b, d, c});
+    }
+  for (int e = 0; e < 2; e++) {  // cut ends
+    float t = (float)e;
+    Vec3 c = ctrAt(t);
+    float rr = r * (1.08f - 0.25f * t);
+    Vec3 n(e ? 1.0f : -1.0f, 0, 0);
+    uint32_t c0 = (uint32_t)g.v.size();
+    g.vert(c, n, 0.5f, 0.5f, 1);
+    g.v.back().c = packCol(wood, 0.8f);
+    for (int i = 0; i <= S; i++) {
+      float a = TAU * i / S;
+      g.vert(c + Vec3(0, std::cos(a), std::sin(a)) * rr * 0.95f, n, 0, 0, 1);
+      g.v.back().c = packCol(wood, 1.0f);
+    }
+    for (int i = 0; i < S; i++) {
+      if (e) g.idx.insert(g.idx.end(), {c0, c0 + 1 + i, c0 + 2 + i});
+      else g.idx.insert(g.idx.end(), {c0, c0 + 2 + i, c0 + 1 + i});
+    }
+  }
+  // stub branch
+  Vec3 sb = ctrAt(0.62f) + Vec3(0, r * 0.7f, 0);
+  size_t v0 = g.v.size();
+  tube(g, sb, sb + Vec3(R.r(-0.2f, 0.2f), 0.55f, R.r(0.1f, 0.35f)) * (r * 2.4f), r * 0.3f, r * 0.12f, 6, 0, 1.0f);
+  for (size_t i = v0; i < g.v.size(); i++) g.v[i].c = packCol(bark, 0.9f);
   return g.data();
 }
 
@@ -1633,7 +1737,7 @@ std::vector<uint8_t> loadImageRGBA(const std::string& rel, int& w, int& h) {
   return out;
 }
 
-std::vector<std::string> procOverrides() { return {"Bush.glb", "Bush with Flowers.glb", "Rock Medium.glb", "Mushroom Laetiporus.glb", "Fern.glb", "Plant.glb", "Plant Big.glb", "Plant-xH5gNlQxAZ.glb", "Flower Group.glb", "Flower Group-LqTljN6Wg2.glb", "Flower Single.glb", "Mushroom.glb", "Flower Petal.glb", "Flower Petal-LqvxG9OBOU.glb", "Flower Petal-eVE0j49ux9.glb", "Flower Petal-niuBUEJdvM.glb", "Flower Petal-tzG4JcqYWs.glb"}; }
+std::vector<std::string> procOverrides() { return {"Bush.glb", "Bush with Flowers.glb", "Rock Medium.glb", "Rock Slab.glb", "Rock Jagged.glb", "Rock Boulder.glb", "Stump.glb", "Stump Broken.glb", "Log Fallen.glb", "Mushroom Laetiporus.glb", "Fern.glb", "Plant.glb", "Plant Big.glb", "Plant-xH5gNlQxAZ.glb", "Flower Group.glb", "Flower Group-LqTljN6Wg2.glb", "Flower Single.glb", "Mushroom.glb", "Flower Petal.glb", "Flower Petal-LqvxG9OBOU.glb", "Flower Petal-eVE0j49ux9.glb", "Flower Petal-niuBUEJdvM.glb", "Flower Petal-tzG4JcqYWs.glb"}; }
 std::vector<std::string> procTreeFiles() { return {"ptree:oak", "ptree:maple", "ptree:birch", "ptree:Pine-cedar", "ptree:rhodo"}; }
 
 // Leaf-cluster card texture built from the single-leaf photo: a fan of twigs carrying many copies of the
@@ -1766,6 +1870,19 @@ void buildProcTrees() {
       };
       remap(B.leaves, 0.5f, 0.5f);
     }
+    {
+      // baked AO: dark inner crown, shaded trunk base and branch forks (computed once, stored per vertex)
+      AOGrid g;
+      g.add(B.bark);
+      if (!B.leaves.idx.empty()) g.add(B.leaves);
+      g.build(80);
+      float ext = std::max(B.bark.bmax.y - B.bark.bmin.y, 1.0f);
+      g.maxDist = ext * 0.3f;
+      g.groundY = B.bark.bmin.y + 0.05f;
+      g.applyGLB(B.bark, 0.8f, false);
+      if (!B.leaves.idx.empty()) g.applyGLB(B.leaves, 0.7f, true);
+      if (!lodSrc.idx.empty()) g.applyGLB(lodSrc, 0.7f, true);
+    }
     auto a = std::make_unique<Asset>();
     a->file = files[s];
     for (int part = 0; part < 2; part++) {
@@ -1774,7 +1891,8 @@ void buildProcTrees() {
       if (md.idx.empty()) continue;
       AssetPart ap;
       ap.mesh = uploadMesh(md);
-      MeshData ld = part == 0 ? makeLod(md, false, false) : makeLod(lodSrc, true, false);
+      // bark: a fine simplification grid, or thin branches collapse to nothing and vanish at mid distance
+      MeshData ld = part == 0 ? makeLod(md, false, false, 48.0f) : makeLod(lodSrc, true, false);
       if (part == 1 && !ld.idx.empty()) { int dr = 0; trimCards(ld, alpha, 256, 256, dr); }  // trim mid cards to the leaf area too: far less wasted overdraw
       if (texW && part == 1) { MeshData t = ld; for (int i = 0; i < t.vertexCount; i++) { VtxGlb* v = reinterpret_cast<VtxGlb*>(t.verts.data()) + i; v->uv[0] = floatToHalf(halfToFloatA(v->uv[0]) * 0.5f + 0.5f); } ld = t; }
       if (!ld.idx.empty()) ap.lod = uploadMesh(ld);
@@ -1796,6 +1914,15 @@ void buildProcTrees() {
   auto addAsset = [&](const std::string& name, std::vector<std::pair<MeshData, AssetMaterial>> parts, bool under, const std::vector<uint8_t>* alpha) {
     auto a = std::make_unique<Asset>();
     a->file = name;
+    {
+      AOGrid g;
+      float lo = 1e9f, ext = 0.1f;
+      for (auto& pm : parts) if (!pm.first.idx.empty()) { g.add(pm.first); lo = std::min(lo, pm.first.bmin.y); ext = std::max(ext, std::max(pm.first.bmax.x - pm.first.bmin.x, std::max(pm.first.bmax.y - pm.first.bmin.y, pm.first.bmax.z - pm.first.bmin.z))); }
+      g.build(48);
+      g.maxDist = ext * 0.35f;
+      g.groundY = lo + 0.03f;
+      for (auto& pm : parts) if (pm.first.fmt == VFmt::GLB) g.applyGLB(pm.first, pm.second.cutout ? 0.55f : 0.7f, pm.second.cutout);
+    }
     for (auto& pm : parts) {
       MeshData& md = pm.first;
       MeshData lodSrc = md;
@@ -1821,6 +1948,11 @@ void buildProcTrees() {
     g_leafOverride = Color{-1, 0, 0};
     g_flowers = 0;
     std::vector<uint8_t> rgba = toRGBA(L);
+    if (!fl) {
+      int bw = 0, bh = 0;
+      std::vector<uint8_t> leaf = loadImageRGBA("textures/leaf_bush.png", bw, bh);  // photographed leaf (LeafSet024)
+      if (!leaf.empty()) rgba = composeCluster(leaf, bw, bh, 512, T_BIRCH, 4711);
+    }
     g_procTex.push_back(std::make_unique<Texture>(uploadTextureRGBA(rgba.data(), 512, 512, true, true, true, false)));
     std::vector<uint8_t> alpha(256 * 256);
     for (int y = 0; y < 256; y++)
@@ -1837,6 +1969,23 @@ void buildProcTrees() {
     m.name = "rock";
     m.kind = SeasonKind::Rock;
     addAsset("Rock Medium.glb", {{buildRock(11), m}}, false, nullptr);
+    addAsset("Rock Slab.glb", {{buildRock(23, Vec3(1.6f, 0.42f, 1.15f), 3, 0.3f), m}}, false, nullptr);     // flat, tilted ledge
+    addAsset("Rock Jagged.glb", {{buildRock(37, Vec3(0.9f, 1.25f, 0.85f), 6, 0.45f), m}}, false, nullptr);  // tall, sharply fractured
+    addAsset("Rock Boulder.glb", {{buildRock(53, Vec3(1.15f, 0.9f, 1.25f), 2, 0.25f), m}}, false, nullptr);  // rounded, weathered
+    AssetMaterial b;
+    b.name = "bark_stump"; b.kind = SeasonKind::Bark;
+    {
+      int dw = 0, dh = 0;
+      std::vector<uint8_t> dead = loadImageRGBA("textures/bark_dead.jpg", dw, dh);  // weathered bark (Bark012)
+      if (!dead.empty()) {
+        g_procTex.push_back(std::make_unique<Texture>(uploadTextureRGBA(dead.data(), dw, dh, true, true, false, true)));
+        b.tex = g_procTex.back().get();
+        b.base = Color{1.7f, 1.7f, 1.7f};  // the vertex colours are dark bark brown: lift so the photo reads
+      }
+    }
+    addAsset("Stump.glb", {{buildStump(61, 0.55f, 0.75f, false), b}}, false, nullptr);
+    addAsset("Stump Broken.glb", {{buildStump(67, 0.62f, 1.3f, true), b}}, false, nullptr);
+    addAsset("Log Fallen.glb", {{buildLog(71, 5.5f, 0.42f), b}}, false, nullptr);
   }
   {
     MeshData st, sh;
@@ -1849,16 +1998,31 @@ void buildProcTrees() {
   // ---- small plants, flowers, mushrooms, garden petals ----
   auto plantMat = [&](const char* name, SeasonKind k, const Texture* t) { AssetMaterial m; m.name = name; m.cutout = t != nullptr; m.tex = t; m.kind = k; return m; };
   {
-    PlantTex fern = uploadPlant(makeFern(512), g_procTex);
+    PlantTex fern{nullptr, {}};
+    {
+      int fw = 0, fh = 0;
+      std::vector<uint8_t> ph = loadImageRGBA("textures/fern_frond.png", fw, fh);  // photographed spray (LeafSet019)
+      if (!ph.empty() && fw == 512 && fh == 512) {
+        g_procTex.push_back(std::make_unique<Texture>(uploadTextureRGBA(ph.data(), 512, 512, true, true, true, false)));
+        fern.tex = g_procTex.back().get();
+        fern.alpha.assign(256 * 256, 0);
+        for (int y = 0; y < 256; y++)
+          for (int x = 0; x < 256; x++) {
+            int m = 0;
+            for (int dy = 0; dy < 2; dy++) for (int dx = 0; dx < 2; dx++) m = std::max(m, (int)ph[(((size_t)(y * 2 + dy) * 512) + x * 2 + dx) * 4 + 3]);
+            fern.alpha[(size_t)y * 256 + x] = (uint8_t)m;
+          }
+      } else fern = uploadPlant(makeFern(512), g_procTex);
+    }
     addAsset("Fern.glb", {{buildRosette(3, 9, 2.4f, 1.0f, 0.5f, 0.55f), plantMat("fern", SeasonKind::Plant, fern.tex)}}, true, &fern.alpha);
     PlantTex parts = uploadPlant(makePartsAtlas(Color::hex("5f9a3c"), 21), g_procTex);
     auto pm = [&](const char* nm, SeasonKind k) { return plantMat(nm, k, parts.tex); };
     addAsset("Plant.glb", {{buildLeafRosette(5, 9, 0.75f, 0.32f, 0.9f, 1.0f), pm("plant_broad", SeasonKind::Plant)}}, true, nullptr);
     addAsset("Plant Big.glb", {{buildLeafRosette(7, 8, 0.3f, 0.13f, 1.4f, 0.9f), pm("plant_low", SeasonKind::Plant)}}, true, nullptr);
     addAsset("Plant-xH5gNlQxAZ.glb", {{buildLeafRosette(9, 7, 0.28f, 0.12f, 1.5f, 0.85f), pm("plant_low2", SeasonKind::Plant)}}, true, nullptr);
-    addAsset("Flower Group.glb", {{buildFlowerPlant(41, 6, 2.0f, 13, 0.115f, 0.038f, 0.12f, Color::hex("f6f3f2"), Color::hex("f2bd25"), 0.036f, 2), pm("flower_daisy", SeasonKind::Flower)}}, true, nullptr);
-    addAsset("Flower Group-LqTljN6Wg2.glb", {{buildFlowerPlant(43, 7, 2.4f, 5, 0.105f, 0.08f, 0.45f, Color::hex("8a58d4"), Color::hex("f0d050"), 0.024f, 2), pm("flower_violet", SeasonKind::Flower)}}, true, nullptr);
-    addAsset("Flower Single.glb", {{buildFlowerPlant(47, 3, 2.0f, 5, 0.13f, 0.105f, 0.55f, Color::hex("e03a2c"), Color::hex("2a1a10"), 0.03f, 3), pm("flower_poppy", SeasonKind::Flower)}}, true, nullptr);
+    addAsset("Flower Group.glb", {{buildFlowerPlant(41, 6, 0.9f, 13, 0.115f, 0.038f, 0.12f, Color::hex("f6f3f2"), Color::hex("f2bd25"), 0.036f, 2), pm("flower_daisy", SeasonKind::Flower)}}, true, nullptr);
+    addAsset("Flower Group-LqTljN6Wg2.glb", {{buildFlowerPlant(43, 7, 1.0f, 5, 0.105f, 0.08f, 0.45f, Color::hex("8a58d4"), Color::hex("f0d050"), 0.024f, 2), pm("flower_violet", SeasonKind::Flower)}}, true, nullptr);
+    addAsset("Flower Single.glb", {{buildFlowerPlant(47, 3, 0.9f, 5, 0.13f, 0.105f, 0.55f, Color::hex("e03a2c"), Color::hex("2a1a10"), 0.03f, 3), pm("flower_poppy", SeasonKind::Flower)}}, true, nullptr);
     MeshData stem;
     MeshData cap = buildToadstool(17, 0.4f, Color::hex("b8422c"), stem);
     addAsset("Mushroom.glb", {{stem, plantMat("mushroom_stem", SeasonKind::Mush, nullptr)}, {cap, plantMat("mushroom_cap", SeasonKind::Mush, nullptr)}}, true, nullptr);

@@ -48,11 +48,28 @@ void main(){
   float n3 = vnoise(vec2(fp.x * 2.6 - t * 1.2, fp.y * 2.9));
   float e = 0.06;
   float h0 = ripples(fp, t), hx = ripples(fp + vec2(e, 0.0), t), hy = ripples(fp + vec2(0.0, e), t);
-  vec2 g = vec2(hx - h0, hy - h0) / e * (0.05 + rapid * 0.08 + u_lake * 0.02);
+  vec2 g = vec2(hx - h0, hy - h0) / e * (0.08 + rapid * 0.08 + u_lake * 0.03);
   vec3 wn = u_lake > 0.5 ? normalize(vec3(-g.x, 1.0, -g.y)) : normalize(vec3(-(g.x * tg.x + g.y * nm.x), 1.0, -(g.x * tg.y + g.y * nm.y)));
+  // wind waves: a few crossing wave trains in world space, so the surface shows rolling bands and broken
+  // reflections instead of a flat mirror (stronger on lakes and calm pools, scaled by the wind)
+  {
+    vec2 wd = normalize(u_windDir + vec2(1e-4));
+    vec2 gw = vec2(0.0);
+    float amp = (0.10 + 0.14 * u_windS) * mix(0.55, 1.0, u_lake) * (1.0 - 0.8 * u_ice);
+    for (int k = 0; k < 4; k++) {
+      float a = float(k) * 0.9 - 1.35;
+      vec2 d = vec2(wd.x * cos(a) - wd.y * sin(a), wd.x * sin(a) + wd.y * cos(a));
+      float f = 0.9 + float(k) * 0.75, sp = 1.3 / sqrt(f);
+      float ph = dot(v_wpos.xz, d) * f - t * sp * 2.2 + float(k) * 1.7 + vnoise(v_wpos.xz * 0.08 + float(k)) * 2.5;
+      gw += d * cos(ph) * amp / (1.0 + float(k) * 0.6);
+    }
+    vec2 cp = v_wpos.xz * 2.2 + wd * t * 0.6;  // fine capillary ripples
+    gw += (vec2(vnoise(cp), vnoise(cp + 17.3)) - 0.5) * 0.12;
+    wn = normalize(wn + vec3(-gw.x, 0.0, -gw.y) * (1.0 - 0.6 * clamp(rapid * 2.0, 0.0, 1.0)));
+  }
   vec3 V = normalize(u_camPos - v_wpos);
   float fres = 0.02 + 0.98 * pow(1.0 - max(dot(wn, V), 0.0), 5.0);
-  vec3 shallow = vec3(0.30, 0.62, 0.62), deepc = vec3(0.05, 0.25, 0.36);
+  vec3 shallow = vec3(0.17, 0.24, 0.19), deepc = vec3(0.025, 0.07, 0.08);  // natural: peaty green shallows, near-black depths
   vec3 col = mix(shallow, deepc, smoothstep(0.05, 0.9, depth));
   col = mix(col, vec3(0.22, 0.36, 0.30), smoothstep(0.0, 0.25, depth) * (1.0 - smoothstep(0.25, 0.6, depth)) * 0.35);
   vec3 R = reflect(-V, wn);
@@ -61,11 +78,13 @@ void main(){
   vec3 land = mix(vec3(0.07, 0.1, 0.07), vec3(0.16, 0.18, 0.2), smoothstep(-0.1, 0.5, u_sunDir.y)) * (0.4 + 0.6 * u_daylight);
   float shore = 1.0 - smoothstep(0.02, 0.22 + 0.25 * vnoise(v_wpos.xz * 0.05), R.y);
   sky = mix(sky, land, shore * 0.85 * (1.0 - u_lake * 0.3));
-  col = mix(col, sky, clamp(fres, 0.0, 0.85));
-  col += vec3(0.85, 0.95, 1.0) * smoothstep(0.62, 0.9, n1 * 0.55 + n2 * 0.45) * (0.16 + rapid * 0.2) * (1.0 - u_lake * 0.6);
+  // calm water is a dark mirror: reflection dominates, especially at a glance across it
+  float calm = 1.0 - clamp(rapid * 2.0, 0.0, 1.0);
+  col = mix(col, sky, clamp(max(fres, 0.25 * calm), 0.0, 0.93));
+  col += vec3(0.85, 0.95, 1.0) * smoothstep(0.62, 0.9, n1 * 0.55 + n2 * 0.45) * rapid * 0.3;  // white ripples only in rapids
   float bank = 1.0 - smoothstep(0.02, 0.18, depth);
   float foamLines = smoothstep(0.55, 0.8, vnoise(vec2(fp.x * 1.3, fp.y * 6.0 + n1 * 2.0)));
-  float foam = bank * max(smoothstep(0.35, 0.75, n3), foamLines * 0.8);
+  float foam = bank * max(smoothstep(0.35, 0.75, n3), foamLines * 0.8) * (0.25 + 0.75 * clamp(rapid * 2.0, 0.0, 1.0));  // no foam rim on calm water
   foam = max(foam, rapid * smoothstep(0.45 - rapid * 0.25, 0.85, n1 * 0.5 + n3 * 0.5));
   col = mix(col, vec3(0.94, 0.97, 0.98), foam * 0.85);
   vec3 H = normalize(u_sunDir.xyz + V);
@@ -73,11 +92,32 @@ void main(){
   // sun glitter: sparkling points on the ripples toward the sun
   spec += step(0.985, vnoise(fp * 9.0 + vec2(t * 2.0, -t))) * pow(max(dot(R, u_sunDir.xyz), 0.0), 8.0) * 4.0;
   col += u_sunCol.rgb * spec * 0.35 * u_daylight;
+  float padA = 0.0;
+  if (u_lake > 0.5 && u_ice < 0.3) {
+    // lily pads float in the lake shallows: notched discs with an occasional pink flower
+    vec2 lp = v_wpos.xz * 0.9;
+    vec2 cell = floor(lp), f = fract(lp) - 0.5;
+    float hh = fract(sin(dot(cell, vec2(41.3, 289.1))) * 43758.5);
+    vec2 o = (vec2(fract(hh * 13.7), fract(hh * 7.9)) - 0.5) * 0.4;
+    vec2 q = f - o;
+    float rr = 0.17 + 0.12 * fract(hh * 3.3);
+    float ang = atan(q.y, q.x) - hh * 6.28;
+    float notch = step(0.25, abs(mod(ang + 3.14159, 6.28318) - 3.14159));
+    float pad = smoothstep(rr, rr - 0.02, length(q)) * notch * step(0.55, hh);
+    float zone = smoothstep(0.08, 0.2, depth) * (1.0 - smoothstep(0.45, 0.8, depth)) * smoothstep(0.35, 0.6, vnoise(v_wpos.xz * 0.12));
+    pad *= zone;
+    vec3 padc = mix(vec3(0.16, 0.3, 0.1), vec3(0.28, 0.42, 0.14), fract(hh * 5.1)) * (0.7 + 0.5 * max(u_sunDir.y, 0.0));
+    float bloom = smoothstep(0.06, 0.03, length(q - vec2(0.03, 0.02))) * step(0.9, hh) * zone;
+    col = mix(col, padc, pad);
+    col = mix(col, vec3(0.95, 0.68, 0.78), bloom);
+    padA = pad * 0.98;
+  }
   float ice = u_ice * (0.55 + 0.45 * (1.0 - smoothstep(0.0, 0.35, depth))) * (0.85 + 0.15 * n1) * (1.0 - rapid * 0.7);
   col = mix(col, vec3(0.8, 0.88, 0.93), ice);
   float lightK = clamp(0.16 + 0.84 * u_daylight, 0.0, 1.0);
   col *= lightK;
   float alpha = mix(smoothstep(0.0, 0.05, depth) * 0.9, 0.97, max(ice, foam * 0.6));
+  alpha = max(alpha, padA);
   alpha = max(alpha, fres * 0.6 * smoothstep(0.0, 0.03, depth));
   // dawn mist: a pale veil drifting low over the water in the early hours
   float dawn = smoothstep(0.02, 0.2, u_daylight) * (1.0 - smoothstep(0.35, 0.6, u_daylight)) * (u_sunDir.x > 0.0 ? 1.0 : 0.3);
@@ -222,7 +262,7 @@ void buildRiver() {
     if (l < 1e-5f) continue;
     tx /= l; tz /= l;
     float nx = -tz, nz = tx;
-    float hw = R.hw[i] + 3.0f;
+    float hw = R.hw[i] + 6.0f;  // banks are ragged (bankNoise): cover the widest inlets
     float wy = R.wy[i];
     for (int k = 0; k <= ACROSS; k++) {
       float u = -1 + 2.0f * k / ACROSS;
@@ -247,7 +287,7 @@ void buildLakes() {
   for (const Lake& L : world::LAKES) {
     const int RINGS = 14, SEG = 48;
     uint32_t base = (uint32_t)v.size();
-    float rmax = L.r + 6;
+    float rmax = L.r * 1.3f + 8;  // shoreline bulges out up to ~28% (world::lakeDist)
     for (int r = 0; r <= RINGS; r++) {
       float rr = rmax * r / RINGS;
       int segs = r == 0 ? 1 : SEG;
@@ -255,6 +295,10 @@ void buildLakes() {
         float a = (float)s / SEG * TAU;
         float x = L.x + std::cos(a) * rr, z = L.z + std::sin(a) * rr;
         float depth = L.level - world::getTerrainHeight(x, z);
+        // past the (ragged) shoreline the sheet must vanish even where the bank dips below lake level,
+        // or it floats over the hollows around the lake
+        float out = world::lakeDist(L, x, z) - L.r;
+        if (out > 0.5f) depth = std::min(depth, -0.3f - out * 0.05f);
         v.push_back({{x, L.level, z}, {0, 0, depth, 0}, {1, 0}});
       }
     }

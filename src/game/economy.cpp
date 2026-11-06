@@ -1,3 +1,4 @@
+#include "extras.h"
 #include "economy.h"
 #include "../models/houses.h"
 
@@ -34,7 +35,6 @@ const GearDef GEAR[GEAR_COUNT] = {
     {"recurve_bow", "Recurve Bow", "Horn-backed bow: every arrow hits 30% harder.", {{"goral_horn", 2}, {"sinew", 3}, {"wood", 6}}},
     {"quiver", "Hunter's Quiver", "Fletch 15 arrows per timber instead of 10 (40 per bundle).", {{"deer_pelt", 2}, {"fiber", 4}, {"bone", 2}}},
     {"snowshoes", "Snowshoes", "Walk over deep snow without slowing down.", {{"wood", 4}, {"sinew", 2}, {"fiber", 4}}},
-    {"lantern", "Hand Lantern", "Lights the ground around you after dark.", {{"stone", 2}, {"bone", 2}, {"fiber", 2}, {"herb", 2}}},
 };
 
 const Production* production(const std::string& id) {
@@ -91,5 +91,5 @@ int housingCapacity() {
 int villageAppeal() {
   int a = 0;
   for (auto& s : A.structures) a += KINDS[s.kind].appeal;
-  return a;
+  return a + extras::trophyAppeal();
 }

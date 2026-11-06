@@ -17,5 +17,7 @@ struct ResidentKit {
 namespace people {
 const PersonModel& person(const std::string& role);
 const ResidentKit& residentKit();
+const PersonModel& bandit();   // villager body, dark clothes, hood, quiver, blood-red face cloth, grim face
+const Mesh& banditBow();       // drawn with the left arm's matrix
 void shutdown();
 }

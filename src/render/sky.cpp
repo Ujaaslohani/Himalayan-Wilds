@@ -29,6 +29,8 @@ void main(){
 const char* SKY_FS = R"(
 in vec3 v_dir;
 uniform sampler2D u_cloudTex;
+uniform float u_aurora;
+uniform float u_meteor;
 uniform vec3 u_top;
 uniform vec3 u_bottom;
 uniform vec3 u_sun;
@@ -86,6 +88,35 @@ void main(){
     }
   }
   col += vec3(0.7, 0.75, 0.9) * u_flash * (0.6 + 0.4 * max(d.y, 0.0));
+  if (u_aurora > 0.01 && d.y > 0.02) {
+    // aurora: slow green curtains low over the northern peaks, violet at their tops
+    float north = smoothstep(-0.2, 0.6, -d.z);
+    vec2 q = vec2(atan(d.x, -d.z) * 1.6 + u_clock * 0.006, 0.0);
+    float wav = texture(u_cloudTex, vec2(q.x * 0.35, u_clock * 0.002)).r;
+    float curtain = pow(abs(sin(q.x * 3.0 + wav * 6.0 + u_clock * 0.03)), 6.0);
+    float h = d.y;
+    float body = smoothstep(0.03, 0.12, h) * (1.0 - smoothstep(0.22 + wav * 0.2, 0.55, h));
+    float rays = 0.55 + 0.45 * texture(u_cloudTex, vec2(q.x * 3.0, h * 0.4 - u_clock * 0.01)).g;
+    vec3 ac = mix(vec3(0.15, 0.95, 0.45), vec3(0.6, 0.25, 0.85), smoothstep(0.18, 0.45, h));
+    col += ac * curtain * body * rays * north * u_aurora * 0.55 * (1.0 - u_daylight);
+  }
+  if (u_meteor > 0.01 && d.y > 0.05) {
+    // meteor shower: a few short streaks each second across the dark sky
+    vec2 sp = d.xz / (d.y + 0.25);
+    for (int k = 0; k < 3; k++) {
+      float slot = floor(u_clock * 0.9 + float(k) * 0.37);
+      float hsh = fract(sin(slot * 91.7 + float(k) * 13.1) * 43758.5);
+      if (hsh > u_meteor * 0.85) continue;
+      float pr = fract(u_clock * 0.9 + float(k) * 0.37);
+      vec2 p0 = (vec2(fract(hsh * 7.3), fract(hsh * 3.1)) - 0.5) * 3.0;
+      vec2 dir = normalize(vec2(fract(hsh * 5.7) - 0.5, -0.6 - fract(hsh * 2.9)));
+      vec2 head = p0 + dir * pr * 1.4;
+      vec2 rel = sp - head;
+      float along = dot(rel, -dir), across = abs(dot(rel, vec2(-dir.y, dir.x)));
+      float tail = smoothstep(0.35, 0.0, along) * step(0.0, along) * smoothstep(0.012, 0.0, across);
+      col += vec3(0.85, 0.9, 1.0) * tail * (1.0 - pr) * 1.6 * (1.0 - u_daylight);
+    }
+  }
   fragColor = vec4(col, 1.0);
 }
 )";
@@ -301,6 +332,7 @@ const char* LEAF_VS = R"(
 in vec3 a_pos;
 in vec4 a_col;
 uniform float u_leafAmt;
+uniform sampler2D u_waterLv;
 out float v_a;
 out float v_rot;
 out vec3 v_seed;
@@ -315,10 +347,17 @@ void main(){
   float ft = min(t, 0.78) * 30.0;
   p.x += sin(ft * 1.3 + sd.z * 30.0) * 0.6 * fall;
   p.z += cos(ft * 1.1 + sd.x * 20.0) * 0.6 * fall;
+  // land on the ground where the leaf actually comes down (not the trunk's height): over a river or lake the
+  // leaf vanishes as it reaches the water instead of resting in mid-air above it
+  float gy = envGround(envAt(p.xz));
+  p.y = mix(em.y, gy + 0.06, fall);
+  vec2 wv = textureLod(u_waterLv, envUV(p.xz), 0.0).rg;
+  float overWater = (wv.g > 0.3 && wv.r > gy - 0.1) ? 1.0 : 0.0;
+  float wet = overWater * smoothstep(wv.r + 0.4, wv.r, p.y);
   vec4 mv = u_view * vec4(p, 1.0);
   gl_Position = u_proj * mv;
   float on = step(sd.y, u_leafAmt) * step(0.5, em.y - em.w);
-  v_a = on * smoothstep(0.0, 0.06, t) * (1.0 - smoothstep(0.88, 1.0, t));
+  v_a = on * smoothstep(0.0, 0.06, t) * (1.0 - smoothstep(0.88, 1.0, t)) * (1.0 - wet);
   v_rot = ft * (1.5 + sd.y * 3.0) + sd.z * 10.0;
   v_seed = sd;
   gl_PointSize = on * clamp((0.13 + sd.x * 0.06) * u_viewH / max(-mv.z, 0.1), 1.5, 26.0);
@@ -379,7 +418,7 @@ void main(){
 )";
 
 struct SkyCols { Color zen, hor; };
-const Color NIGHT = Color::hex("0b1430"), NIGHTH = Color::hex("1c2846"), DAWN = Color::hex("f08a4b"), DAWNH = Color::hex("fbc99a");
+const Color NIGHT = Color::hex("0f1834"), NIGHTH = Color::hex("2a3550"), DAWN = Color::hex("f08a4b"), DAWNH = Color::hex("fbc99a");
 const Color DAY = Color::hex("78bdf0"), DAYH = Color::hex("d3e8ee"), GOLD = Color::hex("f6a35c"), GOLDH = Color::hex("fde3a7");
 const Color SUN = Color::hex("fff1d6"), SUNLOW = Color::hex("ffc58a"), SUNSET = Color::hex("ff7a2a"), MOON = Color::hex("a8c0ee");
 const Color WINTER_H = Color::hex("e4eaf0"), WINTER_Z = Color::hex("9fb6cc"), AUTUMN_H = Color::hex("f3d9b5");
@@ -532,7 +571,7 @@ void update(float dt) {
   float sunElev = g_sunDir.y;
   float dusk = 1.0f - sstep(sunElev, 0.02f, 0.42f);
   float sunI = 2.1f * std::pow(daylight, 1.15f) * (1 - 0.18f * snow) * (1.0f - 0.28f * dusk * dusk);
-  float moonI = 0.5f * moonUp * (1 - daylight);  // brighter blue-silver moonlight, casts soft shadows
+  float moonI = 0.6f * moonUp * (1 - daylight);  // brighter blue-silver moonlight, casts soft shadows
   {
     // showers: deterministic weather over game hours; spring/summer/autumn only, ground stays wet for a while after
     float hrs = (season.start * 7 + season.day) * 24.0f + E.time;
@@ -589,7 +628,7 @@ void update(float dt) {
   g_sunTint = SUN.lerp(SUNLOW, sstep(dusk, 0.0f, 0.55f)).lerp(SUNSET, sstep(dusk, 0.45f, 1.0f));
   Color lightCol = useSun ? g_sunTint : MOON;
   float lightI = std::max(std::max(sunI, moonI), 0.05f);
-  float hemiI = lerpf(0.32f, 1.05f, daylight) * (1 + g_flash * 2.5f);
+  float hemiI = lerpf(0.45f, 1.05f, daylight) * (1 + g_flash * 2.5f);
   Color ground = G_SUMMER.lerp(G_AUTUMN, au * 0.8f).lerp(G_WINTER, snow);
   g_cover = std::min(0.95f, 0.64f + 0.22f * season.fall + 0.08f * season.autumn + 0.25f * std::min(1.0f, g_rain * 2.5f));
 
@@ -611,7 +650,8 @@ void update(float dt) {
     g_shadowMat = lpj * lv;
     g_staticDirty = true;
   }
-  g_shadowUpdate = g_staticDirty || (g_shadowTick++ % 2) == 0;
+  g_shadowUpdate = true;  // moving things (people, animals) every frame so their shadows glide; trees, props and the village stay cached
+  g_shadowTick++;
 
   FrameUBO& F = render::frame;
   g_mixT = std::min(1.0f, g_mixT + dt / 0.3f);
@@ -621,7 +661,7 @@ void update(float dt) {
   std::memcpy(F.viewProj, render::cam.viewProj.m, 64);
   std::memcpy(F.shadowMat, g_shadowMat.m, 64);
   setv(F.cam, render::cam.pos, E.clock);
-  float strength = useSun ? std::min(1.0f, sunI / 1.3f) : 0.45f * moonUp;
+  float strength = useSun ? std::min(1.0f, sunI / 1.3f) : 0.5f * moonUp;
   setv(F.sunDir, g_lightDir, strength);
   setv(F.sunCol, lightCol * lightI, daylight);
   setv(F.hemiSky, HEMI_SKY.lerp(Color::hex("8aa4d6"), (1 - daylight) * 0.6f) * hemiI, std::max(0.011f, g_shadowK));
@@ -633,6 +673,14 @@ void update(float dt) {
   F.fogParam[2] = clampf((0.45f - daylight) / 0.35f, 0, 1);
   F.fogParam[3] = g_wet;
   F.shadowMix[1] = g_rain;
+  if (E.lanternOn && E.playing && !E.photo) {
+    // carried low in the left hand, a little ahead: lights the ground and trunks around the player
+    Vec3 f = render::cam.forward();
+    Vec3 r = Vec3(-f.z, 0, f.x).normalized();
+    Vec3 lp = render::cam.pos + Vec3(f.x, 0, f.z).normalized() * 0.45f - r * 0.3f + Vec3(0, -0.6f, 0);
+    F.lantern[0] = lp.x; F.lantern[1] = lp.y; F.lantern[2] = lp.z;
+    F.lantern[3] = 1.0f - 0.6f * clampf((daylight - 0.35f) / 0.4f, 0, 1);  // barely matters at noon
+  } else F.lantern[0] = F.lantern[1] = F.lantern[2] = F.lantern[3] = 0;
   F.season[0] = season.snow; F.season[1] = season.autumn; F.season[2] = season.bare; F.season[3] = season.spring;
   F.season2[0] = season.dry; F.season2[1] = season.ice; F.season2[2] = wind.t; F.season2[3] = wind.strength;
   F.wind[0] = wind.dirX; F.wind[1] = wind.dirZ; F.wind[2] = 1.0f / (float)g_settings.shadowSize; F.wind[3] = SHADOW_HALF;
@@ -671,6 +719,26 @@ void drawSky() {
   s.set1f("u_storm", std::min(1.0f, g_rain * 2.5f));
   s.set1f("u_flash", g_flash);
   s.set1i("u_cloudTex", 12);
+  {
+    // night sky events, decided per night: auroras (mostly in winter) and meteor showers
+    int night = season.start * 7 + season.day - (E.time < 12 ? 1 : 0);
+    float r1 = valueNoise(night * 1.37f, 2.1f, 811) * 0.5f + 0.5f, r2 = valueNoise(night * 1.91f, 5.3f, 812) * 0.5f + 0.5f;
+    float dark = 1 - sstep(E.daylight, 0.08f, 0.25f), clear = (1 - std::min(1.0f, g_rain * 3)) * (1 - g_blizzard) * (1 - g_fogBank);
+    bool aur = r1 > (season.index == 3 ? 0.72f : 0.93f), met = r2 > 0.955f;  // rare: an aurora a few times a winter, a meteor shower now and then
+    if (std::getenv("HW_SKYEVENTS")) aur = met = true;
+    // a meteor shower lasts one hour, at a different time each night it happens (between 21:00 and 03:00), fading in and out
+    float start = 21.0f + 6.0f * (valueNoise(night * 2.71f, 9.7f, 813) * 0.5f + 0.5f);
+    float hr = E.time < 12 ? E.time + 24 : E.time, into = hr - start;
+    float win = sstep(into, 0.0f, 0.1f) * (1 - sstep(into, 0.9f, 1.0f));
+    float a = aur ? dark * clear : 0, m = met ? dark * clear * win : 0;
+    static int told = -1;
+    if ((a > 0.5f || m > 0.5f) && told != night && E.playing) {
+      told = night;
+      actions::notify(a > 0.5f && m > 0.5f ? "Look up: an aurora and a meteor shower light the sky tonight!" : a > 0.5f ? "Look north: an aurora is shimmering over the peaks tonight." : "A meteor shower streaks across the sky tonight.");
+    }
+    s.set1f("u_aurora", a);
+    s.set1f("u_meteor", m);
+  }
   glActiveTexture(GL_TEXTURE12);
   glBindTexture(GL_TEXTURE_2D, render::fbmTexture());
   glActiveTexture(GL_TEXTURE0);
@@ -842,7 +910,7 @@ void drawWeather(float dt) {
       l.set4f("u_life", ff, bf, pl, 0);
       glBindVertexArray(g_rainVao);
       glBlendFunc(GL_SRC_ALPHA, GL_ONE);  // glow
-      glDrawArrays(GL_POINTS, 0, 300);
+      glDrawArrays(GL_POINTS, 0, 90);  // fireflies: a scattered few, not a swarm
       glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
       glDrawArrays(GL_POINTS, 300, 12);
       glBlendFunc(GL_SRC_ALPHA, GL_ONE);

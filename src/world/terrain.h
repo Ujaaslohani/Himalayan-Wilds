@@ -92,6 +92,7 @@ RiverHit riverQuery(float x, float z);
 float riverMask(float x, float z);
 float waterHeightAt(float x, float z);
 int lakeAt(float x, float z, float margin = 0);
+float lakeDist(const Lake& L, float x, float z);  // distance with a ragged shoreline (shore at L.r)
 PathHit pathQuery(float x, float z);
 float pathDistance(float x, float z);
 float nearRoute(float x, float z);

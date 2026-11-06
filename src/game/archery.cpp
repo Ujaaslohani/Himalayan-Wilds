@@ -1,3 +1,5 @@
+#include "../render/envmap.h"
+#include "extras.h"
 #include "../render/sky.h"
 #include "archery.h"
 #include "engine.h"
@@ -74,10 +76,21 @@ void update(float dt) {
       if (a.life <= 0) a.state = 0;
       continue;
     }
+    if (a.state == 3) {  // floating: carried by the baked water flow, bobbing on the surface
+      float vx, vz;
+      envmap::flowAt(a.pos.x, a.pos.z, vx, vz);
+      a.pos.x += vx * dt;
+      a.pos.z += vz * dt;
+      a.pos.y = world::waterHeightAt(a.pos.x, a.pos.z) + 0.02f + 0.015f * std::sin(a.life * 3.1f);
+      if (vx * vx + vz * vz > 0.01f) a.quat = Quat::fromUnitVectors(FWD, Vec3(vx, 0, vz).normalized());  // swings round to point downstream
+      if (a.life <= 0 || world::waterHeightAt(a.pos.x, a.pos.z) < world::getTerrainHeight(a.pos.x, a.pos.z)) a.state = 0;
+      continue;
+    }
     a.prev = a.pos;
     a.vel.y -= GRAVITY * dt;
     a.pos += a.vel * dt;
     a.quat = Quat::fromUnitVectors(FWD, a.vel.normalized());
+    if (extras::arrowHit(a.prev, a.pos, (28 + 62 * a.power) * (a.aimed ? 1.15f : 1) * (invCount("recurve_bow") > 0 ? 1.3f : 1.0f))) { a.state = 0; continue; }
     ArrowHit hit;
     if (wildlife::arrowHitTest(a.prev, a.pos, hit)) {
       float dmg = (28 + 62 * a.power) * (a.aimed ? 1.15f : 1) * (invCount("recurve_bow") > 0 ? 1.3f : 1.0f);
@@ -87,6 +100,16 @@ void update(float dt) {
       continue;
     }
     float ground = world::getTerrainHeight(a.pos.x, a.pos.z);
+    float wsurf = world::waterHeightAt(a.pos.x, a.pos.z);
+    if (wsurf > ground + 0.08f && a.pos.y <= wsurf) {  // into a river or lake: it floats instead of sticking in the bed
+      a.pos.y = wsurf + 0.02f;
+      a.quat = Quat::fromUnitVectors(FWD, Vec3(a.vel.x, 0, a.vel.z).normalized());
+      a.state = 3;
+      a.life = 18;
+      audio::footstepWater();
+      makeNoise(a.pos.x, a.pos.z, 6);
+      continue;
+    }
     if (a.pos.y <= ground + 0.05f) {
       a.pos.y = ground + 0.12f;
       a.state = 2;

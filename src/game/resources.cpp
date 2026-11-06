@@ -1,3 +1,4 @@
+#include "../render/envmap.h"
 #include "../render/sky.h"
 #include "resources.h"
 #include "engine.h"
@@ -211,7 +212,7 @@ static void rebuild() {
   g_gen++;
 }
 
-float outerR() { return g_settings.fullMap ? 700.0f : std::max(160.0f, 110.0f * g_settings.drawDist()); }
+float outerR() { return g_settings.fullMap ? 700.0f : std::min(envmap::g_cullQ, std::max(160.0f, 110.0f * g_settings.drawDist())); }
 
 static void cull() {
   const Camera& cam = render::cam;

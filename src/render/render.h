@@ -20,6 +20,7 @@ struct FrameUBO {
   float misc[4];
   float shadowMatPrev[16];
   float shadowMix[4];
+  float lantern[4];  // hand lantern: xyz position, w intensity (0 = off)
 };
 
 struct Camera {

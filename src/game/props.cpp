@@ -222,7 +222,7 @@ void rebuildCasters() {
 static void drawWorld(bool shadow) {
   if (!shadow) {
     glDisable(GL_CULL_FACE);
-    terrain_render::drawGroundMesh(g_stairs);
+    terrain_render::drawGroundMesh(g_stairs, true);  // stairs and stepping pillars wear the trail texture
     for (CulledBatch* b : {&g_temples, &g_templeGlow, &g_posts, &g_rails, &g_marks, &g_clueCairns}) b->cull();
   }
   glEnable(GL_CULL_FACE);

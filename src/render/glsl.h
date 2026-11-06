@@ -21,6 +21,7 @@ layout(std140) uniform Frame {
   vec4 u_misc;
   mat4 u_shadowMatPrev;
   vec4 u_shadowMix;
+  vec4 u_lantern;
 };
 #define u_camPos u_cam.xyz
 #define u_clock u_cam.w
@@ -75,6 +76,10 @@ vec3 ptexWood(vec3 wp, inout vec3 n, float scale, float bumpK){
 }
 // Pre-baked procedural rock material (albedo multiplier*0.5 in rgb, height in a; normal xy + cavity in b).
 // Triplanar: returns albedo multiplier, perturbs n.
+uniform sampler2D u_rockB;  // Rock030 (dark, mossy)
+uniform sampler2D u_rockC;  // Rock060 (grey, veined)
+float g_rockVar = 0.0;      // 0 granite (default), 1 dark mossy, 2 grey: picked per rock in the object shader
+vec4 rockAlb(vec2 uv){ return g_rockVar < 0.5 ? texture(u_ptexA, uv) : g_rockVar < 1.5 ? texture(u_rockB, uv * 0.7) : texture(u_rockC, uv * 0.7); }
 vec3 ptexRock(vec3 wp, inout vec3 n, float scale, float bumpK){
   vec3 w = pow(abs(n), vec3(4.0)); w /= (w.x + w.y + w.z);
   w *= step(0.03, w); w /= (w.x + w.y + w.z);  // skip projections that would add under 3%: 2 reads instead of 6 on most faces
@@ -85,9 +90,9 @@ vec3 ptexRock(vec3 wp, inout vec3 n, float scale, float bumpK){
   vec3 alb = vec3(0.0);
   float cav = 0.0;
   vec3 dn = vec3(0.0);
-  if (w.x > 0.0) { vec4 a = texture(u_ptexA, ux), b = texture(u_ptexN, ux); vec2 t = b.xy * 2.0 - 1.0; alb += a.rgb * w.x; cav += b.b * w.x; dn += vec3(0.0, t.y, t.x) * w.x; }
-  if (w.y > 0.0) { vec4 a = texture(u_ptexA, uy), b = texture(u_ptexN, uy); vec2 t = b.xy * 2.0 - 1.0; alb += a.rgb * w.y; cav += b.b * w.y; dn += vec3(t.x, 0.0, t.y) * w.y; }
-  if (w.z > 0.0) { vec4 a = texture(u_ptexA, uz), b = texture(u_ptexN, uz); vec2 t = b.xy * 2.0 - 1.0; alb += a.rgb * w.z; cav += b.b * w.z; dn += vec3(t.x, t.y, 0.0) * w.z; }
+  if (w.x > 0.0) { vec4 a = rockAlb(ux), b = texture(u_ptexN, ux); vec2 t = b.xy * 2.0 - 1.0; alb += a.rgb * w.x; cav += b.b * w.x; dn += vec3(0.0, t.y, t.x) * w.x; }
+  if (w.y > 0.0) { vec4 a = rockAlb(uy), b = texture(u_ptexN, uy); vec2 t = b.xy * 2.0 - 1.0; alb += a.rgb * w.y; cav += b.b * w.y; dn += vec3(t.x, 0.0, t.y) * w.y; }
+  if (w.z > 0.0) { vec4 a = rockAlb(uz), b = texture(u_ptexN, uz); vec2 t = b.xy * 2.0 - 1.0; alb += a.rgb * w.z; cav += b.b * w.z; dn += vec3(t.x, t.y, 0.0) * w.z; }
   n = normalize(n + dn * bumpK);
   return alb * 2.0 * mix(0.55, 1.05, cav);
 }
@@ -107,8 +112,54 @@ vec3 aces(vec3 color){
   color = OM * color;
   return clamp(color, 0.0, 1.0);
 }
+// ---- precomputed environment (envmap.cpp): baked once at load ----
+uniform sampler2D u_envMap;   // r haze density, g ground mist, b sky visibility, a ground height
+uniform sampler2D u_horA;     // terrain horizon angle, directions 0-3 (x = east, 45 degree steps)
+uniform sampler2D u_horB;     // directions 4-7
+vec2 envUV(vec2 xz){ return (xz + 620.0) * (1.0 / 1240.0); }
+vec4 envAt(vec2 xz){ return texture(u_envMap, envUV(xz)); }
+float envGround(vec4 e){ return e.a * 1000.0 - 100.0; }
+float g_envVis = 1.0;  // sky visibility at the shaded point, set by envLight()/shadowAt()
+// mountains and ridges shade the valleys at low sun: precomputed horizon angles vs the current sun elevation
+float horizonShadow(vec3 wp){
+  if (u_sunDir.y < -0.05) return 1.0;
+  float az = atan(u_sunDir.z, u_sunDir.x) * (4.0 / PI);
+  if (az < 0.0) az += 8.0;
+  int i0 = int(floor(az)) & 7, i1 = (i0 + 1) & 7;
+  vec2 uv = envUV(wp.xz);
+  vec4 a = texture(u_horA, uv), b = texture(u_horB, uv);
+  float h[8] = float[8](a.x, a.y, a.z, a.w, b.x, b.y, b.z, b.w);
+  float hor = mix(h[i0], h[i1], fract(az)) * (PI * 0.5);
+  float lift = max(wp.y - envGround(envAt(wp.xz)), 0.0) * 0.004;  // tree tops and roofs catch light a little longer
+  return smoothstep(-0.015, 0.03, asin(clamp(u_sunDir.y, -1.0, 1.0)) - hor + lift);
+}
+uniform sampler2D u_detailMap;  // r contact shade, g firelight, b light height (envmap.cpp, ~1.2 m texels)
+vec3 g_fireLight = vec3(0.0);   // baked lamp/campfire light at the shaded point, added in lambert()
+vec3 g_lanternC = vec3(0.0), g_lanternL = vec3(0.0, 1.0, 0.0);  // hand lantern light at the shaded point (colour, direction to it)
+float envLight(vec3 wp){
+  vec4 e = envAt(wp.xz);
+  vec4 dm = texture(u_detailMap, envUV(wp.xz));
+  float above = wp.y - envGround(e);
+  float nearG = 1.0 - smoothstep(0.4, 2.8, above);  // contact shade only reaches things close to the ground
+  float contact = mix(1.0, dm.r, nearG);
+  g_envVis = e.b * contact;
+  // beyond the 32 m shadow map the baked crown shade also stands in for the trees' sun shadows
+  float farK = smoothstep(24.0, 34.0, distance(wp, u_camPos)) * nearG * 0.7;
+  float night = 1.0 - smoothstep(0.3, 0.55, u_daylight);
+  if (u_lantern.w > 0.0) {
+    vec3 lv = u_lantern.xyz - wp;
+    float ld = length(lv);
+    g_lanternL = lv / max(ld, 1e-3);
+    float lr = max(ld - 1.2, 0.0);  // flat within arm's reach: no hot spot right under the hand
+    g_lanternC = vec3(1.0, 0.7, 0.36) * (u_lantern.w * 1.5 / (1.0 + lr * lr * 0.1)) * (1.0 - smoothstep(9.0, 15.0, ld));
+  }
+  g_fireLight = dm.g > 0.004 ? vec3(1.0, 0.55, 0.22) * (dm.g * dm.g * 2.2 * night) * (1.0 - smoothstep(2.5, 7.0, abs(wp.y - (dm.b * 1000.0 - 100.0)))) : vec3(0.0);
+  return horizonShadow(wp) * mix(1.0, dm.r, farK);
+}
 vec3 lambert(vec3 albedo, vec3 n, float shadow){
-  vec3 irr = mix(u_hemiGround.rgb, u_hemiSky.rgb, 0.5 * n.y + 0.5);
+  vec3 irr = mix(u_hemiGround.rgb, u_hemiSky.rgb, 0.5 * n.y + 0.5) * mix(0.45, 1.0, g_envVis);
+  irr += g_fireLight;
+  irr += g_lanternC * (0.3 + 0.7 * max(dot(n, g_lanternL), 0.0));
   irr += u_sunCol.rgb * max(dot(n, u_sunDir.xyz), 0.0) * shadow;
   return albedo * irr * (1.0 / PI);
 }
@@ -126,7 +177,33 @@ vec3 outColor(vec3 lit){
 #endif
   return linearToSrgb(a);
 }
+// aerial perspective: bright, light-scattering haze that builds steadily with distance and pools in the valleys,
+// so ridges stack up in paler layers instead of the whole valley reading at the same flat saturation
+float fogObjectBase(vec3 wp, float depth);
+float hazeAmt(vec3 wp, float depth){
+  // Regional forest haze (baked density map): thick in forests, wet lowlands and foggy patches (~96% at 200 m),
+  // thin over open high ground so mountain views stay clear. Points well above the player keep a faint silhouette.
+  vec4 em = envAt(mix(u_camPos.xz, wp.xz, 0.35));
+  float dy = wp.y - u_camPos.y;
+  float dens = 0.0165 * em.r * mix(1.0, 0.55, smoothstep(10.0, 160.0, dy)) * mix(1.1, 1.0, u_daylight);  // night keeps its haze (moonlit mist) like the evening
+  float cap = mix(0.975, 0.82, smoothstep(40.0, 260.0, dy));
+  float haze = min(1.0 - exp(-depth * dens), cap) * smoothstep(1.5, 12.0, depth);
+  // ground mist: a low layer hugging marshes, river banks and lake shores, heaviest at dawn, dusk and night
+  vec4 ew = envAt(wp.xz);
+  float m = max(ew.g, em.g * 0.7);
+  if (m > 0.01) {
+    float above = max(wp.y - envGround(ew), 0.0);
+    float tw = 1.0 - smoothstep(0.35, 0.9, u_daylight);
+    float drift = 0.55 + 0.45 * vnoise(wp.xz * 0.035 + u_windDir * (u_clock * 0.04));
+    float mist = m * exp(-above / 2.4) * drift * (1.0 - exp(-depth * 0.05)) * mix(0.5, 0.95, max(tw, u_rain));
+    haze = 1.0 - (1.0 - haze) * (1.0 - mist);
+  }
+  return haze;
+}
 float fogObject(vec3 wp, float depth){
+  return max(fogObjectBase(wp, depth), hazeAmt(wp, depth));
+}
+float fogObjectBase(vec3 wp, float depth){
   float r = smoothstep(3.0, 45.0, abs(wp.y - u_camPos.y));
   float alt = clamp(u_camPos.y / 50.0, 0.0, 5.0);
   float fn = mix(u_fogNear * (1.0 + alt), u_fogNear * 3.0 * (1.0 + alt), r);
@@ -137,11 +214,13 @@ vec3 fogTint(vec3 wp){
   // aerial perspective: haze brightens and warms toward the sun
   vec3 v = normalize(wp - u_camPos);
   float s = max(dot(v, u_sunDir.xyz), 0.0);
-  float k = (pow(s, 6.0) * 0.75 + s * s * 0.12) * smoothstep(-0.04, 0.18, u_sunDir.y);
+  float k = (pow(s, 5.0) * 0.85 + s * s * 0.18) * smoothstep(-0.04, 0.18, u_sunDir.y);
   vec3 warm = min(u_fogCol.rgb * vec3(1.32, 1.18, 0.98) + vec3(0.07, 0.045, 0.0), vec3(1.0));
   // far layers go cooler and bluer: depth between mountain ridges
   float far = smoothstep(220.0, 1600.0, distance(wp, u_camPos)) * smoothstep(0.08, 0.4, u_daylight);
   vec3 base = mix(u_fogCol.rgb, u_fogCol.rgb * vec3(0.84, 0.94, 1.12) + vec3(0.0, 0.012, 0.035), far * 0.8);
+  base = mix(base, min(base * 1.12 + vec3(0.025), vec3(1.0)), u_daylight);  // daylight haze is luminous, not grey
+  base = mix(base, vec3(dot(base, vec3(0.3, 0.59, 0.11))) * vec3(1.06, 1.05, 1.02) + vec3(0.03), 0.4 * u_daylight * (1.0 - far));  // near haze is milky white, distant layers stay blue
   return mix(base, warm, k);
 }
 float valleyMist(vec3 wp, float depth){
@@ -156,7 +235,7 @@ float fogGround(vec3 wp, float depth){
   float alt = clamp(u_camPos.y / 50.0, 0.0, 5.0);
   float nf = smoothstep(u_fogNear * (1.0 + alt), u_fogFar * (1.0 + alt * 1.5), depth) * mix(0.55, 0.22, r);
   float layer = smoothstep(140.0, 950.0, depth) * (1.0 - smoothstep(25.0, 170.0, wp.y)) * 0.42;  // haze pooled low between ridges
-  return max(max(max(nf, smoothstep(180.0, 2300.0, depth) * 0.84), valleyMist(wp, depth)), layer);
+  return max(max(max(max(nf, smoothstep(180.0, 2300.0, depth) * 0.84), valleyMist(wp, depth)), layer), hazeAmt(wp, depth));
 }
 uniform sampler2DShadow u_shadowMap;
 uniform sampler2DShadow u_shadowPrev;
@@ -167,12 +246,16 @@ float shadowTapK(sampler2DShadow m, mat4 M, vec3 wp, vec3 n, float dc, bool leaf
   float t = u_shadowTexel;
   float z = c.z - 0.0006;
   float s;
-  if (leaf && dc <= 45.0) {
+  if (leaf && dc > 10.0) {
+    s = texture(m, vec3(c.xy, z));  // leaves past 10 m: one tap - the cards break the shadow up anyway
+  } else if (leaf) {
     // leaves: 4 taps (rotated grid) - leaf shadows are broken up by the cards themselves, 8 taps look the same
     s = (texture(m, vec3(c.xy + vec2(-0.85, -0.3) * t * 1.6, z)) + texture(m, vec3(c.xy + vec2(0.85, 0.3) * t * 1.6, z))
        + texture(m, vec3(c.xy + vec2(-0.3, 0.85) * t * 1.6, z)) + texture(m, vec3(c.xy + vec2(0.3, -0.85) * t * 1.6, z))) * 0.25;
-  } else if (dc > 45.0) {
-    s = (texture(m, vec3(c.xy + vec2(-0.6, -0.6) * t, z)) + texture(m, vec3(c.xy + vec2(0.6, 0.6) * t, z))) * 0.5;
+  } else if (dc > 12.0) {
+    // ground and trunks past 12 m: 4 taps instead of 8 (the softening is below a pixel there)
+    s = (texture(m, vec3(c.xy + vec2(-0.85, -0.3) * t * 1.6, z)) + texture(m, vec3(c.xy + vec2(0.85, 0.3) * t * 1.6, z))
+       + texture(m, vec3(c.xy + vec2(-0.3, 0.85) * t * 1.6, z)) + texture(m, vec3(c.xy + vec2(0.3, -0.85) * t * 1.6, z))) * 0.25;
   } else {
     const vec2 D[8] = vec2[8](vec2(-0.94, -0.34), vec2(0.94, 0.34), vec2(-0.34, 0.94), vec2(0.34, -0.94),
                               vec2(-0.6, 0.55), vec2(0.6, -0.55), vec2(0.15, 0.25), vec2(-0.2, -0.15));
@@ -184,7 +267,7 @@ float shadowTapK(sampler2DShadow m, mat4 M, vec3 wp, vec3 n, float dc, bool leaf
   return mix(s, 1.0, smoothstep(0.82, 1.0, max(e.x, e.y)));
 }
 float shadowTap(sampler2DShadow m, mat4 M, vec3 wp, vec3 n, float dc){ return shadowTapK(m, M, wp, n, dc, false); }
-float shadowAtK(vec3 wp, vec3 n, bool leaf){
+float shadowMapK(vec3 wp, vec3 n, bool leaf){
   if (u_shadowOn < 0.01) return 1.0;
   float dc = distance(wp, u_camPos);
   float s = shadowTapK(u_shadowMap, u_shadowMat, wp, n, dc, leaf);
@@ -192,6 +275,7 @@ float shadowAtK(vec3 wp, vec3 n, bool leaf){
   if (u_shadowMix.x < 0.999) s = mix(shadowTapK(u_shadowPrev, u_shadowMatPrev, wp, n, dc, leaf), s, u_shadowMix.x);
   return mix(1.0, s, u_shadowOn);
 }
+float shadowAtK(vec3 wp, vec3 n, bool leaf){ return envLight(wp) * shadowMapK(wp, n, leaf); }
 float shadowAt(vec3 wp, vec3 n){ return shadowAtK(wp, n, false); }
 // drifting cloud shadows: applied only to the ground and far forest (one noise tap), not per leaf or grass blade
 float cloudShade(vec3 wp){
@@ -235,14 +319,17 @@ out vec4 v_col;
 out vec3 v_nrm;
 out float v_seed;
 out float v_depth;
+out float v_ao;
 #if defined(CUTOUT) && !defined(CAPTURE) && !defined(SHADOW_PASS)
 out float v_thru;
 #endif
 void main(){
   vec3 p = a_pos;
   vec3 n = vec3(0.0, 1.0, 0.0);
+v_ao = 1.0;
 #if defined(VF_SMOOTH) || defined(VF_GLB)
   n = a_nrm.xyz;
+  v_ao = 1.0 - max(a_nrm.w, 0.0);  // baked ambient occlusion (bakeao.cpp)
 #endif
   mat4 M;
 #if defined(INST_LITE)
@@ -355,6 +442,9 @@ vec3 seasonColor(vec3 sc, vec3 wp, float ny, float seed){
   float lAut = clamp(u_autumn * 1.5 - (1.0 - smoothstep(20.0, 200.0, wp.y)) * 0.5, 0.0, 1.0);
   float lSpr = clamp(u_spring * 1.5 - smoothstep(10.0, 160.0, wp.y) * 0.5, 0.0, 1.0);
 #if defined(K_LEAF)
+  // every leaf cluster a slightly different green: fresh yellow-green to deep green, like real canopies
+  float hv = fract(seed * 7.31 + floor(wp.y * 0.7) * 0.13);
+  sc *= mix(vec3(0.86, 0.96, 0.82), vec3(1.16, 1.14, 0.78), hv) * mix(1.0, 1.08, u_daylight);
   float sL = mix(0.85, clamp(dot(sc, vec3(0.3, 0.59, 0.11)) * 3.2, 0.35, 1.25), 0.75);
   float sNear = 1.0 - smoothstep(10.0, 30.0, distance(wp, u_camPos));
   vec3 sAu = mix(vec3(0.95, 0.33, 0.03), vec3(0.62, 0.06, 0.03), mix(0.5, smoothstep(0.35, 0.75, seed), sNear));
@@ -403,6 +493,7 @@ in vec4 v_col;
 in vec3 v_nrm;
 in float v_seed;
 in float v_depth;
+in float v_ao;
 #if defined(CUTOUT) && !defined(CAPTURE) && !defined(SHADOW_PASS)
 in float v_thru;
 #endif
@@ -520,7 +611,9 @@ void main(){
     float rd = 1.0 - smoothstep(30.0, 70.0, v_depth);
     base.rgb = mix(base.rgb, vec3(0.3, 0.28, 0.25), 0.7);
     vec3 nr = n;
+    g_rockVar = floor(fract(v_seed * 7.31 + 0.13) * 2.999);  // each rock gets one of the three photo surfaces
     vec3 alb = ptexRock(v_wpos, nr, 0.33, 1.1);
+    g_rockVar = 0.0;
     base.rgb *= mix(vec3(1.0), alb, rd);
     n = normalize(mix(n, nr, rd));
     float moss = smoothstep(0.62, 0.92, n.y) * smoothstep(0.45, 0.7, vnoise(v_wpos.xz * 0.9)) * rd;
@@ -542,16 +635,19 @@ void main(){
   if (u_dbg == 3) { fragColor = vec4(linearToSrgb(base.rgb), 1.0); return; }
 #endif
 #ifdef CAPTURE
+  sc *= mix(1.0, v_ao, 0.6);  // far impostors keep the baked crown shading
   fragColor = vec4(sqrt(max(sc, vec3(0.0))), 1.0);
   fragNormal = vec4(n * 0.5 + 0.5, 1.0);
   return;
 #endif
 #if defined(CUTOUT) && !defined(CAPTURE)
   // distant leaves: the shadow term is mostly flattened away below, so skip the shadow-map taps entirely
-  float sh = leafFar > 0.99 ? 1.0 : mix(1.0, shadowAtK(v_wpos, n, true), u_recv);
+  float sh = leafFar > 0.99 ? mix(1.0, envLight(v_wpos), u_recv) : mix(1.0, shadowAtK(v_wpos, n, true), u_recv);
 #else
   float sh = mix(1.0, shadowAt(v_wpos, n), u_recv);
 #endif
+  g_envVis *= v_ao;            // baked AO: sky light reaches less of the inner crown, forks and bases
+  sh *= mix(1.0, v_ao, 0.55);  // and less sun gets through to them
 #ifdef CUTOUT
 #endif
 #ifdef CUTOUT

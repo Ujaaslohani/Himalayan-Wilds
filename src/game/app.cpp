@@ -1,3 +1,4 @@
+#include "extras.h"
 #include <filesystem>
 #include <atomic>
 #include <thread>
@@ -211,7 +212,7 @@ void secondTick() {
     for (int j = 0; j < JOB_COUNT; j++) {
       int n = A.jobs[j] + village::autoJobCount(j);  // player-set jobs plus idle villagers helping out
       if (!n) continue;
-      for (auto& g : JOBS[j].give) give[g.first] += g.second * n * seasonOutput(g.first) * k;
+      for (auto& g : JOBS[j].give) give[g.first] += g.second * n * seasonOutput(g.first) * k * village::traitMult(j);
     }
     if (!give.empty()) {
       Cost out;
@@ -412,6 +413,7 @@ Json buildSave() {
     for (int i : relics::found()) r.push(Json::number(i));
     d.set("relics", r);
   }
+  extras::save(d);
   d.set("stage", Json::number(A.stage));
   Json se = Json::object();
   se.set("start", Json::number(season.start));
@@ -626,7 +628,7 @@ Cost upgradeCost(const Building& b) {
 
 int capacity() { return housingCapacity(); }
 
-bool uiOpen() { return A.tab != Tab::None || A.dialogue >= 0 || A.menuOpen || A.howToOpen || A.status != Status::Playing; }
+bool uiOpen() { return A.tab != Tab::None || A.dialogue >= 0 || A.boardOpen || A.menuOpen || A.howToOpen || A.status != Status::Playing; }
 
 void syncDerived() {
   auto built = [](const char* id) { for (auto& b : A.buildings) if (b.id == id) return b.built; return false; };
@@ -667,6 +669,7 @@ void newGame() {
   A.inv.clear();
   for (int i = 0; i < ITEM_COUNT; i++) A.inv[ITEM_ORDER[i]] = 0;
   for (auto& c : START_COUNTS) A.inv[c.first] = c.second;
+  A.inv["lantern"] = 1;  // everyone starts with a hand lantern (L)
   A.specialists = initialSpecialists();
   A.buildings = initialBuildings();
   A.quests = initialQuests();
@@ -681,6 +684,7 @@ void newGame() {
   events::reset();
   tutorial::start();
   relics::reset();
+  extras::reset();
   A.uid = 1;
   A.jobAcc = 0;
   A.lastHour = E.time;
@@ -748,6 +752,7 @@ bool continueGame(int slot) {
   for (int i = 0; i < ITEM_COUNT; i++) A.inv[ITEM_ORDER[i]] = 0;
   if (const Json* inv = d.get("inventory"))
     for (auto& e : inv->obj) A.inv[e.first] = (int)e.second.n;
+  A.inv["lantern"] = std::max(1, A.inv["lantern"]);  // older saves: hand out the lantern too
   A.buildings = initialBuildings();
   if (const Json* bs = d.get("buildings"))
     for (auto& o : bs->arr)
@@ -783,6 +788,15 @@ bool continueGame(int slot) {
       s.look = lookFrom(o.get("look"));
       A.structures.push_back(s);
     }
+  // the terrain may have been reshaped since this save (rolling ground): sit every structure back on the ground
+  for (auto& st : A.structures) {
+    if (hypot2(st.x, st.z) < SETTLEMENT_RADIUS) continue;
+    st.y = checkStructureSpot(st.kind, st.x, st.z, st.rot, st.uid).y;
+  }
+  for (auto& b : A.buildings) {
+    if (!b.built || b.type == "bridge" || hypot2(b.pos[0], b.pos[2]) < SETTLEMENT_RADIUS) continue;
+    b.pos[1] = checkPlacement(b, b.pos[0], b.pos[2], b.rotY).y;
+  }
   A.population = (int)d.num("population", 0);
   for (int j = 0; j < JOB_COUNT; j++) A.jobs[j] = 0;
   if (const Json* jobs = d.get("jobs"))
@@ -796,6 +810,7 @@ bool continueGame(int slot) {
     if (const Json* r = d.get("relics")) for (auto& v : r->arr) rf.push_back((int)v.n);
     relics::restore(rf);
   }
+  extras::load(d);
   A.status = Status::Playing;
   A.score = (int)d.num("score", 0);
   A.level = (int)d.num("level", 1);
@@ -1051,7 +1066,7 @@ void update(float dt) {
   E.uiOpen = uiOpen();
   if (A.victoryAt > 0 && E.clock >= A.victoryAt) { A.victoryAt = -1; A.status = Status::Victory; }
   if (A.status != Status::Playing) return;
-  if (!A.menuOpen) { tutorial::update(dt); relics::update(dt); }
+  if (!A.menuOpen) { tutorial::update(dt); relics::update(dt); extras::update(dt); }
   if (!A.menuOpen) {
     A.secAcc += dt;
     while (A.secAcc >= 1) {
