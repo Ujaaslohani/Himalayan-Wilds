@@ -36,7 +36,8 @@ int trophyAppeal();
 bool banditsActive();
 bool banditCamp(float& x, float& z);
 int banditLevel();
-void debugBandits(float x, float z, int level);  // selftest: put a camp of the given level here  // 1..6 (difficulty of the current / last camp)
+void debugBandits(float x, float z, int level);
+void debugTrophies();  // selftest: one of every trophy mounted  // selftest: put a camp of the given level here  // 1..6 (difficulty of the current / last camp)
 bool arrowHit(const Vec3& a, const Vec3& b, float dmg);
 
 // stats + achievements

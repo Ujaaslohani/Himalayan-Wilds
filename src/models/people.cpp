@@ -20,10 +20,10 @@ struct Outfit {
   const char* beard;
 };
 
-const Outfit OUT_HUNTER{"#1f4a2c", "#1b1a1c", "#efe6d2", "#c2410c", "#7c6a4f", "#b91c1c", "#2a2a2e", {"#15803d", "#facc15", "#b91c1c"}, "#c48a62", "#16100c", "#ece4d2", "#4a2e1c", false, "#16100c"};
-const Outfit OUT_CARPENTER{"#e8dfcc", "#7a4b2a", "#f0e6d2", "#1e3a8a", "#d6c9ad", "#1e3a8a", "#6b6f76", {"#7f1d1d", "#f59e0b", "#1e40af"}, "#d1a07c", "#2b1d14", "#ebe2cf", "#4a3426", false, nullptr};
-const Outfit OUT_HERBALIST{"#9f1239", "#14532d", "#f5e9d3", "#15803d", "#f1e4c8", "#9f1239", "#15803d", {"#facc15", "#9f1239", "#1d4ed8"}, "#d6a585", "#120c09", "#7c2d12", "#5a3d2b", true, nullptr};
-const Outfit OUT_BUILDER{"#57534e", "#292524", "#e7e0d0", "#ca8a04", "#8a7f73", "#ca8a04", "#3f3f46", {"#1e3a8a", "#dc2626", "#facc15"}, "#b98262", "#c9c4bb", "#d8cfbf", "#2f241c", false, "#d6d3cd"};
+const Outfit OUT_HUNTER{"#1f4a2c", "#1b1a1c", "#efe6d2", "#c2410c", "#7c6a4f", "#b91c1c", "#2a2a2e", {"#15803d", "#facc15", "#b91c1c"}, "#a46e4b", "#16100c", "#ece4d2", "#4a2e1c", false, "#16100c"};
+const Outfit OUT_CARPENTER{"#e8dfcc", "#7a4b2a", "#f0e6d2", "#1e3a8a", "#d6c9ad", "#1e3a8a", "#6b6f76", {"#7f1d1d", "#f59e0b", "#1e40af"}, "#ac7754", "#2b1d14", "#ebe2cf", "#4a3426", false, nullptr};
+const Outfit OUT_HERBALIST{"#9f1239", "#14532d", "#f5e9d3", "#15803d", "#f1e4c8", "#9f1239", "#15803d", {"#facc15", "#9f1239", "#1d4ed8"}, "#b27c58", "#120c09", "#7c2d12", "#5a3d2b", true, nullptr};
+const Outfit OUT_BUILDER{"#57534e", "#292524", "#e7e0d0", "#ca8a04", "#8a7f73", "#ca8a04", "#3f3f46", {"#1e3a8a", "#dc2626", "#facc15"}, "#9e6a4a", "#c9c4bb", "#d8cfbf", "#2f241c", false, "#d6d3cd"};
 
 const Outfit& outfitFor(const std::string& role) {
   if (role == "carpenter") return OUT_CARPENTER;
@@ -397,12 +397,18 @@ std::map<std::string, std::unique_ptr<PersonModel>> g_people;
 std::unique_ptr<PersonModel> g_bandit;
 Mesh g_bow;
 // bandits: the villagers' body, but in dark, worn clothes; the give-away is the blood-red cloth over the lower face
-const Outfit OUT_BANDIT{"#2b2622", "#151312", "#5a1f1a", "#3b2418", "#3a332d", "#7f1d1d", "#1a1714", {"#5a1f1a", "#44403c", "#1c1917"}, "#a8785a", "#0f0b09", "#3b3028", "#1a1410", false, "#0f0b09"};
+const Outfit OUT_BANDIT{"#2b2622", "#151312", "#5a1f1a", "#3b2418", "#3a332d", "#7f1d1d", "#1a1714", {"#5a1f1a", "#44403c", "#1c1917"}, "#946042", "#0f0b09", "#3b3028", "#1a1410", false, "#0f0b09"};
 std::unique_ptr<ResidentKit> g_kit;
 
 }  // namespace
 
 namespace people {
+
+OutfitHex outfitHex(const std::string& role) {
+  const Outfit& o = outfitFor(role);
+  bool elder = o.beard && o.beard[1] != '1';  // builder: grey-white beard
+  return {o.coat, o.trousers, o.sash, o.band[0], o.shoe, o.female, elder};
+}
 
 const PersonModel& person(const std::string& role) {
   auto it = g_people.find(role);
@@ -498,9 +504,9 @@ const Mesh& banditBow() {
 const ResidentKit& residentKit() {
   if (g_kit) return *g_kit;
   const char* W = "#ffffff";
-  Outfit man{W, "#3f2a1c", "#efe6d4", "#7f1d1d", "#d8ccb4", "#9a3412", W, {"#15803d", "#facc15", "#b91c1c"}, "#c98f68", "#1c120c", "#e3d8c2", "#3b2a20", false, nullptr};
-  Outfit woman{W, "#1e3a5f", "#f5e9d3", "#a16207", "#efe3cb", "#be123c", W, {"#facc15", "#1d4ed8", "#15803d"}, "#d6a585", "#120c09", "#7c2d12", "#5a3d2b", true, nullptr};
-  Outfit elder{W, "#44403c", "#e7e0d0", "#57534e", "#8a7f73", "#1e3a8a", W, {"#7f1d1d", "#f59e0b", "#1e40af"}, "#b98262", "#d6d3cd", "#d8cfbf", "#2f241c", false, "#e7e5e0"};
+  Outfit man{W, "#3f2a1c", "#efe6d4", "#7f1d1d", "#d8ccb4", "#9a3412", W, {"#15803d", "#facc15", "#b91c1c"}, "#a87250", "#1c120c", "#e3d8c2", "#3b2a20", false, nullptr};
+  Outfit woman{W, "#1e3a5f", "#f5e9d3", "#a16207", "#efe3cb", "#be123c", W, {"#facc15", "#1d4ed8", "#15803d"}, "#b27c58", "#120c09", "#7c2d12", "#5a3d2b", true, nullptr};
+  Outfit elder{W, "#44403c", "#e7e0d0", "#57534e", "#8a7f73", "#1e3a8a", W, {"#7f1d1d", "#f59e0b", "#1e40af"}, "#9e6a4a", "#d6d3cd", "#d8cfbf", "#2f241c", false, "#e7e5e0"};
   Shape t0; torsoMale(t0, man); shawl(t0, man); neck(t0, man);
   Shape t1; torsoFemale(t1, woman, "#be123c"); shawl(t1, woman); neck(t1, woman); necklace(t1);
   t1.box("#b08850", {0.27f, 0.72f, 0.1f}, {0.12f, 0.14f, 0.16f}).ball("#e11d48", {0.27f, 0.8f, 0.1f}, {0.05f, 0.03f, 0.06f}, Z0, 0);

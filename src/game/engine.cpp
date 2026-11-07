@@ -16,7 +16,7 @@ const ItemDef ITEMS[] = {
     {"herb", "Artemisia Herbs", "Herbs", "Aromatic alpine herb used by healers.", "herb"},
     {"deer_pelt", "Deer Pelt", "Deer Pelt", "Warm chestnut fur for garments and bindings.", "deer"},
     {"boar_hide", "Boar Hide", "Boar Hide", "Tough leather for shelters and gear.", "boar"},
-    {"goral_horn", "Goral Horn", "Goral Horn", "Curved horn prized by craftsmen.", "goral"},
+    {"goral_horn", "Goat Horn", "Goat Horn", "Curved mountain-goat horn prized by craftsmen.", "goral"},
     {"bone", "Bone", "Bone", "For arrowheads, hooks and tool handles.", "bone"},
     {"sinew", "Sinew", "Sinew", "Elastic bowstring cordage.", "sinew"},
     {"food", "Food", "Food", "Dried meat, grain and herbs. Each resident eats one at dawn, half as much again in winter.", "food"},

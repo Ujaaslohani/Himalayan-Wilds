@@ -571,7 +571,7 @@ void update(float dt) {
   float sunElev = g_sunDir.y;
   float dusk = 1.0f - sstep(sunElev, 0.02f, 0.42f);
   float sunI = 2.1f * std::pow(daylight, 1.15f) * (1 - 0.18f * snow) * (1.0f - 0.28f * dusk * dusk);
-  float moonI = 0.6f * moonUp * (1 - daylight);  // brighter blue-silver moonlight, casts soft shadows
+  float moonI = 0.6f * moonUp * (1 - daylight) * (1 - 0.4f * snow);  // blue-silver moonlight, soft shadows; dimmer over bright snow so winter nights stay as dark as autumn's
   {
     // showers: deterministic weather over game hours; spring/summer/autumn only, ground stays wet for a while after
     float hrs = (season.start * 7 + season.day) * 24.0f + E.time;
@@ -628,7 +628,7 @@ void update(float dt) {
   g_sunTint = SUN.lerp(SUNLOW, sstep(dusk, 0.0f, 0.55f)).lerp(SUNSET, sstep(dusk, 0.45f, 1.0f));
   Color lightCol = useSun ? g_sunTint : MOON;
   float lightI = std::max(std::max(sunI, moonI), 0.05f);
-  float hemiI = lerpf(0.45f, 1.05f, daylight) * (1 + g_flash * 2.5f);
+  float hemiI = lerpf(0.45f * (1 - 0.3f * season.snow), 1.05f, daylight) * (1 + g_flash * 2.5f);
   Color ground = G_SUMMER.lerp(G_AUTUMN, au * 0.8f).lerp(G_WINTER, snow);
   g_cover = std::min(0.95f, 0.64f + 0.22f * season.fall + 0.08f * season.autumn + 0.25f * std::min(1.0f, g_rain * 2.5f));
 
@@ -667,8 +667,13 @@ void update(float dt) {
   setv(F.hemiSky, HEMI_SKY.lerp(Color::hex("8aa4d6"), (1 - daylight) * 0.6f) * hemiI, std::max(0.011f, g_shadowK));
   setv(F.hemiGround, ground * hemiI, season.fall);
   float rainFog = (1.0f - 0.45f * g_rain) * (1.0f - 0.72f * g_blizzard) * (1.0f - 0.55f * g_fogBank);  // rain, blizzards and fog banks close the view in
-  setv(F.fogCol, g_hor, (60 - 25 * season.fall) * g_settings.drawDist() * rainFog);
-  F.fogParam[0] = (260 - 100 * season.fall) * g_settings.drawDist() * rainFog;
+  // night mist: moonlit blue-grey, a touch lighter than the moonlit ground so it reads as mist and not as darkness
+  Color fogC = g_hor.lerp(Color::hex("66728c"), clampf((0.35f - daylight) / 0.3f, 0, 1) * (1 - g_blizzard));
+  // winter: colder, bluer haze that stands out against white snow, and it closes in like autumn's
+  fogC = fogC.lerp(Color::hex("8a9ab4"), season.snow * 0.45f * daylight * (1 - g_blizzard));
+  float seasonFog = season.snow;  // winter: 35 m / 160 m (autumn keeps the open 60 m / 260 m range)
+  setv(F.fogCol, fogC, (60 - 25 * seasonFog) * g_settings.drawDist() * rainFog);
+  F.fogParam[0] = (260 - 100 * seasonFog) * g_settings.drawDist() * rainFog;
   F.fogParam[1] = (float)platform::height();
   F.fogParam[2] = clampf((0.45f - daylight) / 0.35f, 0, 1);
   F.fogParam[3] = g_wet;

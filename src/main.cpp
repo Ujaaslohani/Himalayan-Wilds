@@ -469,6 +469,7 @@ void drawWorld(float dt, bool viewModel) {
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   glEnable(GL_DEPTH_TEST);
   glDepthMask(GL_TRUE);
+  envmap::setCameraHeight(render::cam.pos.y);
   envmap::hazeCullDistance(render::cam.pos.x, render::cam.pos.z, dt);
   PROF(render::bindShadow());
   PROF(grass::draw());
@@ -704,6 +705,14 @@ int main(int argc, char** argv) {
         {820, "menu", [=] { A.menuOpen = true; }},
         {840, "deer", [=] { screens::openOptions(false); A.menuOpen = false; A.status = Status::Playing; E.time = 10.0f; float hx, hz; if (wildlife::nearestHerd(SP_DEER, 0, 0, hx, hz)) { float x = hx + 5, z = hz + 4; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.4f, z}; E.player.yaw = std::atan2(-(hx - x), -(hz - z)); E.player.pitch = -0.15f; } }},
         {846, "deer2", [=] {}},
+        {1450, "", [=] { screens::openOptions(false); A.menuOpen = false; A.tab = Tab::None; A.status = Status::Playing; E.time = 11.0f; E.player.hp = 1e6f; float hx, hz; if (wildlife::nearestHerd(SP_BEAR, 0, 0, hx, hz)) { float x = hx + 7, z = hz + 5; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.6f, z}; E.player.velY = 0; E.player.yaw = std::atan2(-(hx - x), -(hz - z)); E.player.pitch = -0.12f; } }},
+        {1456, "bear", [=] {}},
+        {1460, "", [=] { E.player.hp = 1e6f; float hx, hz; if (wildlife::nearestHerd(SP_BOAR, 0, 0, hx, hz)) { float x = hx + 6, z = hz + 4; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.6f, z}; E.player.velY = 0; E.player.yaw = std::atan2(-(hx - x), -(hz - z)); E.player.pitch = -0.12f; } }},
+        {1466, "boar", [=] {}},
+        {1470, "", [=] { E.player.hp = 1e6f; float hx, hz; if (wildlife::nearestHerd(SP_GORAL, 0, 0, hx, hz)) { float x = hx + 5, z = hz + 3; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.6f, z}; E.player.velY = 0; E.player.yaw = std::atan2(-(hx - x), -(hz - z)); E.player.pitch = -0.15f; } }},
+        {1476, "goat", [=] {}},
+        {1480, "", [=] { E.player.hp = 1e6f; float hx, hz; if (wildlife::nearestHerd(SP_LEOPARD, 0, 0, hx, hz)) { float x = hx + 6, z = hz + 4; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.6f, z}; E.player.velY = 0; E.player.yaw = std::atan2(-(hx - x), -(hz - z)); E.player.pitch = -0.12f; } }},
+        {1486, "leopard", [=] {}},
         {1000, "", [=] { screens::openOptions(false); A.menuOpen = false; A.tab = Tab::None; A.status = Status::Playing; restoreSeason(2, 2, 11); E.time = 11.0f; look(4, 16, 0.3f, -0.05f)(); E.player.hp = 1e6f; E.player.maxHp = 1e6f; extras::debugBandits(4 - std::sin(0.3f) * 30, 16 - std::cos(0.3f) * 30, 6); }},
         {1090, "bandits", [=] { E.player.hp = 1e6f; }},
         {1094, "", [=] { E.player.hp = 1e6f; float bx, bz; extras::banditCamp(bx, bz); look(bx + 3, bz + 3, std::atan2(3.0f, 3.0f), -0.05f)(); }},
@@ -713,6 +722,27 @@ int main(int argc, char** argv) {
         {1174, "", [=] { const float* F = grass::flowerFields(); float cx = F[0], cz = F[1]; look(cx + 3, cz + 2, std::atan2(-3.0f, -2.0f) + 0.6f, -0.3f)(); }},
         {1200, "flowers2", [=] {}},
         {1210, "", [=] { screens::openOptions(false); A.menuOpen = false; A.tab = Tab::None; restoreSeason(2, 3, 8); E.time = 8.0f; look(-39.2f, 1.7f, 2.9f, -0.35f)(); }},
+        {1312, "", [=] { restoreSeason(1, 2, 9); E.time = 10.0f; village::debugGroup(-12.0f, 8.0f, 6); look(-12.0f, 12.5f, 0.0f, -0.12f)(); }},
+        {1330, "mh", [=] { village::debugGroup(-12.0f, 8.0f, 6); }},
+        {1332, "", [=] { look(-12.0f, 10.3f, 0.0f, -0.06f)(); village::debugGroup(-12.0f, 8.0f, 3); }},
+        {1345, "mh2", [=] {}},
+        {1347, "", [=] { look(-12.0f, 9.55f, 0.0f, -0.2f)(); }},
+        {1360, "mh3", [=] {}},
+        {1380, "", [=] { restoreSeason(1, 2, 10); E.time = 10.5f; A.tab = Tab::None; A.menuOpen = false;
+            const StructureKind ks[3] = {SK_COTTAGE, SK_FAMILY_HOUSE, SK_RAISED_HOUSE};
+            for (int i = 0; i < 3; i++) { Structure st; st.uid = 9000 + i; st.kind = ks[i]; st.x = -9.0f + i * 9.0f; st.z = -9.0f; st.y = world::getTerrainHeight(st.x, st.z); st.rot = 0.0f; st.look.roof = i; st.look.wall = i; st.look.wood = i % 3; st.look.door = i; st.look.accent = i + 1; A.structures.push_back(st); }
+            village::structuresChanged(); look(0.0f, 6.5f, 0.0f, 0.02f)(); }},
+        {1405, "houses", [=] {}},
+        {1410, "", [=] { restoreSeason(2, 4, 19.4f); E.time = 19.4f; A.tab = Tab::None; const Shrine& sh = world::SHRINES[0]; E.player.pos = {sh.x, sh.y + 1.8f, sh.z}; E.player.velY = 0; E.player.yaw = std::atan2(sh.x, sh.z); E.player.pitch = -0.2f; }},
+        {1440, "templeview", [=] {}},
+        {1490, "", [=] { restoreSeason(3, 1, 2.0f); E.time = 2.0f; A.tab = Tab::None; const Shrine& sh = world::SHRINES[0]; E.player.pos = {sh.x, sh.y + 1.8f, sh.z}; E.player.velY = 0; E.player.yaw = std::atan2(sh.x, sh.z); E.player.pitch = -0.2f; }},
+        {1516, "nightview", [=] {}},
+        {1362, "", [=] { look(-12.0f, 9.2f, 0.0f, -0.1f)(); }},
+        {1375, "mh4", [=] {}},
+        {1265, "", [=] { restoreSeason(1, 2, 9); E.time = 10.5f; extras::debugTrophies(); float x = -6.5f + std::sin(1.2f) * 4.6f, z = 3.0f + std::cos(1.2f) * 4.6f; look(x, z, 1.2f, -0.02f)(); }},
+        {1290, "trophy", [=] {}},
+        {1292, "", [=] { float bx = 6.0f, bz = -5.0f, a = std::atan2(-bx, -bz); float x = bx + std::sin(a) * 3.4f, z = bz + std::cos(a) * 3.4f; look(x, z, a, -0.03f)(); }},
+        {1310, "board2", [=] {}},
         {1260, "riverleaf", [=] { float wl = world::waterHeightAt(-39.2f, 1.7f), g = world::getTerrainHeight(-39.2f, 1.7f); RiverHit q = world::riverQuery(-39.2f, 1.7f); std::printf("riverleaf: water %.2f ground %.2f river d %.1f hw %.1f wy %.2f\n", wl, g, q.d, q.hw, q.wy); }},
         {852, "", [=] { E.time = 12.0f; float hx, hz; if (wildlife::nearestHerd(SP_LEOPARD, 0, 0, hx, hz)) { float x = hx + 2.2f, z = hz + 1.6f; E.player.pos = {x, world::getTerrainHeight(x, z) + 1.0f, z}; E.player.velY = 0; E.player.yaw = std::atan2(-(hx - x), -(hz - z)); E.player.pitch = -0.25f; } }},
         {853, "leo", [=] {}},

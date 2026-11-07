@@ -1,0 +1,15 @@
+boar.anim is converted from "Boar" (https://skfb.ly/pDY7X) by anru97580,
+licensed under Creative Commons Attribution 4.0 (http://creativecommons.org/licenses/by/4.0/).
+Changes: converted to the game's .anim format, texture baked to vertex colours, clips renamed.
+
+bear.anim is converted from "Bear" (https://skfb.ly/o6EAT) by Nyilonelycompany,
+licensed under Creative Commons Attribution 4.0 (http://creativecommons.org/licenses/by/4.0/).
+Changes: decimated to 4K triangles, face/finger bones folded, texture baked to vertex colours, walk/run/graze/attack/death animations added.
+
+stag_realistic.anim is converted from "Deer Idle" (https://skfb.ly/oQYGr) by kenchoo,
+licensed under Creative Commons Attribution 4.0 (http://creativecommons.org/licenses/by/4.0/).
+Changes: decimated to 3.5K triangles, texture baked to vertex colours, walk/run/graze/attack/death animations added.
+
+"himalayan mountain goat" (https://skfb.ly/oFsZW) by all of life is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/). Decimated to 2,400 triangles, auto-rigged and animated (tools/rig2anim.py) -> goat.anim.
+"Leopard" (https://skfb.ly/pwoBr) by planeta-elefante is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/). Own skeleton kept, clips synthesized (tools/rig2anim.py) -> leopard.anim.
+"Grey Wolf Rebuilt" (https://skfb.ly/oQZIM) by kenchoo is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/). Decimated to 2,400 triangles, clips synthesized (tools/fbx2anim.py) -> wolf.anim.

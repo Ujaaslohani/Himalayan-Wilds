@@ -185,7 +185,10 @@ float hazeAmt(vec3 wp, float depth){
   // thin over open high ground so mountain views stay clear. Points well above the player keep a faint silhouette.
   vec4 em = envAt(mix(u_camPos.xz, wp.xz, 0.35));
   float dy = wp.y - u_camPos.y;
-  float dens = 0.0165 * em.r * mix(1.0, 0.55, smoothstep(10.0, 160.0, dy)) * mix(1.1, 1.0, u_daylight);  // night keeps its haze (moonlit mist) like the evening
+  float dens = 0.0165 * em.r * mix(1.0, 0.55, smoothstep(10.0, 160.0, dy)) * mix(1.6, 1.0, u_daylight);
+  // looking down from high ground (summits, the temple): most of the sight line runs through the clear air above the
+  // valley haze, so the haze thins with how far the eye is above the point
+  dens /= 1.0 + max(-dy - 15.0, 0.0) / 45.0;  // night keeps its haze (moonlit mist) like the evening
   float cap = mix(0.975, 0.82, smoothstep(40.0, 260.0, dy));
   float haze = min(1.0 - exp(-depth * dens), cap) * smoothstep(1.5, 12.0, depth);
   // ground mist: a low layer hugging marshes, river banks and lake shores, heaviest at dawn, dusk and night
@@ -226,6 +229,7 @@ vec3 fogTint(vec3 wp){
 float valleyMist(vec3 wp, float depth){
   // dawn/dusk mist pooled in the valleys, visible from high viewpoints
   float tw = smoothstep(0.02, 0.3, u_daylight) * (1.0 - smoothstep(0.5, 0.95, u_daylight));
+  tw = max(tw, (1.0 - smoothstep(0.0, 0.3, u_daylight)) * 0.85);  // night: moonlit mist lies in the valleys too
   float low = 1.0 - smoothstep(2.0, 26.0, wp.y);
   float view = smoothstep(18.0, 60.0, u_camPos.y - wp.y + 10.0);
   return tw * low * view * smoothstep(50.0, 320.0, depth) * 0.7;

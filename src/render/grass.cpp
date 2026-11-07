@@ -193,6 +193,11 @@ void main(){
   if (fract(h.w * 13.7) > fadeK) { kill(); return; }
   vec2 wv = textureLod(u_waterLv, (p + 620.0) * (1.0 / 1240.0), 0.0).rg;
   if (wv.g > 0.3 && wv.r > heightAt(g) - 0.1) { kill(); return; }  // no leaves lying under lake or river water
+  {  // only on fairly level ground: on steep slopes and cliffs a flat leaf reads as a floating flake from below
+    float h0 = heightAt(g), hx = heightAt(g + vec2(0.5, 0.0)), hz = heightAt(g + vec2(0.0, 0.5));
+    float grad = length(vec2(hx - h0, hz - h0)) / (0.5 * u_grid.y);
+    if (grad > 0.55) { kill(); return; }
+  }
   float ang = h.w * 6.2831853;
   vec2 ax = vec2(cos(ang), sin(ang)), az = vec2(-ax.y, ax.x);
   float L = mix(0.08, 0.15, fract(h.x * 5.3)) * (1.0 + d * 0.012);

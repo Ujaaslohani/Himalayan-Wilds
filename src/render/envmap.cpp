@@ -26,6 +26,7 @@ std::vector<float> g_haze, g_canopyC, g_openC, g_wetC, g_flowX, g_flowZ;
 std::vector<uint8_t> g_surf;  // SURF_* per texel (512 x 512, ~2.4 m)
 const int NS = 512;  // CPU copies of baked channels
 float g_cull = 230;
+float g_camY = 0;
 const float HMIN = -100, HRANGE = 1000;
 
 // exact CPU replica of the shader's vnoise() (same 256x256 table as render::init, bilinear + smoothstep)
@@ -417,6 +418,7 @@ float hazeAt(float x, float z) {
   return (r0[0] * (1 - fx) + r0[1] * fx) * (1 - fz) + (r1[0] * (1 - fx) + r1[1] * fx) * fz;
 }
 
+void setCameraHeight(float y) { g_camY = y; }
 float hazeCullDistance(float px, float pz, float dt) {
   // the shader takes the haze density ~35% of the way to each point; find the distance at which it is ~97% opaque
   // in the clearest direction, so nothing visible is ever culled
@@ -427,7 +429,8 @@ float hazeCullDistance(float px, float pz, float dt) {
       float a = k * 0.5236f;
       rmin = std::min(rmin, hazeAt(px + std::cos(a) * D * 0.35f, pz + std::sin(a) * D * 0.35f));
     }
-    D = std::max(230.0f, std::min(1200.0f, 3.6f / (0.0165f * std::max(0.05f, rmin))));
+    float lift = 1.0f + std::max(0.0f, g_camY - 15.0f - 25.0f) / 45.0f;  // eye high above the valley: thinner haze (same as the shader)
+    D = std::max(230.0f, std::min(1200.0f, 3.6f * lift / (0.0165f * std::max(0.05f, rmin))));
   }
   float target = std::round(D / 20) * 20;
   static float lx = 1e9f, lz = 1e9f;

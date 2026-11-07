@@ -1587,7 +1587,7 @@ void forEachItem(int layer, const std::function<void(float, float, float, float,
     }
 }
 
-void resolveTreeCollision(float& x, float& z, float radius) {
+void resolveTreeCollision(float& x, float& z, float radius, float feetY) {
   static unsigned s_frame = ~0u;
   static int s_new = 0;
   if (s_frame != (unsigned)render::frameNo) { s_frame = (unsigned)render::frameNo; s_new = 0; }
@@ -1613,11 +1613,12 @@ void resolveTreeCollision(float& x, float& z, float radius) {
       }
     }
   // rocks, stumps and fallen logs: each file gets its own footprint (logs are capsules along their length)
-  static std::vector<float> fileR;
+  static std::vector<float> fileR, fileH;
   static std::vector<char> isLog;
   if (fileR.empty()) {
     const LayerDef& L = LAYERS[L_ROCK];
     fileR.assign(L.files.size(), 0);
+    fileH.assign(L.files.size(), 0);
     isLog.assign(L.files.size(), 0);
     for (auto& sp : g_slots)
       if (sp->layer == L_ROCK)
@@ -1627,6 +1628,7 @@ void resolveTreeCollision(float& x, float& z, float radius) {
               float r = std::max(std::max(std::fabs(p.mesh->bmin.x), std::fabs(p.mesh->bmax.x)), std::max(std::fabs(p.mesh->bmin.z), std::fabs(p.mesh->bmax.z)));
               isLog[fi] = sp->file.find("Log") != std::string::npos;
               fileR[fi] = std::max(fileR[fi], isLog[fi] ? std::min(std::fabs(p.mesh->bmax.z), std::fabs(p.mesh->bmin.z)) : r * 0.8f);
+              fileH[fi] = std::max(fileH[fi], p.mesh->bmax.y);
             }
   }
   for (int cx = ccx - 1; cx <= ccx + 1; cx++)
@@ -1639,6 +1641,7 @@ void resolveTreeCollision(float& x, float& z, float radius) {
         if (it.file >= fileR.size()) continue;
         float rr = it.scale * fileR[it.file];
         if (rr < 0.3f || blocked(it.x, it.z)) continue;
+        if (feetY > it.y + it.scale * fileH[it.file] * (isLog[it.file] ? 1.0f : 0.92f) - 0.05f) continue;  // jumped over / standing on it
         float px = it.x, pz = it.z;
         if (isLog[it.file]) {
           // closest point on the log's axis (it lies along local x, length 5.5 m before scaling)
@@ -1657,6 +1660,50 @@ void resolveTreeCollision(float& x, float& z, float radius) {
         }
       }
     }
+}
+
+float obstacleTop(float x, float z) {
+  // top of the rock, stump or fallen log under (x, z): the player can jump onto and stand on them
+  float best = -1e9f;
+  const LayerDef& L = LAYERS[L_ROCK];
+  static std::vector<float> fR, fH;
+  static std::vector<char> lg;
+  if (fR.empty()) {
+    fR.assign(L.files.size(), 0); fH.assign(L.files.size(), 0); lg.assign(L.files.size(), 0);
+    for (auto& sp : g_slots)
+      if (sp->layer == L_ROCK)
+        for (size_t fi = 0; fi < L.files.size(); fi++)
+          if (L.files[fi].first == sp->file)
+            for (auto& p : sp->parts) {
+              float r = std::max(std::max(std::fabs(p.mesh->bmin.x), std::fabs(p.mesh->bmax.x)), std::max(std::fabs(p.mesh->bmin.z), std::fabs(p.mesh->bmax.z)));
+              lg[fi] = sp->file.find("Log") != std::string::npos;
+              fR[fi] = std::max(fR[fi], lg[fi] ? std::min(std::fabs(p.mesh->bmax.z), std::fabs(p.mesh->bmin.z)) : r * 0.8f);
+              fH[fi] = std::max(fH[fi], p.mesh->bmax.y);
+            }
+  }
+  int ccx = (int)std::floor(x / CELL), ccz = (int)std::floor(z / CELL);
+  for (int cx = ccx - 1; cx <= ccx + 1; cx++)
+    for (int cz = ccz - 1; cz <= ccz + 1; cz++) {
+      if (!preCell(L_ROCK, cx, cz) && !g_mainCache.cells.count(CellKey{L_ROCK, cx, cz})) continue;
+      for (const Item& it : getCell(g_mainCache, L_ROCK, cx, cz)) {
+        if (it.file >= fR.size()) continue;
+        float rr = it.scale * fR[it.file];
+        if (rr < 0.3f || blocked(it.x, it.z)) continue;
+        float px = it.x, pz = it.z;
+        if (lg[it.file]) {
+          float hl = 2.75f * it.scale, ax = std::cos(it.rot), az = -std::sin(it.rot);
+          float t = clampf((x - it.x) * ax + (z - it.z) * az, -hl, hl);
+          px = it.x + ax * t; pz = it.z + az * t;
+        }
+        float d = hypot2(x - px, z - pz);
+        if (d >= rr) continue;
+        float top = it.y + it.scale * fH[it.file] * (lg[it.file] ? 1.0f : 0.92f);
+        float u = d / rr;
+        top -= (lg[it.file] ? 0.6f : 0.35f) * u * u * (top - it.y);  // rounded: lower toward the edge
+        best = std::max(best, top);
+      }
+    }
+  return best;
 }
 
 bool obstacleAt(float x, float z, float r) {

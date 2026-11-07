@@ -25,7 +25,7 @@ struct Spec { const char* name; float hp, walk, run; Hear hear; int herdLo, herd
 const Spec SPEC[SP_COUNT] = {
     {"Deer", 80, 1.25f, 9.5f, {11, 8, 22, 36}, 3, 3, 4, 3.1f, 1.05f, {{"deer_pelt", 2}, {"bone", 2}, {"sinew", 1}, {"food", 6}}},
     {"Wild Boar", 140, 0.95f, 7.5f, {8, 6, 16, 28}, 2, 3, 5, 4.2f, 0.55f, {{"boar_hide", 2}, {"bone", 3}, {"sinew", 1}, {"food", 8}}},
-    {"Goral", 70, 1.1f, 8.6f, {13, 9, 25, 40}, 2, 3, 5, 3.4f, 0.85f, {{"goral_horn", 2}, {"bone", 2}, {"sinew", 1}, {"food", 5}}},
+    {"Mountain Goat", 70, 1.1f, 8.6f, {13, 9, 25, 40}, 2, 3, 5, 3.4f, 0.85f, {{"goral_horn", 2}, {"bone", 2}, {"sinew", 1}, {"food", 5}}},
     {"Himalayan Wolf", 220, 1.5f, 9.8f, {14, 10, 26, 40}, 3, 4, 3, 3.4f, 0.5f, {{"wolf_fur", 2}, {"bone", 3}, {"sinew", 2}, {"food", 3}}},
     {"Black Bear", 520, 1.0f, 8.2f, {9, 7, 18, 30}, 1, 1, 3, 2.6f, 0.6f, {{"bear_hide", 2}, {"bone", 5}, {"sinew", 3}, {"food", 12}}},
     {"Leopard", 260, 1.2f, 11, {12, 9, 24, 38}, 1, 1, 3, 3.6f, 0.4f, {{"leopard_pelt", 1}, {"bone", 3}, {"sinew", 2}, {"food", 3}}},
@@ -996,7 +996,7 @@ void damage(Animal* a, float dmg, bool headshot) {
   // watchtower: lookouts call targets, so arrows hit raiders harder inside the settlement
   if (a->raid && hasWatchtower() && hypot2(E.player.pos.x, E.player.pos.z) < VILLAGE_SAFE + 25) dmg *= 1.5f;
   if (!PRED(a->sp)) { markDanger(a->x, a->z); if (a->herd) a->herd->migT = 0; }
-  a->hp -= headshot ? dmg * 2 : dmg;
+  a->hp -= (headshot ? dmg * 2 : dmg) * 0.5f;  // animals take half damage
   const Vec3& p = E.player.pos;
   const PredDef* D = PRED(a->sp);
   HudEvent ev;
@@ -1096,8 +1096,9 @@ bool nearestHerd(Species sp, float x, float z, float& ox, float& oz) {
 }
 
 void initRender() {
+  if (std::getenv("HW_TRIS")) { for (int sp = 0; sp < 6; sp++) { models::species(sp, false); models::species(sp, true); } std::fflush(stdout); std::exit(0); }
   registerMarkers("wildlife", [](std::vector<Marker>& out) {
-    { float bx, bz; if (extras::banditCamp(bx, bz)) out.push_back({bx, world::getTerrainHeight(bx, bz) + 3.0f, bz, MI_DANGER, "Bandit camp (level " + std::to_string(extras::banditLevel()) + ")"}); }
+    { float bx, bz; if (extras::banditCamp(bx, bz)) out.push_back({bx, world::getTerrainHeight(bx, bz) + 3.0f, bz, MI_BANDIT, "Bandit camp (level " + std::to_string(extras::banditLevel()) + ")"}); }
     const Vec3& p = E.player.pos;
     float r2 = E.world.bonus.animalRadar * E.world.bonus.animalRadar;
     for (auto& ap : animals) {
@@ -1171,33 +1172,42 @@ struct SkinDraw { Animal* a; const skinned::Model* m; Mat4 xf; };
 static std::vector<SkinDraw> g_skinDraw, g_skinShadow;
 static const skinned::Model* skinFor(const Animal* a, float& scale) {
   static const bool off = std::getenv("HW_NOSKIN") != nullptr;
-  static const skinned::Model* M[3] = {nullptr, nullptr, nullptr};
+  static const skinned::Model* M[8] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
   static bool init = false;
   if (off) return nullptr;
   if (!init) {
     init = true;
     M[0] = skinned::load("animals/deer.anim");
     M[1] = skinned::load("animals/stag.anim");
-    M[2] = skinned::load("animals/wolf.anim");
+    M[2] = skinned::load("animals/wolf.anim");            // "Grey Wolf Rebuilt" by kenchoo (CC BY 4.0)
+    M[3] = skinned::load("animals/boar.anim");
+    M[4] = skinned::load("animals/bear.anim");            // "Bear" by Nyilonelycompany (CC BY 4.0)
+    M[6] = skinned::load("animals/goat.anim");     // "himalayan mountain goat" by all of life (CC BY 4.0), auto-rigged with tools/rig2anim.py
+    M[7] = skinned::load("animals/leopard.anim");  // "Leopard" by planeta-elefante (CC BY 4.0)
+    M[5] = skinned::load("animals/stag_realistic.anim");  // "Deer Idle" by kenchoo (CC BY 4.0)  // "Boar" by anru97580 (CC BY 4.0), converted with tools/fbx2anim.py
   }
   if (a->sp == SP_DEER) {
-    bool stag = (a->id % 4) == 0 && M[1];
-    const skinned::Model* m = stag ? M[1] : M[0];
+    bool stag = (a->id % 4) == 0 && (M[5] || M[1]);
+    const skinned::Model* m = stag ? (M[5] ? M[5] : M[1]) : M[0];
     if (!m) return nullptr;
     scale = (stag ? 1.95f : 1.45f) / m->height;  // stag height includes the antlers
     return m;
   }
   if (a->sp == SP_WOLF && M[2]) { scale = 0.95f / M[2]->height; return M[2]; }
+  if (a->sp == SP_BOAR && M[3]) { scale = 0.92f / M[3]->height; return M[3]; }
+  if (a->sp == SP_BEAR && M[4]) { scale = 1.25f / M[4]->height; return M[4]; }
+  if (a->sp == SP_GORAL && M[6]) { scale = 1.15f / M[6]->height; return M[6]; }    // tahr-like goat, head and horns included
+  if (a->sp == SP_LEOPARD && M[7]) { scale = 0.85f / M[7]->height; return M[7]; }
   return nullptr;
 }
 static int chooseClip(const skinned::Model* m, const Animal* a, float& rate) {
   float v = a->gaitV;
-  bool pred = a->sp == SP_WOLF;
+  bool pred = a->sp == SP_WOLF || a->sp == SP_LEOPARD;
   rate = 1;
   int c = -1;
   if (a->state == S_DOWNED) c = m->clip("Death");
   else if (a->lunge > 0.2f || a->state == S_ATTACK || a->state == S_POUNCE) c = m->clip(pred ? "Attack" : "Attack_Headbutt");
-  else if (v > 3.2f) { rate = clampf(v / (pred ? 7.5f : 8.0f), 0.6f, 1.6f); c = m->clip("Gallop"); }
+  else if (v > 3.2f) { rate = clampf(v / (pred ? 7.5f : 6.8f), 0.7f, 1.7f); c = m->clip("Gallop"); }  // deer: ~2.6 strides/s at full flight, so hooves don't skate
   else if (v > 0.15f) { rate = clampf(v / (pred ? 1.6f : 1.3f), 0.5f, 2.2f); c = m->clip("Walk"); }
   else if (a->state == S_GRAZE || a->state == S_FEED) c = m->clip("Eating");
   if (c < 0) c = m->clip("Idle");

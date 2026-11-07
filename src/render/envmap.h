@@ -23,6 +23,7 @@ void flowAt(float x, float z, float& vx, float& vz);
 // walking surface (baked once): what the ground under a footstep is made of
 enum Surface { SURF_GRASS = 0, SURF_EARTH, SURF_STONE, SURF_WATER };
 Surface surfaceAt(float x, float z);     // grass bare-earth noise 0..1 (same as the grass shader reads); thread-safe once ready      // closeness to open water / marsh 0..1  // regional haze 0..1 (CPU side, for culling)
-float hazeCullDistance(float px, float pz, float dt);  // call once per frame
+float hazeCullDistance(float px, float pz, float dt);
+void setCameraHeight(float y);  // high viewpoints see further through the valley haze  // call once per frame
 inline float g_cullQ = 230;  // last value, quantised to 10 m  // smoothed distance beyond which the haze hides everything
 }

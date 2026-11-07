@@ -31,6 +31,10 @@ void structuresChanged();
 void initRender();
 void drawStructures();
 void drawResidents();
+// selftest: place up to n residents in a loose group at (x, z), standing (k % 3 picks man / woman / elder)
+void debugGroup(float x, float z, int n);
+// story characters' hand lanterns after dark (set each frame by npcs; drawn and lit with the villagers' ones)
+void setNpcLanterns(const std::vector<Vec3>& hands);
 void drawShadow();
 void drawShadowStatic();
 void addLights();

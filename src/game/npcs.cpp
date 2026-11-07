@@ -1,4 +1,6 @@
 #include "npcs.h"
+#include "village.h"
+#include "../render/mhuman.h"
 #include "engine.h"
 #include "fx.h"
 #include "../world/terrain.h"
@@ -138,7 +140,7 @@ void update(float dt) {
     n.z += std::cos(n.yaw) * n.speed * dt;
     if (n.mode == M_TRAVEL) forest::resolveTreeCollision(n.x, n.z, 0.3f);
     n.y = world::getTerrainHeight(n.x, n.z);
-    n.phase += dt * n.speed * 3.4f;
+    n.phase += dt * TAU * (n.speed > 0.05f ? 0.85f + 0.3f * n.speed : 0.0f);  // stride cadence matched to speed (no foot sliding)
     float look = dPlayer < 7 ? clampf(wrapAngle(std::atan2(dx, dz) - n.yaw), -1, 1) : 0;
     n.headYaw += (look - n.headYaw) * std::min(1.0f, dt * 4);
   }
@@ -151,7 +153,52 @@ void initRender() {
   for (auto& s : A.specialists) people::person(s.id);
 }
 
+static Vec3 hexLin(const char* h) {
+  uint32_t c = rgbHex(h);
+  auto f = [](float v) { v /= 255.0f; return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f); };
+  return {f((float)(c & 255)), f((float)((c >> 8) & 255)), f((float)((c >> 16) & 255))};
+}
+// the story characters on the MakeHuman body, in their own role colours
+static void drawNpcsMh(bool shadow) {
+  std::vector<Vec3> lanterns;
+  const Vec3& p = E.player.pos;
+  bool begun = false;
+  std::vector<std::pair<const PersonModel*, Mat4>> heads;
+  for (auto& n : g_npcs) {
+    if (std::fabs(n.x - p.x) > 110 || std::fabs(n.z - p.z) > 110) continue;
+    float d = hypot2(n.x - p.x, n.z - p.z);
+    if (shadow && d > 46) continue;
+    if (!shadow && !render::cam.sphere({n.x, n.y + 1, n.z}, 1.6f)) continue;
+    people::OutfitHex o = people::outfitHex(n.id);
+    mh::Look L;
+    L.kind = o.female ? mh::WOMAN : o.elder ? mh::ELDER : mh::MAN;
+    L.tunic = hexLin(o.coat); L.trousers = hexLin(o.trousers); L.sash = hexLin(o.sash); L.cap = hexLin(o.cap); L.shoes = hexLin(o.shoe);
+    if (o.female) std::swap(L.cap, L.sash);
+    L.skin = o.female ? 1.0f : o.elder ? 0.92f : 0.88f;
+    mh::Pose P;
+    P.walkPhase = n.phase;
+    P.walk = std::min(1.0f, n.speed * 0.5f);
+    P.speed = n.speed;
+    P.headYaw = n.headYaw;
+    if (n.speed < 0.1f && d < 6) { P.armL = 0.12f + std::sin(E.clock * 1.9f) * 0.06f; P.elbowL = 0.3f; P.headPitch = std::sin(E.clock * 2.3f + n.z) * 0.04f; }  // chatting with you
+    else if (n.speed < 0.1f) P.armL = P.armR = std::sin(E.clock * 1.6f + n.x) * 0.04f;
+    float bob = std::fabs(std::sin(n.phase)) * std::min(0.05f, n.speed * 0.02f);
+    float sc = o.female ? 0.95f : 0.98f;
+    Mat4 base = Mat4::compose({n.x, n.y, n.z}, Quat::axisAngle({0, 1, 0}, n.yaw), {sc, sc, sc});
+    if (E.daylight < 0.3f && d < 80 && !(n.speed < 0.1f && d < 6)) {  // after dark: a hand lantern, like the villagers
+      P.armR = 0.3f; P.elbowR = 0.55f;
+      if (!shadow && lanterns.size() < 6) lanterns.push_back(mh::jointWorld(base, P, "hand_r"));
+    }
+    if (!begun) { mh::begin(shadow); begun = true; }
+    mh::draw(base, L, P, d, shadow);
+  }
+  if (begun) mh::end();
+  if (!shadow) village::setNpcLanterns(lanterns);
+
+}
+
 static void drawNpcs(bool shadow) {
+  if (mh::ready()) { drawNpcsMh(shadow); return; }
   const Vec3& p = E.player.pos;
   for (auto& n : g_npcs) {
     if (std::fabs(n.x - p.x) > 110 || std::fabs(n.z - p.z) > 110) continue;

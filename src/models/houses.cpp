@@ -57,72 +57,173 @@ void prism(Shape& b, const char* color, float base, float height, float depth, V
 
 const char* wallColor(const Look& L) { return L.wall == W_PLASTER ? PLASTER : L.wall == W_TIMBER ? WOODC[L.wood][0] : STONE[0]; }
 
+const char* roofCol(const Look& L);
 float roof(Shape& b, const Look& L, float w, float d, float y, float pitch, float ox = 0, float oz = 0) {
-  float t = L.roof == R_THATCH ? 0.38f : L.roof == R_SHINGLE ? 0.16f : 0.12f;
-  float o = L.roof == R_THATCH ? 0.6f : 0.4f;
-  float tp = std::tan(pitch);
+  // a real roof: overlapping courses of slates / shingles / thatch bundles, fascia and barge boards, exposed rafter
+  // tails under the eaves, ridge cap, and the gable walls closing the ends
+  float t = L.roof == R_THATCH ? 0.34f : L.roof == R_SHINGLE ? 0.07f : 0.06f;
+  float o = L.roof == R_THATCH ? 0.6f : 0.45f;
+  float tp = std::tan(pitch), cp = std::cos(pitch), sp = std::sin(pitch);
   float half = d / 2 + o;
-  float len = half / std::cos(pitch);
-  float ridge = y + (d / 2) * tp + t * 0.5f;
+  float len = half / cp;
+  float ridge = y + (d / 2) * tp + t * 0.5f + 0.05f;
   const char* main = L.roof == R_THATCH ? "#c9a95c" : L.roof == R_SHINGLE ? "#8a5a34" : "#4b5563";
+  const char* alt = L.roof == R_THATCH ? "#b8964c" : L.roof == R_SHINGLE ? "#7a4e2c" : "#5a636e";
   const char* under = L.roof == R_THATCH ? "#a8873f" : L.roof == R_SHINGLE ? "#6b4426" : "#374151";
+  const char* w1 = WOODC[L.wood][0];
+  const char* w2 = WOODC[L.wood][1];
+  float W = w + o * 2;
   for (int s = 1; s >= -1; s -= 2) {
-    float c = half / 2;
-    b.box(main, {ox, ridge - c * tp, oz + s * c}, {w + o * 2, t, len}, {s * pitch, 0, 0});
-    if (L.roof == R_SHINGLE)
-      for (int r = 1; r <= 3; r++) {
-        float zz = (half * r) / 4;
-        b.box(under, {ox, ridge - zz * tp + t * 0.55f, oz + s * zz}, {w + o * 2, 0.04f, 0.08f}, {s * pitch, 0, 0});
-      }
+    // deck under the courses
+    b.box(under, {ox, ridge - (half / 2) * tp - 0.04f, oz + s * half / 2}, {W, 0.05f, len}, {s * pitch, 0, 0});
+    // courses from the eave up to the ridge, each overlapping the one below with a visible lip
+    float course = L.roof == R_THATCH ? 0.42f : 0.26f;
+    int n = std::max(3, (int)std::ceil(len / course));
+    for (int i = 0; i < n; i++) {
+      float u = (i + 0.5f) * len / n;  // distance down the slope from the ridge
+      float zz = u * cp, yy = ridge - u * sp;
+      const char* c = (i & 1) ? alt : main;
+      b.box(c, {ox, yy + t * 0.5f, oz + s * zz}, {W + (L.roof == R_THATCH ? 0.05f : 0), t, len / n + 0.06f}, {s * pitch, 0, 0});
+      if (L.roof == R_SLATE)  // staggered joints between slates
+        for (float x = -W / 2 + ((i & 1) ? 0.2f : 0.4f); x < W / 2; x += 0.4f)
+          b.box("#2d333b", {ox + x, yy + t + 0.004f, oz + s * zz}, {0.015f, 0.01f, len / n * 0.9f}, {s * pitch, 0, 0});
+    }
+    // fascia board along the eave and rafter tails under it
+    float ez = oz + s * half, ey = ridge - half * tp;
+    b.box(w1, {ox, ey - 0.05f, ez}, {W + 0.04f, 0.16f, 0.05f}, {s * pitch * 0.2f, 0, 0});
+    for (float x = -W / 2 + 0.25f; x < W / 2; x += 0.5f) b.box(w2, {ox + x, ey - 0.06f, ez - s * 0.18f}, {0.08f, 0.1f, 0.36f}, {s * pitch, 0, 0});
   }
-  if (L.roof == R_THATCH) b.rod(under, {ox - w / 2 - o, ridge + 0.05f, oz}, {ox + w / 2 + o, ridge + 0.05f, oz}, 0.22f, 0.22f, 7);
-  else b.box(under, {ox, ridge + 0.04f, oz}, {w + o * 2, 0.12f, 0.26f});
+  // ridge cap and barge boards on the gable ends
+  if (L.roof == R_THATCH) b.rod(under, {ox - W / 2, ridge + 0.12f, oz}, {ox + W / 2, ridge + 0.12f, oz}, 0.2f, 0.2f, 7);
+  else {
+    b.box(L.roof == R_SLATE ? "#374151" : w1, {ox, ridge + 0.08f, oz}, {W + 0.04f, 0.1f, 0.24f});
+    for (float x = -W / 2; x <= W / 2 + 0.01f; x += W / 8) b.box(L.roof == R_SLATE ? "#2d333b" : w2, {ox + x, ridge + 0.14f, oz}, {0.1f, 0.05f, 0.16f}, {0, 0.785f, 0});
+  }
+  for (int e = -1; e <= 1; e += 2)
+    for (int s = -1; s <= 1; s += 2)
+      b.box(w1, {ox + e * (W / 2 + 0.02f), ridge - (half / 2) * tp + 0.02f, oz + s * half / 2}, {0.06f, 0.2f, len + 0.05f}, {s * pitch, 0, 0});
+  // gable walls with a small vent and a carved finial at the peak
   prism(b, wallColor(L), d, (d / 2) * tp, 0.16f, {ox + w / 2 - 0.08f, y, oz}, PI / 2);
   prism(b, wallColor(L), d, (d / 2) * tp, 0.16f, {ox - w / 2 + 0.08f, y, oz}, PI / 2);
+  for (int e = -1; e <= 1; e += 2) {
+    b.box(GLASS, {ox + e * (w / 2 + 0.005f), y + (d / 2) * tp * 0.4f, oz}, {0.02f, 0.25f, 0.3f});
+    b.box(w1, {ox + e * (w / 2 + 0.02f), y + (d / 2) * tp * 0.4f, oz}, {0.03f, 0.3f, 0.05f});
+    b.cone(w1, {ox + e * (W / 2 + 0.03f), ridge + 0.05f, oz}, 0.06f, 0.3f, 5);
+  }
   return ridge;
 }
 
 void walls(Shape& b, const Look& L, float w, float d, float y0, float h, float ox = 0, float oz = 0) {
   const char *w1 = WOODC[L.wood][0], *w2 = WOODC[L.wood][1];
   if (L.wall == W_STONE) {
+    // Kath-Kuni: dry stone laced with timber courses every ~0.6 m, darker stone at the corners
     b.box(STONE[0], {ox, y0 + h / 2, oz}, {w, h, d});
-    for (int k = 1; k < 3; k++) b.box(STONE[1], {ox, y0 + (h * k) / 3, oz}, {w + 0.04f, 0.12f, d + 0.04f});
+    for (float yy = y0 + 0.55f; yy < y0 + h - 0.2f; yy += 0.6f) b.box(w1, {ox, yy, oz}, {w + 0.05f, 0.11f, d + 0.05f});
+    for (int sx = -1; sx <= 1; sx += 2)
+      for (int sz = -1; sz <= 1; sz += 2)
+        for (float yy = y0 + 0.15f; yy < y0 + h; yy += 0.3f)
+          b.box(STONE[((int)(yy * 7)) % 2 ? 1 : 2], {ox + sx * (w / 2 - 0.1f), yy, oz + sz * (d / 2 - 0.1f)}, {0.26f, 0.26f, 0.26f});
   } else if (L.wall == W_PLASTER) {
     b.box(PLASTER, {ox, y0 + h / 2, oz}, {w, h, d});
     b.box(w1, {ox, y0 + h - 0.08f, oz}, {w + 0.1f, 0.16f, d + 0.1f});
     b.box(w1, {ox, y0 + h * 0.5f, oz}, {w + 0.06f, 0.1f, d + 0.06f});
+    b.box(STONE[1], {ox, y0 + 0.2f, oz}, {w + 0.04f, 0.4f, d + 0.04f});  // stone dado at the foot of the plaster
+    for (int sz = -1; sz <= 1; sz += 2)  // half-timbering on the long walls
+      for (float x = -w / 2 + 0.9f; x < w / 2 - 0.5f; x += 1.2f) {
+        b.box(w1, {ox + x, y0 + h * 0.25f + 0.1f, oz + sz * (d / 2 + 0.02f)}, {0.08f, h * 0.5f - 0.2f, 0.04f}, {0, 0, 0.5f});
+        b.box(w1, {ox + x, y0 + h * 0.75f - 0.05f, oz + sz * (d / 2 + 0.02f)}, {0.08f, h * 0.5f - 0.2f, 0.04f}, {0, 0, -0.5f});
+      }
   } else {
     int n = std::max(3, (int)std::lround(h / 0.28f));
     for (int i = 0; i < n; i++) b.box(i % 2 ? w1 : w2, {ox, y0 + (i + 0.5f) * (h / n), oz}, {w + (i % 2 ? 0.08f : 0), h / n, d + (i % 2 ? 0.08f : 0)});
+    for (int sx = -1; sx <= 1; sx += 2)  // notched log ends sticking out at the corners
+      for (int sz = -1; sz <= 1; sz += 2)
+        for (int i = 0; i < n; i += 2) b.box(w2, {ox + sx * (w / 2 + 0.12f), y0 + (i + 0.5f) * (h / n), oz + sz * (d / 2 - 0.05f)}, {0.24f, h / n * 0.9f, 0.2f});
   }
   for (int sx = -1; sx <= 1; sx += 2)
     for (int sz = -1; sz <= 1; sz += 2) b.box(w2, {ox + sx * w / 2, y0 + h / 2, oz + sz * d / 2}, {0.16f, h, 0.16f});
 }
 
+const char* trimColor(const Look& L) {
+  // frames contrast with the wall: limed pale wood on dark timber / stone, dark carved wood on light plaster
+  return L.wall == W_PLASTER ? WOODC[L.wood][0] : (L.wood == 1 ? "#5a3820" : "#c8b48c");
+}
+
 void windowAt(Shape& b, const Look& L, float x, float y, float z, std::vector<V>& lights, float face = 1) {
-  const char* w1 = WOODC[L.wood][0];
-  b.box(GLASS, {x, y, z + 0.03f * face}, {0.55f, 0.5f, 0.05f});
-  b.box(w1, {x, y - 0.3f, z + 0.06f * face}, {0.7f, 0.07f, 0.1f});
-  b.box(w1, {x, y + 0.28f, z + 0.05f * face}, {0.65f, 0.06f, 0.06f});
-  if (L.accent != 0)
-    for (int s = -1; s <= 1; s += 2) b.box(ACCENTC[L.accent], {x + s * 0.42f, y, z + 0.05f * face}, {0.24f, 0.55f, 0.04f});
+  // a Himachali window bay: deep carved frame, 2x3 panes behind a wooden lattice, arched carved pediment,
+  // projecting sill on brackets with a flower box, painted shutters folded open
+  const char* tr = trimColor(L);
+  const char* w2 = WOODC[L.wood][1];
+  const char* sh = L.accent != 0 ? ACCENTC[L.accent] : "#7a5229";
+  float f = face;
+  const float W = 0.62f, H = 0.74f;
+  b.box("#4a6178", {x, y, z + 0.015f * f}, {W, H, 0.03f});                    // glass (sky-tinted)
+  b.box("#2b3540", {x, y, z + 0.005f * f}, {W - 0.04f, H - 0.04f, 0.02f});    // room behind
+  for (int i = 1; i < 3; i++) b.box(tr, {x, y - H / 2 + i * H / 3, z + 0.04f * f}, {W, 0.03f, 0.03f});  // glazing bars
+  b.box(tr, {x, y, z + 0.04f * f}, {0.03f, H, 0.03f});
+  for (int s = -1; s <= 1; s += 2) b.box(tr, {x + s * (W / 2 + 0.05f), y, z + 0.07f * f}, {0.1f, H + 0.2f, 0.12f});  // jambs
+  b.box(tr, {x, y + H / 2 + 0.06f, z + 0.07f * f}, {W + 0.3f, 0.12f, 0.12f});  // head
+  // arched pediment with a carved rosette
+  b.add(cylinderGeo(W / 2 + 0.08f, W / 2 + 0.08f, 0.08f, 12, 1, false, 0, PI), tr, {x, y + H / 2 + 0.12f, z + 0.06f * f}, {PI / 2, PI / 2, 0});
+  b.add(cylinderGeo(W / 2 - 0.04f, W / 2 - 0.04f, 0.09f, 12, 1, false, 0, PI), w2, {x, y + H / 2 + 0.12f, z + 0.065f * f}, {PI / 2, PI / 2, 0});
+  b.ball(sh, {x, y + H / 2 + 0.22f, z + 0.12f * f}, {0.06f, 0.06f, 0.02f}, Z0, 1);
+  for (int k = 0; k < 7; k++) {
+    float a = PI * (k + 0.5f) / 7;
+    b.box(tr, {x + std::cos(a) * (W / 2 - 0.02f), y + H / 2 + 0.12f + std::sin(a) * (W / 2 - 0.02f), z + 0.11f * f}, {0.05f, 0.05f, 0.03f}, {0, 0, a});
+  }
+  // sill, brackets and flower box
+  b.box(tr, {x, y - H / 2 - 0.05f, z + 0.14f * f}, {W + 0.34f, 0.06f, 0.24f});
+  for (int s = -1; s <= 1; s += 2) b.box(w2, {x + s * (W / 2 + 0.05f), y - H / 2 - 0.14f, z + 0.09f * f}, {0.07f, 0.14f, 0.12f});
+  b.box("#6b4423", {x, y - H / 2 + 0.03f, z + 0.2f * f}, {W + 0.1f, 0.12f, 0.16f});
+  for (int k = 0; k < 6; k++) {
+    float fx = x - W / 2 + 0.08f + k * (W - 0.06f) / 5;
+    b.ball("#3f6b2a", {fx, y - H / 2 + 0.12f, z + 0.2f * f}, {0.07f, 0.05f, 0.07f}, Z0, 0);
+    b.ball(k % 3 == 0 ? "#dc2626" : k % 3 == 1 ? "#f59e0b" : "#f472b6", {fx + 0.02f, y - H / 2 + 0.17f, z + 0.22f * f}, {0.03f, 0.03f, 0.03f}, Z0, 0);
+  }
+  // shutters folded back: frame and two raised panels each
+  for (int s = -1; s <= 1; s += 2) {
+    float sx = x + s * (W / 2 + 0.27f);
+    b.box(sh, {sx, y, z + 0.05f * f}, {0.32f, H + 0.04f, 0.04f});
+    for (int r = -1; r <= 1; r += 2) b.box(w2, {sx, y + r * H * 0.23f, z + 0.075f * f}, {0.22f, H * 0.36f, 0.015f});
+  }
   lights.push_back({x, y, z + 0.12f * face});
 }
 
 void doorAt(Shape& b, const Look& L, float x, float y0, float z, float h = 1.5f, float wd = 0.95f) {
+  // a carved entrance: stone steps, heavy carved frame with stepped lintel and a painted panel, a double-leaf
+  // panelled door with iron studs, a brass knocker and a protective sign (swastika-free knot motif) above
+  const char* tr = trimColor(L);
   const char *w1 = WOODC[L.wood][0], *w2 = WOODC[L.wood][1];
-  b.box(w2, {x, y0 + h / 2, z + 0.03f}, {wd, h, 0.06f});
-  if (L.door == D_CARVED) {
-    for (int s = -1; s <= 1; s += 2) b.box(w1, {x + s * wd * 0.22f, y0 + h * 0.55f, z + 0.07f}, {wd * 0.3f, h * 0.55f, 0.03f});
-    for (int i = 0; i < 5; i++) b.box(w1, {x - wd / 2 + (i + 0.5f) * (wd / 5), y0 + h + 0.12f, z + 0.07f}, {0.12f, 0.12f, 0.04f}, {0, 0, PI / 4});
-    b.box(w1, {x, y0 + h + 0.02f, z + 0.06f}, {wd + 0.3f, 0.1f, 0.08f});
-  } else if (L.door == D_ARCHED) {
-    b.add(cylinderGeo(wd / 2, wd / 2, 0.06f, 10, 1, false, 0, PI), w2, {x, y0 + h, z + 0.03f}, {PI / 2, PI / 2, 0});
-    b.add(torusGeo(wd / 2 + 0.04f, 0.05f, 4, 10, PI), w1, {x, y0 + h, z + 0.06f});
-  } else {
-    b.box(w1, {x, y0 + h + 0.05f, z + 0.05f}, {wd + 0.2f, 0.1f, 0.08f});
+  const char* leaf = L.wood == 0 ? "#7a4e2c" : w1;
+  const char* acc = L.accent != 0 ? ACCENTC[L.accent] : "#b91c1c";
+  b.box("#2a1a0e", {x, y0 + h / 2, z + 0.01f}, {wd, h, 0.04f});
+  for (int s = -1; s <= 1; s += 2) {  // two leaves, each with three raised panels and a stile
+    float lx = x + s * wd / 4;
+    b.box(leaf, {lx, y0 + h / 2, z + 0.035f}, {wd / 2 - 0.02f, h - 0.02f, 0.05f});
+    for (int r = 0; r < 3; r++) {
+      float py = y0 + 0.2f + r * (h - 0.35f) / 3 + (h - 0.35f) / 6;
+      b.box(w2, {lx, py, z + 0.065f}, {wd / 2 - 0.14f, (h - 0.35f) / 3 - 0.08f, 0.015f});
+      b.box(leaf, {lx, py, z + 0.075f}, {wd / 2 - 0.2f, (h - 0.35f) / 3 - 0.14f, 0.012f});
+    }
+    for (int r = 0; r < 4; r++) b.ball("#2f2a26", {lx + (r & 1 ? 0.12f : -0.12f) * (wd / 0.95f), y0 + 0.12f + (r >> 1) * (h - 0.24f), z + 0.07f}, {0.015f, 0.015f, 0.01f}, Z0, 0);
   }
-  b.ball("#d4a017", {x + wd * 0.32f, y0 + h * 0.5f, z + 0.09f}, {0.035f, 0.035f, 0.035f}, Z0, 0);
+  b.add(torusGeo(0.05f, 0.01f, 4, 10), "#c8a24a", {x + 0.08f, y0 + h * 0.52f, z + 0.08f});
+  b.add(torusGeo(0.05f, 0.01f, 4, 10), "#c8a24a", {x - 0.08f, y0 + h * 0.52f, z + 0.08f});
+  // frame: jambs with carved bands, stepped lintel, painted panel with a knot motif
+  for (int s = -1; s <= 1; s += 2) {
+    float jx = x + s * (wd / 2 + 0.08f);
+    b.box(tr, {jx, y0 + h / 2 + 0.05f, z + 0.06f}, {0.16f, h + 0.1f, 0.14f});
+    for (int k = 0; k < 5; k++) b.box(w2, {jx, y0 + 0.2f + k * (h - 0.2f) / 4.5f, z + 0.135f}, {0.17f, 0.04f, 0.02f});
+  }
+  b.box(tr, {x, y0 + h + 0.08f, z + 0.07f}, {wd + 0.44f, 0.14f, 0.16f});
+  b.box(tr, {x, y0 + h + 0.2f, z + 0.09f}, {wd + 0.6f, 0.1f, 0.2f});
+  b.box(acc, {x, y0 + h + 0.36f, z + 0.06f}, {wd * 0.7f, 0.22f, 0.04f});
+  b.add(torusGeo(0.07f, 0.012f, 4, 12), "#facc15", {x, y0 + h + 0.36f, z + 0.09f});
+  for (int k = 0; k < 6; k++) b.box(tr, {x - wd * 0.3f + k * wd * 0.12f, y0 + h + 0.5f, z + 0.08f}, {0.07f, 0.07f, 0.04f}, {0, 0, PI / 4});
+  if (L.door == D_ARCHED) b.add(torusGeo(wd / 2 + 0.12f, 0.06f, 4, 12, PI), tr, {x, y0 + h + 0.24f, z + 0.08f});
+  // stone steps
+  b.box(STONE[2], {x, y0 - 0.1f, z + 0.3f}, {wd + 0.6f, 0.14f, 0.5f});
+  b.box(STONE[1], {x, y0 - 0.24f, z + 0.55f}, {wd + 0.8f, 0.14f, 0.5f});
 }
 
 void decorate(Shape& b, const Look& L, float w, float d, float doorX, std::vector<V>& lights) {
@@ -204,10 +305,27 @@ Out cottage(const Look& L) {
   windowAt(b, L, 1.35f, y0 + 1.35f, d / 2, o.lights);
   windowAt(b, L, 0, y0 + 1.35f, -d / 2, o.lights, -1);
   float ridge = roof(b, L, w, d, y0 + h, 0.62f);
+  {
+    // front verandah: plank deck, carved posts, railing either side of the steps, lean-to roof
+    const char *w1 = WOODC[L.wood][0], *w2 = WOODC[L.wood][1];
+    float vz = d / 2 + 0.75f;
+    b.box(w2, {0, y0 - 0.02f, vz}, {w + 0.2f, 0.08f, 1.5f});
+    for (float px : {-w / 2, -0.75f, 0.75f, w / 2}) {
+      b.box(w1, {px, y0 + 1.1f, vz + 0.65f}, {0.14f, 2.2f, 0.14f});
+      b.box(w1, {px, y0 + 2.1f, vz + 0.65f}, {0.3f, 0.1f, 0.22f});
+    }
+    for (int s = -1; s <= 1; s += 2) {
+      float cx = s * (w / 2 + 0.75f) / 2;
+      b.box(w1, {cx, y0 + 0.85f, vz + 0.65f}, {w / 2 - 0.8f, 0.07f, 0.08f});
+      for (float rx = s * 0.85f; std::fabs(rx) < w / 2 - 0.05f; rx += s * 0.22f) b.box(w2, {rx, y0 + 0.45f, vz + 0.65f}, {0.05f, 0.8f, 0.05f});
+    }
+    b.box(roofCol(L), {0, y0 + h + 0.05f, vz + 0.1f}, {w + 0.5f, 0.07f, 1.75f}, {0.22f, 0, 0});
+    b.box(w1, {0, y0 + 2.2f, vz + 0.65f}, {w + 0.2f, 0.12f, 0.14f});
+  }
   b.box(STONE[0], {w * 0.28f, ridge - 0.1f, -d * 0.18f}, {0.5f, 1.2f, 0.5f});
   b.box("#2b2522", {w * 0.28f, ridge + 0.52f, -d * 0.18f}, {0.56f, 0.08f, 0.56f});
   decorate(b, L, w, d, 0, o.lights);
-  o.door = {0, 0, d / 2 + 0.9f};
+  o.door = {0, 0, d / 2 + 2.0f};
   return o;
 }
 

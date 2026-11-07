@@ -1,3 +1,5 @@
+#include <cstdlib>
+#include <cstdio>
 #include "models.h"
 #include <memory>
 #include <functional>
@@ -543,6 +545,7 @@ const SpeciesModel& species(int sp, bool lod) {
   m->hitHead = b.hh;
   m->shadowRadius = b.shadow;
   buildLegs(*m, sp, b.legs[0].y, b.legs[2].y);
+  if (std::getenv("HW_TRIS")) std::printf("species %d%s: body %d head %d leg %d x4 -> %d tris\n", sp, lod ? " (far LOD)" : "", m->body.count / 3, m->head.count / 3, m->leg.count / 3, (m->body.count + m->head.count + 4 * m->leg.count) / 3);
   g_geoLod = 0;
   SpeciesModel& r = *m;
   g_species[key] = std::move(m);

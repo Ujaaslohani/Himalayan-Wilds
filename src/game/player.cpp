@@ -51,7 +51,7 @@ QuestTarget targetForMaterial(const std::string& item) {
   if (sp >= 0) {
     float x, z;
     if (wildlife::nearestHerd((Species)sp, p.x, p.z, x, z)) {
-      const char* nm = sp == SP_DEER ? "deer" : sp == SP_BOAR ? "boar" : "goral";
+      const char* nm = sp == SP_DEER ? "deer" : sp == SP_BOAR ? "boar" : "mountain goat";
       return {true, x, z, std::string("Hunt ") + nm + " for " + itemLabel(item)};
     }
   }
@@ -201,6 +201,9 @@ void releaseBow() {
   }
   B.draw = 0;
 }
+
+// walkable height for the player: terrain, floors, bridges, plus the tops of rocks, stumps and logs to stand on
+static float groundAt(float x, float z) { return std::max(walkHeight(x, z), forest::obstacleTop(x, z)); }
 
 void jump() {
   auto& P = E.player;
@@ -407,7 +410,7 @@ void update(float dt) {
   if (season.snow > 0.45f && world::getTerrainHeight(P.pos.x, P.pos.z) > -0.3f && invCount("snowshoes") <= 0 && world::pathMask(P.pos.x, P.pos.z) < 0.4f)
     speed *= 1.0f - 0.25f * std::min(1.0f, (season.snow - 0.45f) * 3);  // deep snow drags without snowshoes (trails are trodden down)
   if (B.drawing || B.aiming) speed *= 0.6f;
-  float ground0 = walkHeight(P.pos.x, P.pos.z);
+  float ground0 = groundAt(P.pos.x, P.pos.z);
   float water0 = world::waterHeightAt(P.pos.x, P.pos.z);
   if (ground0 < water0 - 0.2f) speed *= 0.6f;
   if (ground0 < water0 - 1.15f) speed *= 0.6f;  // swimming
@@ -417,14 +420,14 @@ void update(float dt) {
   P.pos.x += (g_vel.x + P.knock.x) * dt;
   P.pos.z += (g_vel.z + P.knock.z) * dt;
   P.knock *= std::max(0.0f, 1 - dt * 5);
-  { int pi_ = forest::profOpen ? forest::profOpen("treeCollision") : -1; forest::resolveTreeCollision(P.pos.x, P.pos.z, 0.38f); bridgeRailCollision(P.pos.x, P.pos.z, P.pos.y - 1.7f); if (forest::profClose) forest::profClose(pi_); }
+  { int pi_ = forest::profOpen ? forest::profOpen("treeCollision") : -1; forest::resolveTreeCollision(P.pos.x, P.pos.z, 0.38f, g_feetY); bridgeRailCollision(P.pos.x, P.pos.z, P.pos.y - 1.7f); if (forest::profClose) forest::profClose(pi_); }
   resolveBuildingCollision(P.pos.x, P.pos.z, 0.38f);
   P.pos.x = clampf(P.pos.x, -MAP_HALF + 4, MAP_HALF - 4);
   P.pos.z = clampf(P.pos.z, -MAP_HALF + 4, MAP_HALF - 4);
 
-  float ground = walkHeight(P.pos.x, P.pos.z);
+  float ground = groundAt(P.pos.x, P.pos.z);
   bool onTerrain = ground <= world::getTerrainHeight(P.pos.x, P.pos.z) + 0.02f;
-  float g0 = walkHeight(px0, pz0);
+  float g0 = groundAt(px0, pz0);
   float moved = hypot2(P.pos.x - px0, P.pos.z - pz0);
   float grade = (ground - g0) / (moved > 0 ? moved : 1e-4f);
   if (!P.onGround && !onTerrain && ground > g_feetY && ground - g_feetY <= 0.4f) {
@@ -447,7 +450,7 @@ void update(float dt) {
       float push = std::min(7.0f, (sl - slMax) * 6 + 2.5f) * dt;
       P.pos.x -= (gx / gl) * push;
       P.pos.z -= (gz / gl) * push;
-      ground = walkHeight(P.pos.x, P.pos.z);
+      ground = groundAt(P.pos.x, P.pos.z);
     }
   }
   P.velY += g_settings.gravity * dt;

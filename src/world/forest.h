@@ -22,7 +22,8 @@ void drawOpaque();
 void drawShadow();
 void drawBlobs();
 bool nearestRock(float x, float z, float& ox, float& oz, float& os);
-void resolveTreeCollision(float& x, float& z, float radius = 0.35f);
+void resolveTreeCollision(float& x, float& z, float radius = 0.35f, float feetY = -1e9f);  // rocks and logs below feetY are stepped over
+float obstacleTop(float x, float z);  // top of a rock / stump / log under the point, or -1e9
 void nearTrees(float x, float z, float r, std::vector<float>& out, int max);
 bool treeTrunkAt(float x, float y, float z);
 std::vector<AssetRequest> requiredFiles();

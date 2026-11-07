@@ -31,8 +31,8 @@ namespace {
 
 uint32_t C(const char* h, float a = 1) { return rgba(h, a); }
 
-const char* ICON_HEX[MI_COUNT] = {"#c2773a", "#7d9bc1", "#9bc53d", "#b26ad6", "#e05d44", "#f2b31d", "#3fb6a8", "#ffd23f", "#e8a15c", "#d6c3a1", "#f2d16b", "#ef4444"};
-float ICON_RANGE[MI_COUNT] = {55, 55, 50, 50, 70, 140, 110, 600, 0, 0, 0, 0};
+const char* ICON_HEX[MI_COUNT] = {"#c2773a", "#7d9bc1", "#9bc53d", "#b26ad6", "#e05d44", "#f2b31d", "#3fb6a8", "#ffd23f", "#e8a15c", "#d6c3a1", "#f2d16b", "#ef4444", "#e2e8f0"};
+float ICON_RANGE[MI_COUNT] = {55, 55, 50, 50, 70, 140, 110, 600, 0, 0, 0, 0, 0};
 
 struct Popup { std::string text; uint32_t color; double t0; };
 std::vector<Popup> g_popups;
@@ -103,6 +103,14 @@ void glyph(MarkerIcon icon, float cx, float cy, float r, float alpha = 1) {
     case MI_DANGER:
       for (int k = -1; k <= 1; k += 2) tri({cx + k * 4.2f * u, cy - 4 * u}, {cx + k * 1.2f * u, cy - 4 * u}, {cx + k * 2.6f * u, cy + 4.8f * u}, col);
       rect({cx - 5 * u, cy - 5.6f * u, 10 * u, 1.8f * u}, col);
+      break;
+    case MI_BANDIT:  // crossed arrows: the bandit archers' camp (predators keep the fangs)
+      for (int k = -1; k <= 1; k += 2) {
+        line(cx - k * 4.4f * u, cy + 4.4f * u, cx + k * 3.0f * u, cy - 3.0f * u, 1.3f * u, col);
+        tri({cx + k * 4.9f * u, cy - 4.9f * u}, {cx + k * 1.6f * u, cy - 3.6f * u}, {cx + k * 3.6f * u, cy - 1.6f * u}, col);
+        line(cx - k * 4.4f * u, cy + 4.4f * u, cx - k * 5.4f * u, cy + 2.6f * u, 1.0f * u, col);
+        line(cx - k * 4.4f * u, cy + 4.4f * u, cx - k * 2.6f * u, cy + 5.4f * u, 1.0f * u, col);
+      }
       break;
     case MI_QUEST:
       poly({{cx, cy - 5.5f * u}, {cx + 4 * u, cy}, {cx, cy + 5.5f * u}, {cx - 4 * u, cy}}, col);
@@ -397,7 +405,7 @@ void drawRadar(float X, float Y, float size) {
     if (d > RANGE * 1.05f) continue;
     Vec2 c = tx(m.x, m.z);
     if (c.x * c.x + c.y * c.y > (R - 3) * (R - 3)) continue;
-    bool big = m.icon == MI_RECRUIT || m.icon == MI_HARVEST || m.icon == MI_CLUE || m.icon == MI_DANGER;
+    bool big = m.icon == MI_RECRUIT || m.icon == MI_HARVEST || m.icon == MI_CLUE || m.icon == MI_DANGER || m.icon == MI_BANDIT;
     if (big) glyph(m.icon, cx + c.x, cy + c.y, 5.5f);
     else circle(cx + c.x, cy + c.y, m.icon == MI_ANIMAL ? 2.25f : 2.75f, C(ICON_HEX[m.icon]));
   }
@@ -450,9 +458,9 @@ void drawCompass(float W) {
     if (n) show(relativeBearing(n->x, n->z), ri[t], hypot2(n->x - p.x, n->z - p.z));
   }
   for (auto& m : g_markers) {
-    if (m.icon != MI_RECRUIT && m.icon != MI_CLUE && m.icon != MI_HARVEST && m.icon != MI_DANGER) continue;
+    if (m.icon != MI_RECRUIT && m.icon != MI_CLUE && m.icon != MI_HARVEST && m.icon != MI_DANGER && m.icon != MI_BANDIT) continue;
     float d = hypot2(m.x - p.x, m.z - p.z);
-    if (m.icon == MI_DANGER && d > 45 && m.label.rfind("Bandit", 0) != 0) continue;  // the bandit camp shows at any range
+    if (m.icon == MI_DANGER && d > 45) continue;  // the bandit camp (MI_BANDIT) shows at any range
     if (m.icon == MI_HARVEST && d > 90) continue;
     show(relativeBearing(m.x, m.z), m.icon, d);
   }
@@ -1248,7 +1256,7 @@ float tabMap(float x, float y, float w) {
     if (b.built) { Vec2 p = P(b.pos[0], b.pos[2]); rect({p.x - 5, p.y - 5, 10, 10}, C("#1c1917")); rect({p.x - 4, p.y - 4, 8, 8}, C("#fef3c7")); }
   std::string tip;
   for (auto& m : ms)
-    if (m.icon == MI_RECRUIT || m.icon == MI_CLUE || m.icon == MI_HARVEST || (m.icon == MI_DANGER && m.label.rfind("Bandit", 0) == 0)) {
+    if (m.icon == MI_RECRUIT || m.icon == MI_CLUE || m.icon == MI_HARVEST || m.icon == MI_BANDIT) {
       Vec2 p = P(m.x, m.z);
       glyph(m.icon, p.x, p.y, 9);
       if (hypot2(mouse().x - p.x, mouse().y - p.y) < 9) tip = m.label;
