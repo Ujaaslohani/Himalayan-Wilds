@@ -22,6 +22,9 @@ layout(std140) uniform Frame {
   mat4 u_shadowMatPrev;
   vec4 u_shadowMix;
   vec4 u_lantern;
+  mat4 u_prevVP;
+  mat4 u_vpNoJit;
+  vec4 u_taa;
 };
 #define u_camPos u_cam.xyz
 #define u_clock u_cam.w
@@ -256,6 +259,8 @@ float shadowTapK(sampler2DShadow m, mat4 M, vec3 wp, vec3 n, float dc, bool leaf
     // leaves: 4 taps (rotated grid) - leaf shadows are broken up by the cards themselves, 8 taps look the same
     s = (texture(m, vec3(c.xy + vec2(-0.85, -0.3) * t * 1.6, z)) + texture(m, vec3(c.xy + vec2(0.85, 0.3) * t * 1.6, z))
        + texture(m, vec3(c.xy + vec2(-0.3, 0.85) * t * 1.6, z)) + texture(m, vec3(c.xy + vec2(0.3, -0.85) * t * 1.6, z))) * 0.25;
+  } else if (dc > 35.0) {
+    s = texture(m, vec3(c.xy, z));  // past 35 m: one hardware-filtered tap (shadow detail is sub-pixel there)
   } else if (dc > 12.0) {
     // ground and trunks past 12 m: 4 taps instead of 8 (the softening is below a pixel there)
     s = (texture(m, vec3(c.xy + vec2(-0.85, -0.3) * t * 1.6, z)) + texture(m, vec3(c.xy + vec2(0.85, 0.3) * t * 1.6, z))
@@ -276,7 +281,7 @@ float shadowMapK(vec3 wp, vec3 n, bool leaf){
   float dc = distance(wp, u_camPos);
   float s = shadowTapK(u_shadowMap, u_shadowMat, wp, n, dc, leaf);
   // crossfade from the previous shadow map so shadows glide as the sun moves instead of stepping
-  if (u_shadowMix.x < 0.999) s = mix(shadowTapK(u_shadowPrev, u_shadowMatPrev, wp, n, dc, leaf), s, u_shadowMix.x);
+  if (u_shadowMix.x < 0.999 && dc < 40.0) s = mix(shadowTapK(u_shadowPrev, u_shadowMatPrev, wp, n, dc, leaf), s, u_shadowMix.x);  // far away the step is invisible: skip the second map
   return mix(1.0, s, u_shadowOn);
 }
 float shadowAtK(vec3 wp, vec3 n, bool leaf){ return envLight(wp) * shadowMapK(wp, n, leaf); }
@@ -327,6 +332,62 @@ out float v_ao;
 #if defined(CUTOUT) && !defined(CAPTURE) && !defined(SHADOW_PASS)
 out float v_thru;
 #endif
+#ifdef VELOCITY
+out vec3 v_vc, v_vp;  // clip x,y,w now and last frame (un-jittered)
+#endif
+#ifdef WIND
+// wind sway of one vertex at wind-clock T (run twice for motion vectors: now and last frame)
+vec3 windAt(vec3 p, mat4 M, float T_){
+  vec3 sO = M[3].xyz;
+  vec2 sWo = sO.xz;
+  vec3 sWd = transpose(mat3(M)) * vec3(u_windDir.x, 0.0, u_windDir.y) / max(1e-4, dot(M[0].xyz, M[0].xyz));
+  float sGust = u_windS * (0.6 + 0.4 * sin(T_ * 0.9 + sWo.x * 0.045 + sWo.y * 0.035));
+  float sSw = 0.55 + 0.45 * sin(T_ * 1.4 + sWo.x * 0.11 + sWo.y * 0.09);
+#if defined(K_GRASS)
+  { float b = min(p.y * p.y * 4.0, 1.4);
+    p += sWd * ((0.25 + sSw) * 0.32 * sGust * b) + vec3(sin(T_ * 3.1 + sWo.x * 0.8 + a_pos.x * 9.0), 0.0, cos(T_ * 2.7 + sWo.y * 0.8)) * 0.07 * sGust * b; }
+#elif defined(K_PLANT)
+  { float h = clamp(p.y, 0.0, 2.5); float b = h * h * 0.18;
+    p += sWd * ((0.2 + sSw) * 0.45 * sGust * b) + vec3(sin(T_ * 2.9 + a_pos.x * 3.0 + sWo.x), 0.0, cos(T_ * 2.5 + a_pos.z * 3.0 + sWo.y)) * 0.07 * sGust * h; }
+#elif defined(K_FLOWER)
+  { float h = clamp(p.y, 0.0, 1.5); p += sWd * ((0.2 + sSw) * 0.3 * sGust * h * h) + vec3(sin(T_ * 3.3 + sWo.x * 2.0), 0.0, cos(T_ * 2.9 + sWo.y * 2.0)) * 0.04 * sGust * h; }
+#elif defined(K_BARK)
+  { float h = max(p.y, 0.0) / 12.0; p += sWd * ((0.2 + sSw) * 1.1 * sGust * h * h); }
+#elif defined(K_LEAF)
+  { float h = max(p.y, 0.0) / 12.0;
+#ifdef VF_GLB
+    // the free end of each leaf cluster flutters on its own (tip = top of the card)
+    { float tip = clamp(1.0 - a_uv.y, 0.0, 1.0); float ph = T_ * 6.3 + dot(a_pos, vec3(3.1, 2.3, 2.7)) + sWo.x;
+      p += vec3(sin(ph), 0.6 * sin(ph * 1.3 + 1.1), cos(ph * 0.9 + 0.7)) * 0.09 * (0.35 + sGust) * tip * tip; }
+#endif
+    p += sWd * ((0.2 + sSw) * 1.1 * sGust * h * h)
+      + vec3(sin(T_ * 4.3 + a_pos.x * 1.7 + sWo.x), sin(T_ * 5.1 + a_pos.y * 2.3) * 0.5, cos(T_ * 3.9 + a_pos.z * 1.9 + sWo.y)) * 0.11 * sGust * clamp(h * 1.5, 0.3, 1.5); }
+#elif defined(K_PINE)
+  { float h = max(p.y, 0.0) / 12.0; p += sWd * ((0.2 + sSw) * 0.9 * sGust * h * h)
+      + vec3(sin(T_ * 3.7 + a_pos.y * 2.0 + sWo.x), 0.0, cos(T_ * 3.3 + a_pos.y * 1.7 + sWo.y)) * 0.06 * sGust * clamp(h * 1.5, 0.0, 1.2); }
+#elif defined(K_BUILD)
+  { float wv = a_col.a < 0.999 ? a_col.a * (255.0 / 254.0) : 0.0;
+    if (wv > 0.001) {
+      float ph = T_ * 7.0 + a_pos.x * 2.6 + a_pos.z * 2.6 + a_pos.y * 1.5 + sWo.x * 0.3;
+      vec3 fl = vec3(sin(ph), 0.35 * sin(ph * 0.8 + 1.7), cos(ph * 1.1 + 0.6));
+      p += wv * (0.4 + sGust) * (sWd * 0.5 + fl * 0.32);
+    } }
+#endif
+  return p;
+}
+#endif
+vec3 seasonShape(vec3 p){
+#if defined(K_GRASS)
+  p.y *= 1.0 - 0.6 * u_snow;
+#elif defined(K_PLANT)
+  p.y *= 1.0 - 0.45 * u_snow;
+#elif defined(K_FLOWER)
+  p *= max(0.0, 1.0 - 1.15 * u_snow - 0.6 * u_autumn);
+#elif defined(K_MUSH)
+  p *= max(0.0, 1.0 - u_snow);
+#endif
+  return p;
+}
 void main(){
   vec3 p = a_pos;
   vec3 n = vec3(0.0, 1.0, 0.0);
@@ -352,52 +413,23 @@ v_ao = 1.0;
   if (u_packed > 0.5) v_fade *= 1.0 - floor(a_i1 / 6.2831853) / 15.0;
 #endif
 #ifdef WIND
-  vec2 sWo = sO.xz;
-  vec3 sWd = transpose(mat3(M)) * vec3(u_windDir.x, 0.0, u_windDir.y) / max(1e-4, dot(M[0].xyz, M[0].xyz));
-  float sGust = u_windS * (0.6 + 0.4 * sin(u_windT * 0.9 + sWo.x * 0.045 + sWo.y * 0.035));
-  float sSw = 0.55 + 0.45 * sin(u_windT * 1.4 + sWo.x * 0.11 + sWo.y * 0.09);
-#if defined(K_GRASS)
-  { float b = min(p.y * p.y * 4.0, 1.4);
-    p += sWd * ((0.25 + sSw) * 0.32 * sGust * b) + vec3(sin(u_windT * 3.1 + sWo.x * 0.8 + a_pos.x * 9.0), 0.0, cos(u_windT * 2.7 + sWo.y * 0.8)) * 0.07 * sGust * b; }
-#elif defined(K_PLANT)
-  { float h = clamp(p.y, 0.0, 2.5); float b = h * h * 0.18;
-    p += sWd * ((0.2 + sSw) * 0.45 * sGust * b) + vec3(sin(u_windT * 2.9 + a_pos.x * 3.0 + sWo.x), 0.0, cos(u_windT * 2.5 + a_pos.z * 3.0 + sWo.y)) * 0.07 * sGust * h; }
-#elif defined(K_FLOWER)
-  { float h = clamp(p.y, 0.0, 1.5); p += sWd * ((0.2 + sSw) * 0.3 * sGust * h * h) + vec3(sin(u_windT * 3.3 + sWo.x * 2.0), 0.0, cos(u_windT * 2.9 + sWo.y * 2.0)) * 0.04 * sGust * h; }
-#elif defined(K_BARK)
-  { float h = max(p.y, 0.0) / 12.0; p += sWd * ((0.2 + sSw) * 1.1 * sGust * h * h); }
-#elif defined(K_LEAF)
-  { float h = max(p.y, 0.0) / 12.0;
-#ifdef VF_GLB
-    // the free end of each leaf cluster flutters on its own (tip = top of the card)
-    { float tip = clamp(1.0 - a_uv.y, 0.0, 1.0); float ph = u_windT * 6.3 + dot(a_pos, vec3(3.1, 2.3, 2.7)) + sWo.x;
-      p += vec3(sin(ph), 0.6 * sin(ph * 1.3 + 1.1), cos(ph * 0.9 + 0.7)) * 0.09 * (0.35 + sGust) * tip * tip; }
+  vec3 pW0 = p;
+  p = windAt(pW0, M, u_windT);
 #endif
-    p += sWd * ((0.2 + sSw) * 1.1 * sGust * h * h)
-      + vec3(sin(u_windT * 4.3 + a_pos.x * 1.7 + sWo.x), sin(u_windT * 5.1 + a_pos.y * 2.3) * 0.5, cos(u_windT * 3.9 + a_pos.z * 1.9 + sWo.y)) * 0.11 * sGust * clamp(h * 1.5, 0.3, 1.5); }
-#elif defined(K_PINE)
-  { float h = max(p.y, 0.0) / 12.0; p += sWd * ((0.2 + sSw) * 0.9 * sGust * h * h)
-      + vec3(sin(u_windT * 3.7 + a_pos.y * 2.0 + sWo.x), 0.0, cos(u_windT * 3.3 + a_pos.y * 1.7 + sWo.y)) * 0.06 * sGust * clamp(h * 1.5, 0.0, 1.2); }
-#elif defined(K_BUILD)
-  { float wv = a_col.a < 0.999 ? a_col.a * (255.0 / 254.0) : 0.0;
-    if (wv > 0.001) {
-      float ph = u_windT * 7.0 + a_pos.x * 2.6 + a_pos.z * 2.6 + a_pos.y * 1.5 + sWo.x * 0.3;
-      vec3 fl = vec3(sin(ph), 0.35 * sin(ph * 0.8 + 1.7), cos(ph * 1.1 + 0.6));
-      p += wv * (0.4 + sGust) * (sWd * 0.5 + fl * 0.32);
-    } }
+  p = seasonShape(p);
+#ifdef VELOCITY
+#ifdef WIND
+  vec3 pPrevL = seasonShape(windAt(pW0, M, u_taa.x));
+#else
+  vec3 pPrevL = p;
 #endif
-#endif
-#if defined(K_GRASS)
-  p.y *= 1.0 - 0.6 * u_snow;
-#elif defined(K_PLANT)
-  p.y *= 1.0 - 0.45 * u_snow;
-#elif defined(K_FLOWER)
-  p *= max(0.0, 1.0 - 1.15 * u_snow - 0.6 * u_autumn);
-#elif defined(K_MUSH)
-  p *= max(0.0, 1.0 - u_snow);
 #endif
   vec4 wp = M * vec4(p, 1.0);
   v_wpos = wp.xyz;
+#ifdef VELOCITY
+  v_vc = (u_vpNoJit * wp).xyw;
+  v_vp = (u_prevVP * (M * vec4(pPrevL, 1.0))).xyw;
+#endif
 #if defined(CUTOUT) && !defined(CAPTURE) && !defined(SHADOW_PASS)
   // leaf backlight term per vertex (smooth across a card anyway): saves a normalize + pow per leaf pixel
   v_thru = pow(max(dot(-normalize(u_camPos - wp.xyz), u_sunDir.xyz), 0.0), 4.0) * smoothstep(-0.02, 0.15, u_sunDir.y);
@@ -519,10 +551,21 @@ in float v_fadeIn;
 #ifdef CAPTURE
 layout(location = 0) out vec4 fragColor;
 layout(location = 1) out vec4 fragNormal;
+uniform float u_octCap;
+#elif defined(DEFERRED)
+layout(location = 0) out vec4 fragColor;  // shade-once foliage: season albedo (sqrt), receive-shadow flag
+layout(location = 1) out vec4 gNrm;       // octahedral normal, baked AO, edge-on factor
 #else
 out vec4 fragColor;
 #endif
+#ifdef VELOCITY
+in vec3 v_vc, v_vp;
+#endif
 void main(){
+#ifdef VELOCITY
+  // wind motion for temporal upscaling (vertices at/behind the camera plane: no vector)
+  if (v_vc.z > 0.05 && v_vp.z > 0.05) g_hwVel = vec4(clamp((v_vc.xy / v_vc.z - v_vp.xy / v_vp.z) * 0.5, -0.2, 0.2), 1.0, 1.0);
+#endif
   if (v_fade < 0.999 || v_fadeIn < 0.999) {
 #ifdef SHADOW_PASS
     float dh = FADE_NOISE_STATIC();
@@ -612,11 +655,11 @@ void main(){
 #if defined(K_ROCK) && !defined(CAPTURE)
   {
     // pre-baked procedural rock material, triplanar
-    float rd = 1.0 - smoothstep(30.0, 70.0, v_depth);
+    float rd = 1.0 - smoothstep(25.0, 50.0, v_depth);  // triplanar photo rock only within 50 m (was 70)
     base.rgb = mix(base.rgb, vec3(0.3, 0.28, 0.25), 0.7);
     vec3 nr = n;
     g_rockVar = floor(fract(v_seed * 7.31 + 0.13) * 2.999);  // each rock gets one of the three photo surfaces
-    vec3 alb = ptexRock(v_wpos, nr, 0.33, 1.1);
+    vec3 alb = rd > 0.001 ? ptexRock(v_wpos, nr, 0.33, 1.1) : vec3(1.0);
     g_rockVar = 0.0;
     base.rgb *= mix(vec3(1.0), alb, rd);
     n = normalize(mix(n, nr, rd));
@@ -634,6 +677,15 @@ void main(){
   float wetK = u_wet * (1.0 - u_snow) * smoothstep(-0.2, 0.6, n.y + 0.5);
   sc *= 1.0 - 0.32 * wetK;  // rain-soaked surfaces darken
 #endif
+#ifdef DEFERRED
+  {
+    vec3 on = n / (abs(n.x) + abs(n.y) + abs(n.z));
+    vec2 oe = on.y >= 0.0 ? on.xz : (1.0 - abs(on.zx)) * vec2(on.x >= 0.0 ? 1.0 : -1.0, on.z >= 0.0 ? 1.0 : -1.0);
+    fragColor = vec4(sqrt(max(sc, vec3(0.0))), 0.5 + 0.5 * u_recv);
+    gNrm = vec4(oe * 0.5 + 0.5, v_ao, edgeOn);
+    return;
+  }
+#endif
 #if defined(CUTOUT) && !defined(CAPTURE)
   if (u_dbg == 1) { fragColor = u_tier == 1 ? vec4(0.1, 0.3, 1.0, 1.0) : vec4(1.0, 0.55, 0.0, 1.0); return; }
   if (u_dbg == 3) { fragColor = vec4(linearToSrgb(base.rgb), 1.0); return; }
@@ -641,7 +693,12 @@ void main(){
 #ifdef CAPTURE
   sc *= mix(1.0, v_ao, 0.6);  // far impostors keep the baked crown shading
   fragColor = vec4(sqrt(max(sc, vec3(0.0))), 1.0);
-  fragNormal = vec4(n * 0.5 + 0.5, 1.0);
+  if (u_octCap > 0.5) {
+    // octahedral impostor capture: normal octahedron-packed in rg, depth through the tree (0 front, 1 back) in b
+    vec3 on = n / (abs(n.x) + abs(n.y) + abs(n.z));
+    vec2 oe = on.y >= 0.0 ? on.xz : (1.0 - abs(on.zx)) * vec2(on.x >= 0.0 ? 1.0 : -1.0, on.z >= 0.0 ? 1.0 : -1.0);
+    fragNormal = vec4(oe * 0.5 + 0.5, gl_FragCoord.z, 1.0);
+  } else fragNormal = vec4(n * 0.5 + 0.5, 1.0);
   return;
 #endif
 #if defined(CUTOUT) && !defined(CAPTURE)

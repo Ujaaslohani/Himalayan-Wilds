@@ -459,7 +459,7 @@ namespace actions {
 
 void addItems(const Cost& delta) {
   for (auto& d : delta) A.inv[d.first] = std::max(0, A.inv[d.first] + d.second);
-  E.world.gearCoat = invCount("fur_coat") > 0;
+  E.world.gearCoat = invCount("fur_coat") > 0 || invCount("leopard_cloak") > 0;
   E.world.gearArmour = invCount("leather_armour") > 0;
 }
 
@@ -639,7 +639,7 @@ void syncDerived() {
   bn.stoneExtra = rec("builder") ? 2 : 0;
   bn.herbExtra = rec("herbalist") ? 1 : 0;
   bn.animalRadar = built("watchtower") ? 140.0f : built("hunter_hut") ? 80.0f : 45.0f;
-  E.world.gearCoat = invCount("fur_coat") > 0;
+  E.world.gearCoat = invCount("fur_coat") > 0 || invCount("leopard_cloak") > 0;
   E.world.gearArmour = invCount("leather_armour") > 0;
   E.world.hungry = A.hungerDays > 0;
   int cap = capacity();

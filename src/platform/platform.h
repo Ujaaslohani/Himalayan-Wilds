@@ -36,6 +36,9 @@ struct Settings {
   bool fullMap = false;
   int fpsLimit = 60;
   int menuFps = 30;
+  int leafPrepass = 2;       // leaf depth pre-pass: 0 off, 1 on, 2 auto (timed on this GPU, the faster wins)
+  bool eco = false;  // Eco: automatic quality keeps the GPU at most ~half busy (cooler, quieter laptop)
+  bool temporalUpscale = false;  // off by default: sharper; the player found it soft  // render low-res with sub-pixel jitter and rebuild detail from previous frames
   float drawDist() const { return fullMap ? 8.0f : drawDistance; }
 };
 

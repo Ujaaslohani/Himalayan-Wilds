@@ -1,4 +1,8 @@
 #include <chrono>
+#include <future>
+#include <array>
+#include <cstdint>
+void hwWritePng(const char* path, int w, int h, const uint8_t* rgb);  // main.cpp
 #include "../render/envmap.h"
 #include "../game/engine.h"
 #include "../render/sky.h"
@@ -167,6 +171,7 @@ struct FileSlot {
   std::vector<InstLite> visible;
   int imp = -1;
   float impW = 1, impBase = 0;
+  float octCy = 0, octR = 1;  // octahedral impostor: sphere centre above the base and radius (model units)
   std::vector<InstLite> farItems, farVisible, midItems, midVisible;
   std::vector<Range> farRanges, midRanges;
   bool hasLod = false;
@@ -364,12 +369,25 @@ void gardenSpots(std::vector<std::array<float, 6>>& out) {
 }
 
 std::atomic<bool> g_impReady{false};
-const float IMP_BAND = 16;
-const float MID_BAND = 2.5f, CANOPY_BAND = 30;  // shorter crossfade: near and mid versions overlap less
+float g_treeBand = 16;  // 3D tree <-> impostor cross-fade for trees; 10 m once the octahedral impostors are ready
+// (they match the 3D tree from every angle). Small plants and rocks keep the long 16 m hand-over: as pictures
+// they lose their shape against the grass, and they cost little as 3D anyway.
+inline float impBand(int layer) { return layer == 3 /*L_TREE*/ ? g_treeBand : 16.0f; }
+const float MID_BAND = 4.0f, CANOPY_BAND = 30;  // shorter crossfade: near and mid versions overlap less
 std::atomic<float> g_budgetScale{1.0f};
 float effScale() { return std::min(g_settings.detailScale, g_budgetScale.load()); }
-float midNearS(float ds) { return clampf(4.5f * g_settings.drawDist(), 10, 14) * ds; }  // single-leaf trees only within ~12 m; leaf-cluster cards beyond (Far Cry-style)
-float impostorNearS(float ds) { return clampf(16 * g_settings.drawDist(), 28, 90) * (0.5f + 0.5f * ds); }
+float midNearS(float ds) {
+  static const float force = std::getenv("HW_MIDNEAR") ? (float)std::atof(std::getenv("HW_MIDNEAR")) : 0.0f;  // A/B test
+  if (force > 0) return force;
+  return clampf(4.0f * g_settings.drawDist(), 9, 12) * (0.6f + 0.4f * ds);
+}  // single-leaf trees only within ~12 m; leaf-cluster cards beyond (Far Cry-style)
+// the 3D/picture switch hardly moves with detail any more (0.85..1x): a ring that slides in and out with the automatic
+// detail made trees visibly swap while the player stood still. Detail now mostly trims the single-leaf radius.
+float impostorNearS(float ds) {
+  static const float force = std::getenv("HW_IMPNEAR") ? (float)std::atof(std::getenv("HW_IMPNEAR")) : 0.0f;  // A/B test
+  if (force > 0) return force;
+  return clampf(16 * g_settings.drawDist(), 28, 90) * (0.85f + 0.15f * ds) * 0.85f;
+}
 float midNear() { return midNearS(effScale()); }
 float impostorNear() { return impostorNearS(effScale()); }
 float canopyNear() { return std::min(HAZE_CULL - CANOPY_BAND, clampf(140 * g_settings.drawDist(), 200, 420)) * (1.0f - 0.25f * sky::rainAmount()); }  // rain: far canopy ends sooner (hidden in the fog)
@@ -481,12 +499,12 @@ void compute(BuildJob& J) {
             const float M = 20.0f;
             if (d > nearD - M) J.far[si].push_back(inst);
             if (slot->hasLod) {
-              if (d > midD - M && d < nearD + IMP_BAND + M) J.mid[si].push_back(inst);
+              if (d > midD - M && d < nearD + impBand(layer.id) + M) J.mid[si].push_back(inst);
               if (d > midD + MID_BAND + M) {
                 if (caster && d < 46 && (layer.id == L_TREE || inst.s > 0.55f || d < 18)) J.shadow[si].push_back(inst);
                 continue;
               }
-            } else if (d > nearD + IMP_BAND + M) continue;
+            } else if (d > nearD + impBand(layer.id) + M) continue;
           }
           // tiny rocks far off cover a few shadow-map texels at most: skip them as casters
           if (caster && d < 46 && (layer.id == L_TREE || inst.s > 0.55f || d < 18)) J.shadow[si].push_back(inst);
@@ -614,12 +632,41 @@ std::unordered_map<int, char> g_occ;
 int g_occFrame = -1;
 int g_culledOcc = 0;
 
+// terrain-horizon occlusion for anything with a bounding box (terrain patches, houses): hidden when every
+// sight line from the camera to its top corners passes under a ridge. Cached until the camera moves 3 m.
+std::unordered_map<long long, char> g_occBox;
+bool horizonVisibleImpl(const Vec3& mn, const Vec3& mx) {
+  const Camera& cam = render::cam;
+  float cx = (mn.x + mx.x) * 0.5f, cz = (mn.z + mx.z) * 0.5f;
+  float dist = hypot2(cx - cam.pos.x, cz - cam.pos.z);
+  float half = std::max(mx.x - mn.x, mx.z - mn.z) * 0.5f;
+  if (dist < 40 + half) return true;
+  long long key = ((long long)(int)std::floor(cx * 0.5f) * 73856093LL) ^ ((long long)(int)std::floor(cz * 0.5f) * 19349663LL) ^ ((long long)(int)(half * 2) << 40);
+  auto it = g_occBox.find(key);
+  if (it != g_occBox.end()) return it->second != 0;
+  Vec3 pts[5] = {{cx, mx.y, cz}, {mn.x, mx.y, mn.z}, {mx.x, mx.y, mx.z}, {mn.x, mx.y, mx.z}, {mx.x, mx.y, mn.z}};
+  bool vis = false;
+  for (auto& q : pts) {
+    int steps = (int)clampf(dist / 10, 6, 48);
+    bool blocked = false;
+    for (int k = 1; k < steps && !blocked; k++) {
+      float t = (float)k / steps;
+      float x = cam.pos.x + (q.x - cam.pos.x) * t, y = cam.pos.y + (q.y - cam.pos.y) * t, z = cam.pos.z + (q.z - cam.pos.z) * t;
+      if (world::getTerrainHeight(x, z) > y + 2.0f) blocked = true;
+    }
+    if (!blocked) { vis = true; break; }
+  }
+  g_occBox[key] = vis ? 1 : 0;
+  return vis;
+}
+
 bool chunkVisible(const FileSlot::Range& r) {
   const Camera& cam = render::cam;
   if (!cam.box(r.mn, r.mx)) return false;
+  if (!render::hizVisible(r.mn, r.mx)) return false;  // behind a house, rock face or nearer trunks last frame
   float cx = (r.mn.x + r.mx.x) * 0.5f, cz = (r.mn.z + r.mx.z) * 0.5f;
   float dist = hypot2(cx - cam.pos.x, cz - cam.pos.z);
-  if (dist < 45) return true;
+  if (dist < 35) return true;
   int key = chunkKey(cx, cz);
   auto it = g_occ.find(key);
   if (it != g_occ.end()) return it->second != 0;
@@ -694,6 +741,7 @@ void cullVisible() {
   const Vec3& cp = render::cam.pos;
   if (++g_occAge > 20 || hypot2(cp.x - g_occPos.x, cp.z - g_occPos.z) > 3 || std::fabs(cp.y - g_occPos.y) > 2) {
     g_occ.clear();
+    g_occBox.clear();
     g_occPos = cp;
     g_occAge = 0;
   }
@@ -704,13 +752,13 @@ void cullVisible() {
   for (auto& s : g_slots) {
     LodCfg lc = lodFor(s->layer);
     bool useImp = g_impReady && s->imp >= 0;
-    float nearMax = !useImp ? 1e9f : s->hasLod ? lc.mid + MID_BAND : lc.imp + IMP_BAND;
+    float nearMax = !useImp ? 1e9f : s->hasLod ? lc.mid + MID_BAND : lc.imp + impBand(s->layer);
     if (gatherVisible(s->items, s->ranges, s->visible, s->gen, s->sigN, 0, nearMax)) uploadShared(s->parts, &PartSlot::batch, s->visible);
     g_instances += (int)s->visible.size();
     if (s->imp >= 0) {
       if (gatherVisible(s->farItems, s->farRanges, s->farVisible, s->gen, s->sigF, lc.imp)) impDirty[s->layer] = true;
       if (s->hasLod) {
-        if (gatherVisible(s->midItems, s->midRanges, s->midVisible, s->gen, s->sigM, lc.mid, lc.imp + IMP_BAND)) uploadShared(s->parts, &PartSlot::lodBatch, s->midVisible);
+        if (gatherVisible(s->midItems, s->midRanges, s->midVisible, s->gen, s->sigM, lc.mid, lc.imp + impBand(s->layer))) uploadShared(s->parts, &PartSlot::lodBatch, s->midVisible);
         g_instances += (int)s->midVisible.size();
       }
     }
@@ -719,24 +767,31 @@ void cullVisible() {
     for (int L = 0; L < 4; L++) if (impDirty[L] && L != L_GRASS) rebuildImpostorMerge(L);
   int budget = g_settings.triBudget;
   if (budget <= 0 || !g_impReady) { g_budgetScale = 1.0f; return; }
+  static unsigned s_bf = 0;
+  if ((s_bf++ & 7) != 0) return;  // triangle budget: walks every visible tree, so only every 8th frame
   const int NB = 200;
   static std::vector<double> full, lod;
   full.assign(4 * NB, 0); lod.assign(4 * NB, 0);
   const Vec3& cp2 = render::cam.pos;
+  const float hfov = 2.0f * std::atan(std::tan(render::cam.fov * 0.5f * PI / 180.0f) * render::cam.aspect);
+  const double viewShare = clampf(hfov / TAU * 1.15f, 0.2f, 1.0f);
   for (auto& s : g_slots) {
     if (s->layer == L_GRASS) continue;
     double ft = 0, lt = 0;
     for (auto& p : s->parts) { ft += p.mesh->count / 3 * (p.mat.cutout && !p.proc ? 2 : 1); lt += (p.lod ? p.lod->count : p.mesh->count) / 3; }
     int L = s->layer;
-    for (auto& it : s->visible) { int k = std::min(NB - 1, (int)hypot2(it.x - cp2.x, it.z - cp2.z)); full[L * NB + k] += ft; }
-    if (s->hasLod) for (auto& it : s->midVisible) { int k = std::min(NB - 1, (int)hypot2(it.x - cp2.x, it.z - cp2.z)); lod[L * NB + k] += lt; }
+    // every tree around the player, not only those in view, scaled by the share of the circle the view covers: the
+    // result then depends on where you stand, never on where you look, so turning the camera can't move the LOD
+    // distances (it did: facing a dense forest pulled the 3D/picture switch closer and trees changed while turning)
+    for (auto& it : s->items) { int k = std::min(NB - 1, (int)hypot2(it.x - cp2.x, it.z - cp2.z)); full[L * NB + k] += ft * viewShare; }
+    if (s->hasLod) for (auto& it : s->midItems) { int k = std::min(NB - 1, (int)hypot2(it.x - cp2.x, it.z - cp2.z)); lod[L * NB + k] += lt * viewShare; }
   }
   float cap = std::min(1.0f, g_settings.detailScale), pick = 0.3f;
   for (float sc = cap; sc >= 0.3f; sc -= 0.05f) {
     double T = 0;
     for (int L = 1; L < 4; L++) {
       LodCfg c = lodForS(L, sc);
-      int m = (int)(c.mid + MID_BAND * 0.5f), im = (int)(c.imp + IMP_BAND * 0.5f);
+      int m = (int)(c.mid + MID_BAND * 0.5f), im = (int)(c.imp + impBand(L) * 0.5f);
       for (int k = 0; k < NB; k++) {
         if (k < m) T += full[L * NB + k];
         else if (k < im) T += lod[L * NB + k];
@@ -746,7 +801,8 @@ void cullVisible() {
     if (T <= budget) { pick = sc; if (std::getenv("HW_BUDGET")) std::printf("budget pick %.2f T=%.0f\n", sc, T); break; }
   }
   float cur = g_budgetScale.load();
-  float next = pick < cur ? std::max(pick, cur - 0.05f) : std::min(pick, cur + 0.01f);
+  if (std::fabs(pick - cur) < 0.06f) pick = cur;  // dead zone: small swings in the count never move the LOD rings
+  float next = pick < cur ? std::max(pick, cur - 0.02f) : std::min(pick, cur + 0.01f);
   if (std::fabs(next - cur) > 0.001f) {
     g_budgetScale = next;
     static float lastBuilt = 1.0f;
@@ -755,10 +811,149 @@ void cullVisible() {
 }
 
 
-const int IMP_CELL_W = 96, IMP_CELL_H = 192, IMP_VIEWS = 16,  // distant-tree images: seen only past ~48 m, so 3/4 size (56% of the memory)
+const int IMP_CELL_W = 128, IMP_CELL_H = 256, IMP_VIEWS = 16,  // distant-tree images: they now take over from ~22-26 m, where a 192 px cell was visibly upscaled
  IMP_ATLAS = IMP_CELL_W * IMP_VIEWS;
 int IMP_ATLAS_H = 256, g_impRows = 1;
 GLuint g_impFbo = 0, g_impTex = 0, g_impDepth = 0, g_impNrm = 0;
+// compressed copies of the distant-tree atlases (DXT1: 1/8 the memory traffic of RGBA8 when thousands of
+// far trees are drawn); refreshed row by row after each capture, sampled instead of the render targets
+GLuint g_impTexC = 0, g_impNrmC = 0;
+// compressed copy of one atlas row. During play (season recapture) the DXT compression runs on a worker thread
+// and is uploaded a few frames later: it used to cost a visible hitch on the main thread for every tree type
+struct ImpRowJob { int row; std::future<std::array<TexLevels, 2>> f; };
+std::vector<ImpRowJob> g_impJobs;
+static void uploadImpRow(int row, std::array<TexLevels, 2>& L) {
+  const int LV = 5;
+  for (int a = 0; a < 2; a++) {
+    if (!L[a].bc) return;
+    glBindTexture(GL_TEXTURE_2D, a == 0 ? g_impTexC : g_impNrmC);
+    GLenum fmt = a == 0 ? GL_COMPRESSED_RGBA_S3TC_DXT1_EXT : GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
+    for (int i = 0; i < LV && i < (int)L[a].data.size(); i++)
+      glCompressedTexSubImage2D(GL_TEXTURE_2D, i, 0, (row * IMP_CELL_H) >> i, L[a].dims[i].first, L[a].dims[i].second, fmt, (GLsizei)L[a].data[i].size(), L[a].data[i].data());
+  }
+}
+void pollImpRowJobs() {
+  for (size_t i = 0; i < g_impJobs.size();) {
+    if (g_impJobs[i].f.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+      auto L = g_impJobs[i].f.get();
+      uploadImpRow(g_impJobs[i].row, L);
+      g_impJobs.erase(g_impJobs.begin() + i);
+    } else i++;
+  }
+}
+void compressImpRow(int row, bool async = false) {
+  if (!gfx::hasS3TC() || row < 0 || row >= g_impRows) return;
+  const int LV = 5;  // the atlas uses mip levels 0..4
+  auto ensure = [](GLuint& tex, GLenum fmt) {
+    if (tex) return;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    for (int i = 0; i < LV; i++) {
+      int w = IMP_ATLAS >> i, h = IMP_ATLAS_H >> i;
+      glCompressedTexImage2D(GL_TEXTURE_2D, i, fmt, w, h, 0, ((w + 3) / 4) * ((h + 3) / 4) * 8, nullptr);
+    }
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, LV - 1);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gfx::addBufferBytes((long long)IMP_ATLAS * IMP_ATLAS_H / 2 * 4 / 3);
+  };
+  ensure(g_impTexC, GL_COMPRESSED_RGBA_S3TC_DXT1_EXT);
+  ensure(g_impNrmC, GL_COMPRESSED_RGB_S3TC_DXT1_EXT);
+  GLint prevRead = 0;
+  glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevRead);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, g_impFbo);
+  std::array<std::vector<uint8_t>, 2> px;
+  for (int a = 0; a < 2; a++) {
+    px[a].resize((size_t)IMP_ATLAS * IMP_CELL_H * 4);
+    glReadBuffer(a == 0 ? GL_COLOR_ATTACHMENT0 : GL_COLOR_ATTACHMENT1);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, row * IMP_CELL_H, IMP_ATLAS, IMP_CELL_H, GL_RGBA, GL_UNSIGNED_BYTE, px[a].data());
+  }
+  glReadBuffer(GL_COLOR_ATTACHMENT0);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, prevRead);
+  auto work = [](std::array<std::vector<uint8_t>, 2> p) {
+    std::array<TexLevels, 2> L;
+    for (int a = 0; a < 2; a++) L[a] = prepareTexture(p[a].data(), IMP_ATLAS, IMP_CELL_H, true, true, a == 0);
+    return L;
+  };
+  if (async) {
+    for (auto& j : g_impJobs) if (j.row == row) j.f.wait();  // an older job for this row must not land later
+    g_impJobs.push_back({row, std::async(std::launch::async, work, std::move(px))});
+  } else {
+    auto L = work(std::move(px));
+    uploadImpRow(row, L);
+  }
+}
+// ---- octahedral impostors: every tree / rock type photographed from 8 x 8 directions spread over the upper
+// hemisphere (hemi-octahedral layout), colour + packed normal + depth, one texture-array layer per type. The
+// shader blends the 3 captured views nearest to the real viewing direction, so the picture matches the 3D model
+// from any angle (also from above, on a hillside) and the hand-over from 3D tree to picture can be short.
+const int OCT_K = 8, OCT_C = 160, OCT_S = OCT_K * OCT_C, OCT_LV = 5;
+GLuint g_octFbo = 0, g_octTex = 0, g_octNrm = 0, g_octDepth = 0, g_octTexC = 0, g_octNrmC = 0;
+int g_octLayers = 0;
+bool g_octReady = false;
+const bool g_octWanted = std::getenv("HW_OCT") != nullptr;
+Vec3 octDecode(float u, float v) {  // hemi-octahedral: square [0,1]^2 -> direction with y >= 0
+  float px = u * 2 - 1, py = v * 2 - 1;
+  Vec3 d((px + py) * 0.5f, 0, (px - py) * 0.5f);
+  d.y = 1.0f - std::fabs(d.x) - std::fabs(d.z);
+  return d.normalized();
+}
+// store the scratch capture of one type into its layer of the sampled arrays: DXT1-compressed on the CPU
+// (1/8 of RGBA8), or a plain copy when the GPU has no S3TC
+bool g_octBC = false;
+void storeOctLayer(int layer) {
+  if (layer < 0 || layer >= g_octLayers) return;
+  g_octBC = gfx::hasS3TC() && !std::getenv("HW_NOOCTC");
+  auto ensure = [](GLuint& tex, GLenum fmt) {
+    if (tex) return;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
+    for (int i = 0; i < OCT_LV; i++) {
+      int w = OCT_S >> i;
+      if (g_octBC) glCompressedTexImage3D(GL_TEXTURE_2D_ARRAY, i, fmt, w, w, g_octLayers, 0, ((w + 3) / 4) * ((w + 3) / 4) * 8 * g_octLayers, nullptr);
+      else glTexImage3D(GL_TEXTURE_2D_ARRAY, i, GL_RGBA8, w, w, g_octLayers, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    }
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, OCT_LV - 1);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gfx::addBufferBytes((long long)OCT_S * OCT_S * (g_octBC ? 1 : 8) / 2 * g_octLayers * 4 / 3);
+  };
+  ensure(g_octTexC, GL_COMPRESSED_RGBA_S3TC_DXT1_EXT);
+  ensure(g_octNrmC, GL_COMPRESSED_RGB_S3TC_DXT1_EXT);
+  GLint prevRead = 0;
+  glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prevRead);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, g_octFbo);
+  static std::vector<uint8_t> px;
+  px.resize((size_t)OCT_S * OCT_S * 4);
+  for (int a = 0; a < 2; a++) {
+    glReadBuffer(GL_COLOR_ATTACHMENT0 + a);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, a == 0 ? g_octTexC : g_octNrmC);
+    if (!g_octBC) {
+      glCopyTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, 0, 0, OCT_S, OCT_S);
+      continue;
+    }
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, OCT_S, OCT_S, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    TexLevels L = prepareTexture(px.data(), OCT_S, OCT_S, true, true, a == 0);
+    GLenum fmt = a == 0 ? GL_COMPRESSED_RGBA_S3TC_DXT1_EXT : GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
+    for (int i = 0; i < OCT_LV && i < (int)L.data.size(); i++)
+      glCompressedTexSubImage3D(GL_TEXTURE_2D_ARRAY, i, 0, 0, layer, L.dims[i].first, L.dims[i].second, 1, fmt, (GLsizei)L.data[i].size(), L.data[i].data());
+  }
+  if (!g_octBC) {
+    glBindTexture(GL_TEXTURE_2D_ARRAY, g_octTexC); glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, g_octNrmC); glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+  }
+  glReadBuffer(GL_COLOR_ATTACHMENT0);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, prevRead);
+}
+// views [vFrom, vTo) of the 64; `only` = one type (season recapture slice) or -1 for all
+void captureOct(int only, bool mips, int vFrom, int vTo);
+
 Mesh g_impQuad;
 float g_impSig = -1, g_capSig = 0;
 int g_capNext = -1, g_impTypes = 0;
@@ -776,8 +971,10 @@ out vec2 v_rot;
 out vec3 v_wpos;
 out float v_depth;
 out vec2 v_fade;
+out vec3 v_q;  // quad x (-0.5..0.5), height (0..1), per-tree variation
 void main(){
   vec3 base = a_i0.xyz;
+  v_q = vec3(a_pos.x, a_pos.y, fract(sin(dot(base.xz, vec2(12.9898, 78.233))) * 43758.5453));
   float s = a_i0.w, yaw = mod(a_i1, 6.2831853);
   vec2 tc = u_camPos.xz - base.xz;
   float d = max(length(tc), 1e-3);
@@ -791,7 +988,12 @@ void main(){
   v_blend = fract(fv);
   vec3 right = vec3(dir.y, 0.0, -dir.x);
   float W = s;
-  vec3 p = base + right * (a_pos.x * W) + vec3(0.0, a_pos.y * 2.0 * W, 0.0);
+  // seen from above (hills, ridges) a vertical card is foreshortened into a flat sliver: lean it back toward the
+  // camera by half the viewing elevation, pivoting at the trunk base so it stays planted
+  float elev = clamp(atan(u_camPos.y - (base.y + W), d), 0.0, 0.9);
+  float tl = elev * 0.5;
+  vec3 upv = vec3(dir.x * sin(tl), cos(tl), dir.y * sin(tl));
+  vec3 p = base + right * (a_pos.x * W) + upv * (a_pos.y * 2.0 * W);
   float row = floor(a_i1 / 6.2831853), rows = u_cell.w;
   float vv = (row + a_pos.y) / rows;
   v_uv0 = vec2((v0 + a_pos.x + 0.5) / 16.0, vv);
@@ -813,6 +1015,8 @@ in vec2 v_rot;
 in vec3 v_wpos;
 in float v_depth;
 in vec2 v_fade;
+in vec3 v_q;
+uniform vec3 u_impGain;
 uniform sampler2D u_atlas;
 uniform sampler2D u_nrm;
 uniform int u_dbg;
@@ -823,7 +1027,7 @@ void main(){
   // beyond 200 m use the nearest viewing angle only: half the atlas reads, the blend is invisible that far
   bool farI = v_depth > 200.0;
   vec2 uvA = farI && v_blend > 0.5 ? v_uv1 : v_uv0;
-  vec4 t0 = texture(u_atlas, uvA), t1 = farI ? t0 : texture(u_atlas, v_uv1);
+  vec4 t0 = texture(u_atlas, uvA, -0.6), t1 = farI ? t0 : texture(u_atlas, v_uv1, -0.6);  // slight negative bias: crisper crowns
   vec4 t = farI ? t0 : mix(t0, t1, v_blend);
   if (t.a < 0.5) {
     // fill pinholes inside the crown from a blurrier mip so sky doesn't speckle through
@@ -835,9 +1039,20 @@ void main(){
   vec3 nl = (farI ? texture(u_nrm, uvA).xyz : mix(texture(u_nrm, v_uv0).xyz, texture(u_nrm, v_uv1).xyz, v_blend)) * 2.0 - 1.0;
   float shT = farI ? envLight(v_wpos) : shadowAt(v_wpos, vec3(0.0, 1.0, 0.0));  // shadow map does not reach that far anyway
   vec3 n = normalize(vec3(v_rot.x * nl.x + v_rot.y * nl.z, nl.y, -v_rot.y * nl.x + v_rot.x * nl.z));
-  n = normalize(mix(n, vec3(0.0, 1.0, 0.0), 0.75));
+  // volume cue: a rounded crown normal from the pixel's place on the card (sun side lit, far side in shade), mixed
+  // with the captured leaf normals, so the card shades like a 3D crown instead of a flat photo
+  vec2 vc = normalize((u_camPos - v_wpos).xz + vec2(1e-4));
+  vec3 rgt = vec3(vc.y, 0.0, -vc.x), fwd = vec3(vc.x, 0.0, vc.y);
+  float sx = v_q.x * 2.0, sy = (v_q.y - 0.62) / 0.5;
+  vec3 ns = normalize(rgt * sx + vec3(0.0, sy * 0.8 + 0.25, 0.0) + fwd * sqrt(max(0.05, 1.0 - sx * sx - sy * sy)));
+  n = normalize(mix(mix(n, ns, 0.55), vec3(0.0, 1.0, 0.0), 0.25));
   vec3 alb = t.rgb * t.rgb;
-  float sh = mix(mix(0.42, 0.9, shT) * mix(0.75, 1.0, smoothstep(0.08, 0.45, u_sunDir.y)), 0.62, 0.85);
+  // per-tree tint and brightness (no two cards print the same), darker toward the trunk and lower crown
+  float var = v_q.z;
+  alb *= mix(0.9, 1.1, var) * vec3(1.0 + 0.08 * (fract(var * 7.31) - 0.5), 1.0, 1.0 - 0.12 * (fract(var * 3.17) - 0.5));
+  alb *= mix(0.8, 1.04, smoothstep(0.05, 0.75, v_q.y));
+  alb *= u_impGain;  // measured against the 3D trees (same view, all-3D vs all-picture): no colour jump at the swap
+  float sh = mix(mix(0.42, 0.9, shT) * mix(0.75, 1.0, smoothstep(0.08, 0.45, u_sunDir.y)), 0.62, 0.45);
   vec3 lit = lambert(alb, n, sh);
   {
     // distant trees glow at the edges when backlit, like the near leaves
@@ -847,6 +1062,130 @@ void main(){
   }
   vec3 c = outColor(lit);
   c = mix(c, fogTint(v_wpos), mix(fogObject(v_wpos, v_depth), fogGround(v_wpos, v_depth), smoothstep(60.0, 160.0, v_depth)));
+  fragColor = vec4(c, 1.0);
+}
+)";
+
+const char* OCT_VS = R"(
+layout(location=0) in vec3 a_pos;
+layout(location=6) in vec4 a_i0;
+layout(location=7) in float a_i1;
+uniform vec4 u_range;
+uniform vec4 u_oct[32];  // per type: sphere centre above base, radius, 1 / impostor width, unused
+out vec4 v_f0, v_f1, v_f2;  // per captured view: uv in its cell, cell index
+out vec3 v_w;
+flat out float v_layer;
+out vec2 v_rot;
+out vec3 v_wpos;
+out vec3 v_toCam;
+flat out float v_R;
+out float v_depth;
+out vec2 v_fade;
+const float K = 8.0;
+vec3 octDir(vec2 c){ vec2 p = c / (K - 1.0) * 2.0 - 1.0; vec3 d = vec3((p.x + p.y) * 0.5, 0.0, (p.x - p.y) * 0.5); d.y = 1.0 - abs(d.x) - abs(d.z); return normalize(d); }
+vec4 frameUV(vec2 c, vec3 camL, vec3 PL, float R){
+  vec3 dk = octDir(c);
+  vec3 up0 = abs(dk.y) > 0.999 ? vec3(0.0, 0.0, -1.0) : vec3(0.0, 1.0, 0.0);
+  vec3 rk = normalize(cross(up0, dk)), uk = cross(dk, rk);
+  vec3 r = PL - camL;
+  float den = dot(r, dk);
+  float t = abs(den) > 1e-5 ? -dot(camL, dk) / den : 1.0;
+  vec3 X = camL + r * t;
+  return vec4(vec2(dot(X, rk), dot(X, uk)) / (2.0 * R) + 0.5, c);
+}
+void main(){
+  float row = floor(a_i1 / 6.2831853);
+  float yaw = mod(a_i1, 6.2831853);
+  vec4 o = u_oct[int(row)];
+  float s = a_i0.w * o.z;
+  float R = o.y * s;
+  vec3 C = a_i0.xyz + vec3(0.0, o.x * s, 0.0);
+  float cy = cos(yaw), sy = sin(yaw);
+  vec3 camW = u_camPos - C;
+  float d = max(length(camW.xz), 1e-3);
+  vec3 nrm = normalize(camW + vec3(0.0, 0.0, 1e-4));
+  vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), nrm) + vec3(1e-5, 0.0, 0.0));
+  vec3 up = cross(nrm, right);
+  vec3 P = C + right * (a_pos.x * 2.0 * R) + up * ((a_pos.y * 2.0 - 1.0) * R);
+  // camera and corner in the model's own frame (instances turn about Y by yaw)
+  vec3 camL = vec3(cy * camW.x - sy * camW.z, camW.y, sy * camW.x + cy * camW.z);
+  vec3 q = P - C;
+  vec3 PL = vec3(cy * q.x - sy * q.z, q.y, sy * q.x + cy * q.z);
+  vec3 dh = normalize(vec3(camL.x, max(camL.y, 0.0), camL.z) + vec3(0.0, 1e-4, 0.0));
+  vec3 a = dh / (abs(dh.x) + abs(dh.y) + abs(dh.z));
+  vec2 g = (vec2(a.x + a.z, a.x - a.z) * 0.5 + 0.5) * (K - 1.0);
+  vec2 b = floor(min(g, vec2(K - 1.001))), f = g - b;
+  vec2 c0, c1, c2;
+  if (f.x + f.y < 1.0) { c0 = b; c1 = b + vec2(1.0, 0.0); c2 = b + vec2(0.0, 1.0); v_w = vec3(1.0 - f.x - f.y, f.x, f.y); }
+  else { c0 = b + vec2(1.0); c1 = b + vec2(0.0, 1.0); c2 = b + vec2(1.0, 0.0); v_w = vec3(f.x + f.y - 1.0, 1.0 - f.x, 1.0 - f.y); }
+  v_f0 = frameUV(c0, camL, PL, R);
+  v_f1 = frameUV(c1, camL, PL, R);
+  v_f2 = frameUV(c2, camL, PL, R);
+  v_layer = row;
+  v_rot = vec2(cy, sy);
+  v_wpos = P;
+  v_toCam = nrm;
+  v_R = R;
+  v_fade = vec2(1.0 - smoothstep(u_range.x, mix(u_range.x, u_range.y, 0.5), d), 1.0 - smoothstep(mix(u_range.z, u_range.w, 0.5), u_range.w, d));
+  vec4 vp = u_view * vec4(P, 1.0);
+  v_depth = -vp.z;
+  gl_Position = u_proj * vp;
+}
+)";
+
+const char* OCT_FS = R"(
+in vec4 v_f0, v_f1, v_f2;
+in vec3 v_w;
+flat in float v_layer;
+in vec2 v_rot;
+in vec3 v_wpos;
+in vec3 v_toCam;
+flat in float v_R;
+in float v_depth;
+in vec2 v_fade;
+uniform sampler2DArray u_octA, u_octN;
+uniform int u_dbg;
+out vec4 fragColor;
+const float K = 8.0;
+vec3 cellUV(vec4 f){ return vec3((f.zw + clamp(f.xy, vec2(0.004), vec2(0.996))) / K, v_layer); }
+float inCell(vec4 f){ return step(0.0, f.x) * step(0.0, f.y) * step(f.x, 1.0) * step(f.y, 1.0); }
+vec3 octDec(vec2 e){ e = e * 2.0 - 1.0; vec3 n = vec3(e.x, 1.0 - abs(e.x) - abs(e.y), e.y); if (n.y < 0.0) n.xz = (1.0 - abs(n.zx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.z >= 0.0 ? 1.0 : -1.0); return normalize(n); }
+void main(){
+  float dh = FADE_NOISE_STATIC();
+  if (dh < v_fade.x || dh >= v_fade.y) discard;  // dithered fade first: skip the atlas reads for faded-out pixels
+  // beyond 200 m only the strongest view: a third of the reads, the blend is invisible that far
+  bool farI = v_depth > 200.0;
+  vec3 w = v_w;
+  if (farI) w = w.x >= max(w.y, w.z) ? vec3(1.0, 0.0, 0.0) : w.y >= w.z ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
+  w *= vec3(inCell(v_f0), inCell(v_f1), inCell(v_f2));
+  vec4 t0 = w.x > 0.0 ? texture(u_octA, cellUV(v_f0)) : vec4(0.0);
+  vec4 t1 = w.y > 0.0 ? texture(u_octA, cellUV(v_f1)) : vec4(0.0);
+  vec4 t2 = w.z > 0.0 ? texture(u_octA, cellUV(v_f2)) : vec4(0.0);
+  float a = t0.a * w.x + t1.a * w.y + t2.a * w.z;
+  if (a < 0.5 * (w.x + w.y + w.z) || a <= 0.0) discard;
+  if (u_dbg == 1) { fragColor = vec4(0.0, 1.0, 1.0, 1.0); return; }
+  vec3 wa = w * vec3(t0.a, t1.a, t2.a) / a;
+  // compressed cut-outs store black in the clear texels, so the filtered colour is premultiplied: divide it out
+  vec3 alb0 = (t0.rgb * w.x + t1.rgb * w.y + t2.rgb * w.z) / a;
+  vec4 n0 = wa.x > 0.0 ? texture(u_octN, cellUV(v_f0)) : vec4(0.5);
+  vec4 n1 = wa.y > 0.0 ? texture(u_octN, cellUV(v_f1)) : vec4(0.5);
+  vec4 n2 = wa.z > 0.0 ? texture(u_octN, cellUV(v_f2)) : vec4(0.5);
+  vec3 nl = normalize(octDec(n0.rg) * wa.x + octDec(n1.rg) * wa.y + octDec(n2.rg) * wa.z);
+  float dep = n0.b * wa.x + n1.b * wa.y + n2.b * wa.z;
+  vec3 wp = v_wpos + v_toCam * (v_R - 2.0 * v_R * dep);  // the leaf's real position: shadows land where they should
+  float shT = farI ? envLight(wp) : shadowAt(wp, vec3(0.0, 1.0, 0.0));
+  vec3 n = normalize(vec3(v_rot.x * nl.x + v_rot.y * nl.z, nl.y, -v_rot.y * nl.x + v_rot.x * nl.z));
+  n = normalize(mix(n, vec3(0.0, 1.0, 0.0), 0.6));
+  vec3 alb = alb0 * alb0;
+  float sh = mix(mix(0.42, 0.9, shT) * mix(0.75, 1.0, smoothstep(0.08, 0.45, u_sunDir.y)), 0.62, 0.8);
+  vec3 lit = lambert(alb, n, sh);
+  {
+    vec3 V = normalize(u_camPos - wp);
+    float through = pow(max(dot(-V, u_sunDir.xyz), 0.0), 4.0) * smoothstep(-0.02, 0.15, u_sunDir.y);
+    lit += alb * vec3(1.05, 1.15, 0.6) * u_sunCol.rgb * through * 0.35;
+  }
+  vec3 c = outColor(lit);
+  c = mix(c, fogTint(wp), mix(fogObject(wp, v_depth), fogGround(wp, v_depth), smoothstep(60.0, 160.0, v_depth)));
   fragColor = vec4(c, 1.0);
 }
 )";
@@ -1005,11 +1344,141 @@ void captureImpostors(int only = -1, bool mips = true, int vFrom = 0, int vTo = 
     glGenerateMipmap(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, g_impNrm);
     glGenerateMipmap(GL_TEXTURE_2D);
+    if (only >= 0) compressImpRow(only, true);
+    else for (int r = 0; r < t; r++) compressImpRow(r);
   }
   glBindFramebuffer(GL_FRAMEBUFFER, prevFbo);
   glViewport(vp[0], vp[1], vp[2], vp[3]);
   if (only < 0) g_impSig = seasonSig();
   g_impTypes = t;
+  // octahedral impostors: off by default. On a Quadro P600 they cost ~2x the old pictures per pixel (3 views
+  // blended instead of 2), warped while walking up to them and made loading / season changes heavier
+  if (g_octWanted) captureOct(only, mips, vFrom * 4, vTo * 4);
+}
+
+void captureOct(int only, bool mips, int vFrom, int vTo) {
+  if (!g_octFbo) {
+    // one type at a time is rendered into a scratch target (13 MB) and then stored into its array layer, so the
+    // big uncompressed array never has to exist
+    g_octLayers = g_impRows;
+    auto mk = [](GLuint& tex) {
+      glGenTextures(1, &tex);
+      glBindTexture(GL_TEXTURE_2D, tex);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, OCT_S, OCT_S, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      gfx::addBufferBytes((long long)OCT_S * OCT_S * 4);
+    };
+    mk(g_octTex);
+    mk(g_octNrm);
+    glGenRenderbuffers(1, &g_octDepth);
+    glBindRenderbuffer(GL_RENDERBUFFER, g_octDepth);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, OCT_S, OCT_S);
+    glGenFramebuffers(1, &g_octFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_octFbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_octTex, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, g_octNrm, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, g_octDepth);
+    const GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+    glDrawBuffers(2, bufs);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+      glBindFramebuffer(GL_FRAMEBUFFER, 0);
+      glDeleteFramebuffers(1, &g_octFbo); g_octFbo = 0;
+      return;
+    }
+  }
+  GLint vp[4], prevFbo = 0;
+  glGetIntegerv(GL_VIEWPORT, vp);
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, g_octFbo);
+  const GLfloat cc0[4] = {0, 0, 0, 0}, cc1[4] = {0.5f, 0.5f, 0.5f, 0};  // black clear: colour filters premultiplied
+  glEnable(GL_DEPTH_TEST);
+  glDepthMask(GL_TRUE);
+  glDisable(GL_BLEND);
+  glDisable(GL_CULL_FACE);
+  glEnable(GL_SCISSOR_TEST);
+  FrameUBO saved = render::frame;
+  render::frame.season2[3] = 0;
+  const char* dump = std::getenv("HW_OCTDUMP");
+  int t = 0;
+  for (auto& sp : g_slots) {
+    if (only < 0) platform::pumpLoad();
+    if (sp->layer == L_GRASS || sp->parts.empty() || t >= g_octLayers) continue;
+    if (only >= 0 && t != only) { t++; continue; }
+    Vec3 mn{1e9f, 1e9f, 1e9f}, mx{-1e9f, -1e9f, -1e9f};
+    for (auto& p : sp->parts) {
+      mn = {std::min(mn.x, p.mesh->bmin.x), std::min(mn.y, p.mesh->bmin.y), std::min(mn.z, p.mesh->bmin.z)};
+      mx = {std::max(mx.x, p.mesh->bmax.x), std::max(mx.y, p.mesh->bmax.y), std::max(mx.z, p.mesh->bmax.z)};
+    }
+    // bounding sphere around the vertical axis (instances rotate about it)
+    float rxz = std::max(std::max(std::fabs(mn.x), std::fabs(mx.x)), std::max(std::fabs(mn.z), std::fabs(mx.z)));
+    float cy = (mn.y + mx.y) * 0.5f, hh = (mx.y - mn.y) * 0.5f;
+    float rr = rxz * 1.1f;  // the box corner can hold leaves a little farther out than either axis
+    float R = std::sqrt(rr * rr + hh * hh) * 1.01f;
+    sp->octCy = cy - mn.y;
+    sp->octR = R;
+    if (only < 0) {
+      glViewport(0, 0, OCT_S, OCT_S);
+      glScissor(0, 0, OCT_S, OCT_S);
+      glClearBufferfv(GL_COLOR, 0, cc0); glClearBufferfv(GL_COLOR, 1, cc1); glClear(GL_DEPTH_BUFFER_BIT);
+    }
+    Vec3 c{0, cy, 0};
+    int v0 = only < 0 ? 0 : vFrom, v1 = only < 0 ? OCT_K * OCT_K : std::min(vTo, OCT_K * OCT_K);
+    for (int v = v0; v < v1; v++) {
+      int ci = v % OCT_K, cj = v / OCT_K;
+      Vec3 d = octDecode(ci / (float)(OCT_K - 1), cj / (float)(OCT_K - 1));
+      Vec3 up = std::fabs(d.y) > 0.999f ? Vec3(0, 0, -1) : Vec3(0, 1, 0);
+      Vec3 eye = c + d * 60.0f;
+      Mat4 view = Mat4::lookAt(eye, c, up);
+      Mat4 proj = Mat4::ortho(-R, R, -R, R, 60.0f - R, 60.0f + R);
+      Mat4 vpM = proj * view;
+      std::memcpy(render::frame.view, view.m, 64);
+      std::memcpy(render::frame.proj, proj.m, 64);
+      std::memcpy(render::frame.viewProj, vpM.m, 64);
+      render::frame.cam[0] = eye.x; render::frame.cam[1] = eye.y; render::frame.cam[2] = eye.z;
+      render::uploadFrame();
+      glViewport(ci * OCT_C, cj * OCT_C, OCT_C, OCT_C);
+      glScissor(ci * OCT_C, cj * OCT_C, OCT_C, OCT_C);
+      if (only >= 0) { glClearBufferfv(GL_COLOR, 0, cc0); glClearBufferfv(GL_COLOR, 1, cc1); glClear(GL_DEPTH_BUFFER_BIT); }
+      for (auto& p : sp->parts) {
+        Shader& s = render::objectFor(p.mat, IM_NONE, OF_CAPTURE);
+        s.set1f("u_octCap", 1.0f);
+        render::setModel(s, Mat4());
+        p.mesh->draw();
+        s.set1f("u_octCap", 0.0f);
+      }
+    }
+    if (only < 0 || mips) {  // whole type captured: store it (full capture: before the next type reuses the scratch)
+      glDisable(GL_SCISSOR_TEST);
+      storeOctLayer(t);
+      if (dump) {
+        std::vector<uint8_t> px((size_t)OCT_S * OCT_S * 4), rgb((size_t)OCT_S * OCT_S * 3);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, g_octFbo);
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glReadPixels(0, 0, OCT_S, OCT_S, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+        for (int y = 0; y < OCT_S; y++)
+          for (int x = 0; x < OCT_S; x++)
+            for (int k = 0; k < 3; k++) {
+              const uint8_t* q = &px[((size_t)(OCT_S - 1 - y) * OCT_S + x) * 4];
+              rgb[((size_t)y * OCT_S + x) * 3 + k] = q[3] ? q[k] : (uint8_t)(k == 2 ? 255 : 0);
+            }
+        std::string name = sp->file;
+        for (auto& ch : name) if (ch == '/' || ch == '\\' || ch == ':') ch = '_';
+        char fn[512];
+        std::snprintf(fn, sizeof fn, "%s/oct%02d_%s.png", dump, t, name.c_str());
+        ::hwWritePng(fn, OCT_S, OCT_S, rgb.data());
+      }
+      glBindFramebuffer(GL_FRAMEBUFFER, g_octFbo);
+      glEnable(GL_SCISSOR_TEST);
+    }
+    t++;
+  }
+  glDisable(GL_SCISSOR_TEST);
+  render::frame = saved;
+  render::uploadFrame();
+  if (only < 0 || g_octReady) { g_octReady = true; g_treeBand = 10.0f; g_impMergeDirty = true; }
+  glBindFramebuffer(GL_FRAMEBUFFER, prevFbo);
+  glViewport(vp[0], vp[1], vp[2], vp[3]);
 }
 
 
@@ -1284,6 +1753,7 @@ static bool g_jumped = false;
 void seasonJumped() { g_jumped = true; }
 
 void update(const Vec3& cam, const Vec3& fwd) {
+  pollImpRowJobs();
   if (g_jumped && g_impSig >= 0) {
     g_jumped = false;
     g_capNext = -1;
@@ -1295,9 +1765,12 @@ void update(const Vec3& cam, const Vec3& fwd) {
     if (g_impFbo) { g_impReady = true; g_dirty = true; }
   } else if (g_capNext >= 0) {
     if ((render::frameNo % 3) == 0) {  // season impostor recapture: one slice every 3rd frame (never restart mid-way)
-      int type = g_capNext / 4, part = g_capNext % 4;
-      bool last = type + 1 >= g_impTypes && part == 3;
-      captureImpostors(type, last, part * 4, part * 4 + 4);
+      // NP slices per type: small, even frame cost. Each type's mips and compressed copy are refreshed when its
+      // last slice is done (before, only the very last type's compressed copy was ever refreshed)
+      const int NP = g_octWanted ? 8 : 4, VW = 16 / NP;
+      int type = g_capNext / NP, part = g_capNext % NP;
+      bool last = type + 1 >= g_impTypes && part == NP - 1;
+      captureImpostors(type, part == NP - 1, part * VW, part * VW + VW);
       g_capNext++;
       if (last) { g_impSig = g_capSig; g_capNext = -1; }
     }
@@ -1343,6 +1816,225 @@ void update(const Vec3& cam, const Vec3& fwd) {
   cullVisible();
 }
 
+// ---- GPU-driven culling (OpenGL 4.3): the CPU still picks the nearby chunks, then a compute shader tests every
+// tree in them against this frame's view frustum and the Hi-Z depth of an earlier frame, writes the survivors
+// (keeping their near-to-far order) into a second instance buffer and the count straight into indirect draw
+// commands. No per-tree CPU work, no upload when the camera only turns, and trees hidden behind a hill or a
+// closer crown inside a visible chunk are no longer drawn.
+const char* CULL_CS = R"(
+layout(local_size_x = 256) in;
+struct Inst { float x, y, z, s, yaw; };
+layout(std430, binding = 0) readonly buffer InB { Inst inst[]; };
+layout(std430, binding = 1) writeonly buffer OutB { Inst outI[]; };
+layout(std430, binding = 2) buffer CmdB { uint cmd[]; };
+uniform uint u_n;
+uniform uint u_cmd0;   // first command (5 uints each) of this batch
+uniform uint u_ncmd;
+uniform vec4 u_planes[6];
+uniform vec2 u_sph;    // bounding sphere: centre height above the base, radius (model units)
+uniform int u_hzOn;
+uniform mat4 u_hzVP;
+uniform vec3 u_hzCam;
+uniform ivec2 u_hzSize;
+uniform sampler2D u_hz;
+shared uint sCount[256];
+bool visible(Inst t){
+  vec3 c = vec3(t.x, t.y + u_sph.x * t.s, t.z);
+  float r = u_sph.y * t.s;
+  for (int k = 0; k < 6; k++) if (dot(u_planes[k].xyz, c) + u_planes[k].w < -r) return false;
+  if (u_hzOn == 0) return true;
+  vec3 mn = c - vec3(r), mx = c + vec3(r);
+  vec3 dd = max(vec3(0.0), max(mn - u_hzCam, u_hzCam - mx));
+  float nearD = length(dd);
+  if (nearD < 6.0) return true;
+  vec2 lo = vec2(1e9), hi = vec2(-1e9);
+  for (int k = 0; k < 8; k++) {
+    vec3 p = vec3((k & 1) != 0 ? mx.x : mn.x, (k & 2) != 0 ? mx.y : mn.y, (k & 4) != 0 ? mx.z : mn.z);
+    vec4 q = u_hzVP * vec4(p, 1.0);
+    if (q.w <= 0.1) return true;
+    vec2 sp = q.xy / q.w;
+    lo = min(lo, sp); hi = max(hi, sp);
+  }
+  if (any(lessThan(lo, vec2(-1.0))) || any(greaterThan(hi, vec2(1.0)))) return true;  // (partly) off-screen then: no data
+  ivec2 t0 = max(ivec2(0), ivec2((lo * 0.5 + 0.5) * vec2(u_hzSize)) - 1);
+  ivec2 t1 = min(u_hzSize - 1, ivec2((hi * 0.5 + 0.5) * vec2(u_hzSize)) + 1);
+  ivec2 ext = t1 - t0 + 1;
+  if (ext.x * ext.y > 96) return true;  // big on screen: not worth the risk (or the reads)
+  float far = 0.0;
+  for (int y = t0.y; y <= t1.y; y++)
+    for (int x = t0.x; x <= t1.x; x++) far = max(far, texelFetch(u_hz, ivec2(x, y), 0).r);
+  return nearD < far * 1.03 + 1.5;
+}
+void main(){
+  // one workgroup per batch: each thread takes a contiguous run, so the survivors keep the CPU's
+  // near-to-far order (crowns in front fill the depth buffer first)
+  uint tid = gl_LocalInvocationID.x;
+  uint per = (u_n + 255u) / 256u;
+  uint a = tid * per, b = min(a + per, u_n);
+  uint mask = 0u, n = 0u;  // runs are at most 32 long in practice; longer runs re-test in the write loop
+  for (uint i = a; i < b; i++) { bool v = visible(inst[i]); if (v) { n++; if (i - a < 32u) mask |= 1u << (i - a); } }
+  sCount[tid] = n;
+  barrier();
+  // exclusive scan of the 256 counts (Hillis-Steele in place, small enough)
+  for (uint off = 1u; off < 256u; off <<= 1u) {
+    uint add = tid >= off ? sCount[tid - off] : 0u;
+    barrier();
+    sCount[tid] += add;
+    barrier();
+  }
+  uint base = sCount[tid] - n;
+  for (uint i = a; i < b; i++) {
+    bool v = i - a < 32u ? (mask & (1u << (i - a))) != 0u : visible(inst[i]);
+    if (v) outI[base++] = inst[i];
+  }
+  if (tid == 255u) for (uint k = 0u; k < u_ncmd; k++) cmd[(u_cmd0 + k) * 5u + 1u] = sCount[255];
+}
+)";
+struct GpuGroup { GLuint out = 0, src = 0; size_t cap = 0; int cmd0 = -1; int ncmd = 0; float cy = 0, R = 1; std::vector<InstBatch> vaos; };
+std::unordered_map<const InstBatch*, GpuGroup> g_gpu;           // keyed by the batch that owns the instance buffer
+std::unordered_map<const InstBatch*, std::pair<const InstBatch*, int>> g_gpuOf;  // any part's batch -> (owner, part index)
+GLuint g_cullProg = 0, g_cmdBuf = 0;
+int g_cmdUsed = 0, g_cmdCap = 0;
+bool g_gpuOn = false;
+bool gpuCullAvailable() {
+  static int st = -1;
+  if (st < 0) {
+    st = 0;
+    if (gfx::hasCompute() && !std::getenv("HW_NOGPUCULL")) {
+      g_cullProg = gfx::compileCompute(CULL_CS);
+      if (g_cullProg) { st = 1; std::printf("gpu culling: on (OpenGL 4.3 compute)\n"); }
+    }
+  }
+  return st == 1;
+}
+static void gpuCullBatches(int bsel) {  // 0 near batch, 1 mid (lod) batch
+  for (auto& sp : g_slots) {
+    if (sp->parts.empty()) continue;
+    InstBatch PartSlot::*mb = bsel == 0 ? &PartSlot::batch : &PartSlot::lodBatch;
+    InstBatch& owner = sp->parts[0].*mb;
+    if (owner.count <= 0 || !owner.ivbo) continue;
+    GpuGroup& g = g_gpu[&owner];
+    if (g.src != owner.ivbo) {  // new or recycled batch: start over (old command slots are simply left unused)
+      g.cmd0 = -1; g.cap = 0; g.src = owner.ivbo;
+    }
+    if (g.cmd0 < 0) {
+      // first time: bounding sphere of the type, commands for every part sharing this buffer
+      Vec3 mn{1e9f, 1e9f, 1e9f}, mx{-1e9f, -1e9f, -1e9f};
+      for (auto& p : sp->parts) {
+        mn = {std::min(mn.x, p.mesh->bmin.x), std::min(mn.y, p.mesh->bmin.y), std::min(mn.z, p.mesh->bmin.z)};
+        mx = {std::max(mx.x, p.mesh->bmax.x), std::max(mx.y, p.mesh->bmax.y), std::max(mx.z, p.mesh->bmax.z)};
+      }
+      float rxz = std::max(std::max(std::fabs(mn.x), std::fabs(mx.x)), std::max(std::fabs(mn.z), std::fabs(mx.z)));
+      g.cy = (mn.y + mx.y) * 0.5f;
+      g.R = std::sqrt(rxz * rxz + (mx.y - mn.y) * (mx.y - mn.y) * 0.25f) * 1.15f + 0.3f;  // + wind sway
+      int n = 0;
+      for (auto& p : sp->parts) if ((p.*mb).ivbo == owner.ivbo) n++;
+      if (g_cmdUsed + n > g_cmdCap) {
+        // grow the command buffer (keeps old contents)
+        int cap = std::max(256, (g_cmdUsed + n) * 2);
+        GLuint nb = 0;
+        glGenBuffers(1, &nb);
+        glBindBuffer(GL_COPY_WRITE_BUFFER, nb);
+        glBufferData(GL_COPY_WRITE_BUFFER, cap * 20, nullptr, GL_DYNAMIC_DRAW);
+        if (g_cmdBuf) {
+          glBindBuffer(GL_COPY_READ_BUFFER, g_cmdBuf);
+          glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER, 0, 0, g_cmdUsed * 20);
+          glDeleteBuffers(1, &g_cmdBuf);
+        }
+        g_cmdBuf = nb; g_cmdCap = cap;
+      }
+      g.cmd0 = g_cmdUsed; g.ncmd = n; g_cmdUsed += n;
+      glBindBuffer(GL_COPY_WRITE_BUFFER, g_cmdBuf);
+      int k = 0;
+      for (auto& p : sp->parts) {
+        if ((p.*mb).ivbo != owner.ivbo) continue;
+        uint32_t c[5] = {(uint32_t)p.mesh->count, 0, 0, 0, 0};
+        glBufferSubData(GL_COPY_WRITE_BUFFER, (g.cmd0 + k) * 20, 20, c);
+        g_gpuOf[&(p.*mb)] = {&owner, k};
+        k++;
+      }
+    }
+    if (g.cap < owner.capacity) {
+      if (!g.out) glGenBuffers(1, &g.out);
+      glBindBuffer(GL_ARRAY_BUFFER, g.out);
+      glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(owner.capacity * sizeof(InstLite)), nullptr, GL_DYNAMIC_DRAW);
+      gfx::addBufferBytes((long long)((owner.capacity - g.cap) * sizeof(InstLite)));
+      g.cap = owner.capacity;
+      for (auto& v : g.vaos) v.destroy();
+      g.vaos.clear();
+      for (auto& p : sp->parts) {
+        if ((p.*mb).ivbo != owner.ivbo) continue;
+        g.vaos.emplace_back();
+        g.vaos.back().create(p.mesh, InstKind::Lite, g.out);
+      }
+    }
+    glBindBufferBase(gfx::SHADER_STORAGE_BUFFER, 0, owner.ivbo);
+    glBindBufferBase(gfx::SHADER_STORAGE_BUFFER, 1, g.out);
+    static GLint lN = glGetUniformLocation(g_cullProg, "u_n"), lC = glGetUniformLocation(g_cullProg, "u_cmd0"),
+                 lK = glGetUniformLocation(g_cullProg, "u_ncmd"), lS = glGetUniformLocation(g_cullProg, "u_sph");
+    glUniform1ui(lN, (GLuint)owner.count);
+    glUniform1ui(lC, (GLuint)g.cmd0);
+    glUniform1ui(lK, (GLuint)g.ncmd);
+    glUniform2f(lS, g.cy, g.R);
+    gfx::dispatchCompute(1, 1, 1);
+  }
+}
+void gpuCullForest() {
+  g_gpuOn = false;
+  if (!gpuCullAvailable()) return;
+  glUseProgram(g_cullProg);
+  // frustum planes from this frame's camera
+  const float* m = render::cam.viewProj.m;
+  float pl[6][4];
+  for (int i = 0; i < 3; i++)
+    for (int sgn = 0; sgn < 2; sgn++) {
+      float* p = pl[i * 2 + sgn];
+      for (int k = 0; k < 4; k++) p[k] = m[k * 4 + 3] + (sgn ? -1.0f : 1.0f) * m[k * 4 + i];
+      float l = std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+      for (int k = 0; k < 4; k++) p[k] /= std::max(l, 1e-6f);
+    }
+  glUniform4fv(glGetUniformLocation(g_cullProg, "u_planes"), 6, &pl[0][0]);
+  unsigned hz = 0; Mat4 hvp; Vec3 hcam; int hw = 0, hh = 0;
+  bool hzOn = render::hizTexture(hz, hvp, hcam, hw, hh);
+  glUniform1i(glGetUniformLocation(g_cullProg, "u_hzOn"), hzOn ? 1 : 0);
+  glUniformMatrix4fv(glGetUniformLocation(g_cullProg, "u_hzVP"), 1, GL_FALSE, hvp.m);
+  glUniform3f(glGetUniformLocation(g_cullProg, "u_hzCam"), hcam.x, hcam.y, hcam.z);
+  glUniform2i(glGetUniformLocation(g_cullProg, "u_hzSize"), hw, hh);
+  glUniform1i(glGetUniformLocation(g_cullProg, "u_hz"), 31);
+  glActiveTexture(GL_TEXTURE31);
+  glBindTexture(GL_TEXTURE_2D, hzOn ? hz : 0);
+  glActiveTexture(GL_TEXTURE0);
+  if (g_cmdBuf) glBindBufferBase(gfx::SHADER_STORAGE_BUFFER, 2, g_cmdBuf);
+  gpuCullBatches(0);
+  gpuCullBatches(1);
+  if (g_cmdBuf) glBindBufferBase(gfx::SHADER_STORAGE_BUFFER, 2, g_cmdBuf);  // (re)bound after a grow
+  gfx::memoryBarrier(gfx::SHADER_STORAGE_BARRIER | gfx::COMMAND_BARRIER | gfx::VERTEX_ATTRIB_BARRIER);
+  glUseProgram(0);
+  g_gpuOn = g_cmdBuf != 0;
+}
+// draw one part's instances: from the GPU-culled buffer with an indirect command when available
+static void drawBatch(const InstBatch& b) {
+  if (g_gpuOn) {
+    auto it = g_gpuOf.find(&b);
+    if (it != g_gpuOf.end()) {
+      auto gi = g_gpu.find(it->second.first);
+      if (gi != g_gpu.end() && it->second.second < (int)gi->second.vaos.size() && gi->second.cap >= (size_t)b.count &&
+          gi->second.vaos[it->second.second].mesh == b.mesh && gi->second.src == b.ivbo) {
+        const GpuGroup& g = gi->second;
+        glBindVertexArray(g.vaos[it->second.second].vao);
+        glBindBuffer(gfx::DRAW_INDIRECT_BUFFER, g_cmdBuf);
+        const void* off = (const void*)(uintptr_t)((g.cmd0 + it->second.second) * 20);
+        if (b.mesh->ibo) gfx::drawElementsIndirect(GL_TRIANGLES, b.mesh->indexType, off);
+        else gfx::drawArraysIndirect(GL_TRIANGLES, off);
+        glBindBuffer(gfx::DRAW_INDIRECT_BUFFER, 0);
+        gfx::drawCalls++;
+        gfx::triangles += (long long)(b.mesh->count / 3) * b.count;  // upper bound (the real count stays on the GPU)
+        return;
+      }
+    }
+  }
+  b.draw();
+}
 static void drawPart(PartSlot& p, InstBatch& b, int extra, float f0, float f1, float i0, float i1, bool packed) {
   if (b.count <= 0) return;
   Shader* s;
@@ -1353,7 +2045,7 @@ static void drawPart(PartSlot& p, InstBatch& b, int extra, float f0, float f1, f
   s->set1i("u_tier", &b == &p.lodBatch ? 1 : 0);
   s->set2f("u_fade", f0, f1);
   s->set2f("u_fadeIn", i0, i1);
-  b.draw();
+  drawBatch(b);
   s->set2f("u_fade", 0, 0);
   s->set2f("u_fadeIn", 0, 0);
   s->set1f("u_packed", 0);
@@ -1365,14 +2057,25 @@ float detailLevel() { return effScale(); }
 int (*profOpen)(const char*) = nullptr;
 void (*profClose)(int) = nullptr;
 static const char* LAYER_PROF[2][4] = {{"forest.grass", "forest.under", "forest.rock", "forest.tree"}, {"forest.grassLod", "forest.underLod", "forest.rockLod", "forest.treeLod"}};
-struct PrepassTuner {
+// Picks the fastest way to draw the forest on this GPU by timing them: leaves forward / forward with a depth
+// pre-pass / shade-once (deferred), each with CPU or GPU-side culling. What is fastest depends on the card
+// (a bandwidth-starved laptop GPU can lose with the G-buffer or the compute pass), so it is measured, not assumed.
+struct ForestTuner {
+  static const int NM = 6;  // mode = shade (0 forward, 1 forward + pre-pass, 2 shade-once) + 3 * gpu culling
   GLuint q[4][2] = {};
-  bool mode[4] = {};
+  int qmode[4] = {};
   bool valid[4] = {};
-  int idx = 0;
-  bool on = true, testing = false;
-  double frameT = 0, avgOn = -1, avgOff = -1;
-  int frames = 0;
+  int idx = 0, frames = 0, cur = 0, testIdx = 0;
+  double avg[NM] = {-1, -1, -1, -1, -1, -1};
+  int shade() const { return cur % 3; }
+  bool gpu() const { return cur >= 3; }
+  bool allowed(int m) const {
+    int sh = m % 3;
+    if (m >= 3 && !gpuCullAvailable()) return false;
+    if (g_settings.leafPrepass == 0) return sh == 0;
+    if (g_settings.leafPrepass == 1) return sh == 1;
+    return !(sh == 2 && std::getenv("HW_NODEFER"));
+  }
   void begin() {
     if (!q[0][0]) for (auto& a : q) glGenQueries(2, a);
     int r = (idx + 1) % 4;
@@ -1384,20 +2087,31 @@ struct PrepassTuner {
         glGetQueryObjectui64v(q[r][0], GL_QUERY_RESULT, &a);
         glGetQueryObjectui64v(q[r][1], GL_QUERY_RESULT, &b);
         double ms = (b - a) / 1e6;
-        double& avg = mode[r] ? avgOn : avgOff;
-        avg = avg < 0 ? ms : avg * 0.9 + ms * 0.1;
+        double& v = avg[qmode[r]];
+        v = v < 0 ? ms : v * 0.85 + ms * 0.15;
       }
       valid[r] = false;
     }
     frames++;
-    int period = 600, test = 45;
-    int ph = frames % period;
-    bool best = avgOff < 0 || avgOn < 0 ? (ph < period / 2) : avgOn <= avgOff;
-    testing = ph >= period - test;
-    on = testing ? !best : best;
-    if (avgOff < 0 && frames > 60 && frames < 120) on = false;
-    if (const char* f = std::getenv("HW_PREPASS")) on = f[0] == '1';
-    mode[idx] = on;
+    const int warm = 60, slot = 40, period = 600;
+    int best = -1;
+    for (int m = 0; m < NM; m++) if (allowed(m) && avg[m] >= 0 && (best < 0 || avg[m] < avg[best])) best = m;
+    int untested = -1;
+    for (int m = 0; m < NM && untested < 0; m++) if (allowed(m) && avg[m] < 0) untested = m;
+    if (frames < warm) cur = allowed(0) ? 0 : (allowed(1) ? 1 : 3);
+    else if (untested >= 0) cur = untested;  // first pass: try every allowed way once (~40 frames each)
+    else {
+      int ph = frames % period;
+      if (ph == period - slot) {  // now and then re-time one of the others: the scene and load change
+        for (int k = 1; k <= NM; k++) { int m = (testIdx + k) % NM; if (allowed(m) && m != best) { testIdx = m; break; } }
+      }
+      cur = ph >= period - slot && allowed(testIdx) && testIdx != best ? testIdx : best;
+    }
+    if (const char* f = std::getenv("HW_FMODE")) cur = std::atoi(f) % NM;
+    if (!allowed(cur)) cur = allowed(0) ? 0 : 1;
+    if (std::getenv("HW_FTUNE") && frames % 120 == 0)
+      std::printf("forest modes ms: %.2f %.2f %.2f | gpu %.2f %.2f %.2f -> %d\n", avg[0], avg[1], avg[2], avg[3], avg[4], avg[5], cur);
+    qmode[idx] = cur;
     glQueryCounter(q[idx][0], GL_TIMESTAMP);
   }
   void end() {
@@ -1407,14 +2121,160 @@ struct PrepassTuner {
   }
 } g_tuner;
 
+// ---- shade-once foliage (deferred leaves): leaf cards write only their albedo, normal and AO into a small
+// G-buffer (cheap per layer of overdraw), then one full-screen pass lights each visible leaf pixel exactly once.
+// Replaces the leaf depth pre-pass, which drew every leaf twice to get the same effect.
+const char* LEAFLIGHT_FS = R"(
+in vec2 v_uv;
+uniform sampler2D u_gA, u_gB, u_gD;
+uniform mat4 u_invVP;
+out vec4 fragColor;
+vec3 octDec(vec2 e){ e = e * 2.0 - 1.0; vec3 n = vec3(e.x, 1.0 - abs(e.x) - abs(e.y), e.y); if (n.y < 0.0) n.xz = (1.0 - abs(n.zx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.z >= 0.0 ? 1.0 : -1.0); return normalize(n); }
+void main(){
+  ivec2 px = ivec2(gl_FragCoord.xy);
+  vec4 a = texelFetch(u_gA, px, 0);
+  if (a.a < 0.25) discard;
+  vec4 b = texelFetch(u_gB, px, 0);
+  float z = texelFetch(u_gD, px, 0).r;
+  vec4 w = u_invVP * vec4(v_uv * 2.0 - 1.0, z * 2.0 - 1.0, 1.0);
+  vec3 wp = w.xyz / w.w;
+  float depth = -(u_view * vec4(wp, 1.0)).z;
+  vec3 sc = a.rgb * a.rgb;
+  float recv = clamp(a.a * 2.0 - 1.0, 0.0, 1.0);
+  vec3 n = octDec(b.rg);
+  float ao = b.b, edgeOn = b.a;
+  float leafFar = smoothstep(8.0, 28.0, depth);
+  float sh = leafFar > 0.99 ? mix(1.0, envLight(wp), recv) : mix(1.0, shadowAtK(wp, n, true), recv);
+  g_envVis *= ao;
+  sh *= mix(1.0, ao, 0.55);
+  sh = mix(0.42, 0.9, sh) * mix(0.75, 1.0, smoothstep(0.08, 0.45, u_sunDir.y));
+  sh = mix(sh, 0.62, 0.85 * max(leafFar, edgeOn));
+  vec3 lit = lambert(sc, n, sh);
+  float thru = pow(max(dot(-normalize(u_camPos - wp), u_sunDir.xyz), 0.0), 4.0) * smoothstep(-0.02, 0.15, u_sunDir.y);
+  lit += sc * vec3(1.05, 1.15, 0.6) * u_sunCol.rgb * thru * mix(0.25, 0.75, sh) * 0.55;
+  vec3 c = outColor(lit);
+  c = mix(c, fogTint(wp), fogObject(wp, depth));
+  fragColor = vec4(c, 1.0);
+}
+)";
+struct LeafGBuf { GLuint fbo = 0, lfbo = 0, gA = 0, gB = 0; int w = 0, h = 0; GLint sceneFbo = 0; GLuint color = 0, depth = 0, vel = 0; } g_lg;
+// switches drawing to the leaf G-buffer; false when the current target cannot take it (MSAA, screen)
+bool leafDeferBegin() {
+  if (std::getenv("HW_NODEFER") || render::dbgMode) return false;
+  GLint fb = 0;
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fb);
+  if (!fb) return false;
+  GLint tc = 0, td = 0, nc = 0, nd = 0, tv = 0, nv = 0;
+  glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &tc);
+  glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &td);
+  if (tc != GL_TEXTURE || td != GL_TEXTURE) return false;
+  glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &nc);
+  glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &nd);
+  if (render::velocityPass) {
+    glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &tv);
+    if (tv == GL_TEXTURE) glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &nv);
+  }
+  GLint w = 0, h = 0;
+  glBindTexture(GL_TEXTURE_2D, (GLuint)nd);
+  glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &w);
+  glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &h);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  if (w <= 0 || h <= 0) return false;
+  if (w != g_lg.w || h != g_lg.h || !g_lg.fbo) {
+    auto mk = [&](GLuint& t) {
+      if (t) glDeleteTextures(1, &t);
+      glGenTextures(1, &t);
+      glBindTexture(GL_TEXTURE_2D, t);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    };
+    mk(g_lg.gA); mk(g_lg.gB);
+    if (!g_lg.fbo) { glGenFramebuffers(1, &g_lg.fbo); glGenFramebuffers(1, &g_lg.lfbo); }
+    g_lg.w = w; g_lg.h = h;
+  }
+  g_lg.sceneFbo = fb; g_lg.color = (GLuint)nc; g_lg.depth = (GLuint)nd; g_lg.vel = (GLuint)nv;
+  glBindFramebuffer(GL_FRAMEBUFFER, g_lg.fbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_lg.gA, 0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, g_lg.gB, 0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, g_lg.vel, 0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, g_lg.depth, 0);
+  const GLenum bufs[4] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_NONE, GL_COLOR_ATTACHMENT2};
+  glDrawBuffers(g_lg.vel ? 4 : 2, bufs);
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { glBindFramebuffer(GL_FRAMEBUFFER, fb); return false; }
+  const float z[4] = {0, 0, 0, 0};
+  glClearBufferfv(GL_COLOR, 0, z);
+  return true;
+}
+void leafDeferEnd() {
+  // light the leaf pixels into the scene colour (a target without depth: the depth texture is read here)
+  glBindFramebuffer(GL_FRAMEBUFFER, g_lg.lfbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_lg.color, 0);
+  { const GLenum b0 = GL_COLOR_ATTACHMENT0; glDrawBuffers(1, &b0); }
+  GLboolean dt = glIsEnabled(GL_DEPTH_TEST);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  static const char* VS = "out vec2 v_uv;\nvoid main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); v_uv = p; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }\n";
+  Shader& sh = render::program("leaflight", VS, LEAFLIGHT_FS);
+  glActiveTexture(GL_TEXTURE27); glBindTexture(GL_TEXTURE_2D, g_lg.gA);
+  glActiveTexture(GL_TEXTURE28); glBindTexture(GL_TEXTURE_2D, g_lg.gB);
+  glActiveTexture(GL_TEXTURE29); glBindTexture(GL_TEXTURE_2D, g_lg.depth);
+  glActiveTexture(GL_TEXTURE0);
+  sh.set1i("u_gA", 27); sh.set1i("u_gB", 28); sh.set1i("u_gD", 29);
+  Mat4 inv = render::cam.viewProj.inverse();
+  sh.setMat4("u_invVP", inv);
+  render::drawFullscreen();
+  glActiveTexture(GL_TEXTURE29); glBindTexture(GL_TEXTURE_2D, 0);
+  glActiveTexture(GL_TEXTURE0);
+  glDepthMask(GL_TRUE);
+  if (dt) glEnable(GL_DEPTH_TEST);
+  glBindFramebuffer(GL_FRAMEBUFFER, g_lg.sceneFbo);
+}
+
 void drawOpaque() {
   glDisable(GL_CULL_FACE);
   bool imp = g_impReady;
   g_tuner.begin();
+  if (g_tuner.gpu()) gpuCullForest();
+  else g_gpuOn = false;
   // leaf depth prepass: kills overdraw of stacked cards. The prepass depth is pushed back a hair (polygon offset)
   // so the colour pass always passes LEQUAL on the same surface: that mismatch was the old speckle source.
   // The tuner times frames with and without it and keeps whichever is faster on this GPU.
-  bool pre = std::getenv("HW_PRE") != nullptr;  // off: still speckles on NVIDIA even with offset
+  // pre-pass mode from the options (auto: the tuner times both ways on this GPU and keeps the faster one)
+  bool pre = g_tuner.shade() == 1;
+  if (const char* e = std::getenv("HW_PRE")) pre = e[0] == '1';
+  // shade-once leaves: the G-buffer pass does what the pre-pass did (each leaf pixel lit once), in one geometry pass
+  bool defer = g_tuner.shade() == 2 && leafDeferBegin();
+  if (defer) {
+    pre = false;
+    glDepthFunc(GL_LEQUAL);
+    for (auto& s : g_slots) {
+      if (s->layer == L_UNDER && std::getenv("HW_NOUNDER")) continue;
+      LodCfg lc = lodFor(s->layer);
+      bool packed = s->layer == L_UNDER;
+      bool useImp = imp && s->imp >= 0;
+      for (auto& p : s->parts) {
+        if (!p.mat.cutout || p.proc) continue;
+        float R = LAYERS[s->layer].radius();
+        int li = s->layer < 4 ? s->layer : 3;
+        int pi = profOpen ? profOpen(LAYER_PROF[0][li]) : -1;
+        if (!useImp) drawPart(p, p.batch, OF_DEFERRED, R * 0.84f, R, 0, 0, packed);
+        else if (s->hasLod) drawPart(p, p.batch, OF_DEFERRED, lc.mid, lc.mid + MID_BAND, 0, 0, packed);
+        else drawPart(p, p.batch, OF_DEFERRED, lc.imp, lc.imp + impBand(s->layer), 0, 0, packed);
+        if (profClose) profClose(pi);
+        if (useImp && s->hasLod) {
+          pi = profOpen ? profOpen(LAYER_PROF[1][li]) : -1;
+          drawPart(p, p.lodBatch, OF_DEFERRED, lc.imp, lc.imp + impBand(s->layer), lc.mid, lc.mid + MID_BAND, packed);
+          if (profClose) profClose(pi);
+        }
+      }
+    }
+    int pl = profOpen ? profOpen("forest.leafLight") : -1;
+    leafDeferEnd();
+    if (profClose) profClose(pl);
+    glDepthFunc(GL_LESS);
+  }
   int pD = profOpen ? profOpen("forest.depthPre") : -1;
   glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
   if (pre) { glEnable(GL_POLYGON_OFFSET_FILL); glPolygonOffset(1.5f, 12.0f); }
@@ -1429,7 +2289,7 @@ void drawOpaque() {
       float R = LAYERS[s->layer].radius();
       if (!useImp) drawPart(p, p.batch, OF_DEPTH, R * 0.84f, R, 0, 0, packed);
       else if (s->hasLod) drawPart(p, p.batch, OF_DEPTH, lc.mid, lc.mid + MID_BAND, 0, 0, packed);
-      else drawPart(p, p.batch, OF_DEPTH, lc.imp, lc.imp + IMP_BAND, 0, 0, packed);
+      else drawPart(p, p.batch, OF_DEPTH, lc.imp, lc.imp + impBand(s->layer), 0, 0, packed);
     }
   }
   glDisable(GL_POLYGON_OFFSET_FILL);
@@ -1444,16 +2304,17 @@ void drawOpaque() {
     bool useImp = imp && s->imp >= 0;
     long long t0_ = gfx::triangles;
     for (auto& p : s->parts) {
+      if (defer && p.mat.cutout && !p.proc) continue;  // already drawn and lit by the shade-once pass
       float R = LAYERS[s->layer].radius();
       int li = s->layer < 4 ? s->layer : 3;
       int pi = profOpen ? profOpen(LAYER_PROF[0][li]) : -1;
       if (!useImp) drawPart(p, p.batch, 0, R * 0.84f, R, 0, 0, packed);
       else if (s->hasLod) drawPart(p, p.batch, 0, lc.mid, lc.mid + MID_BAND, 0, 0, packed);
-      else drawPart(p, p.batch, 0, lc.imp, lc.imp + IMP_BAND, 0, 0, packed);
+      else drawPart(p, p.batch, 0, lc.imp, lc.imp + impBand(s->layer), 0, 0, packed);
       if (profClose) profClose(pi);
       if (useImp && s->hasLod) {
         pi = profOpen ? profOpen(LAYER_PROF[1][li]) : -1;
-        drawPart(p, p.lodBatch, 0, lc.imp, lc.imp + IMP_BAND, lc.mid, lc.mid + MID_BAND, packed);
+        drawPart(p, p.lodBatch, 0, lc.imp, lc.imp + impBand(s->layer), lc.mid, lc.mid + MID_BAND, packed);
         if (profClose) profClose(pi);
       }
     }
@@ -1463,19 +2324,39 @@ void drawOpaque() {
   g_tuner.end();
   int pImp = profOpen ? profOpen("forest.impostor") : -1;
   if (imp) {
-    Shader& sh = render::program("impostor", IMP_VS, IMP_FS);
-    sh.set1i("u_atlas", 0);
-    sh.set1i("u_nrm", 5);
-    glActiveTexture(GL_TEXTURE5);
-    glBindTexture(GL_TEXTURE_2D, g_impNrm);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, g_impTex);
+    bool oct = g_octReady && g_octTexC && !std::getenv("HW_NOOCT");
+    Shader& sh = oct ? render::program("impostorOct", OCT_VS, OCT_FS) : render::program("impostor", IMP_VS, IMP_FS);
+    if (oct) {
+      sh.set1i("u_octA", 0);
+      sh.set1i("u_octN", 5);
+      glActiveTexture(GL_TEXTURE5);
+      glBindTexture(GL_TEXTURE_2D_ARRAY, g_octNrmC);
+      glActiveTexture(GL_TEXTURE0);
+      glBindTexture(GL_TEXTURE_2D_ARRAY, g_octTexC);
+      float o[32 * 4] = {};
+      for (auto& sp : g_slots)
+        if (sp->imp >= 0 && sp->imp < 32) { float* q = o + sp->imp * 4; q[0] = sp->octCy; q[1] = sp->octR; q[2] = 1.0f / std::max(1e-3f, sp->impW); }
+      glUniform4fv(sh.loc("u_oct"), 32, o);
+    } else {
+      sh.set1i("u_atlas", 0);
+      sh.set1i("u_nrm", 5);
+      glActiveTexture(GL_TEXTURE5);
+      glBindTexture(GL_TEXTURE_2D, g_impNrmC ? g_impNrmC : g_impNrm);
+      glActiveTexture(GL_TEXTURE0);
+      glBindTexture(GL_TEXTURE_2D, g_impTexC ? g_impTexC : g_impTex);
+    }
     for (int L = 0; L < 4; L++) {
       if (g_impAll[L].count <= 0) continue;
       LodCfg lc = lodFor(L);
       float cn = canopyNear();
-      float ib = render::dbgMode == 2 ? 0.01f : IMP_BAND, i0 = render::dbgMode == 2 ? lc.imp + IMP_BAND * 0.5f : lc.imp;
+      float ib = render::dbgMode == 2 ? 0.01f : impBand(L), i0 = render::dbgMode == 2 ? lc.imp + impBand(L) * 0.5f : lc.imp;
       sh.set1i("u_dbg", render::dbgMode);
+      {
+        static float g[3] = {1.75f, 1.9f, 1.15f};
+        static bool rd = false;
+        if (!rd) { rd = true; if (const char* e = std::getenv("HW_IMPGAIN")) std::sscanf(e, "%f,%f,%f", &g[0], &g[1], &g[2]); }
+        if (!oct) { if (L == L_TREE) sh.set3f("u_impGain", g[0], g[1], g[2]); else sh.set3f("u_impGain", 1.05f, 1.05f, 1.05f); }
+      }
       if (lc.canopy) sh.set4f("u_range", i0, i0 + ib, cn, cn + CANOPY_BAND);
       else sh.set4f("u_range", i0, i0 + ib, lc.outer * 0.85f, lc.outer);
       sh.set4f("u_cell", 0, 0, 0, (float)g_impRows);
@@ -1711,6 +2592,8 @@ bool obstacleAt(float x, float z, float r) {
   resolveTreeCollision(tx, tz, r);  // same footprints as collision: trunks, rocks, stumps and log capsules
   return std::fabs(tx - x) + std::fabs(tz - z) > 0.01f;
 }
+
+bool horizonVisible(const Vec3& mn, const Vec3& mx) { return horizonVisibleImpl(mn, mx); }
 
 void nearTrees(float x, float z, float r, std::vector<float>& out, int max) {
   struct N { float d; Item it; };

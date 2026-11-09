@@ -24,6 +24,7 @@
 #include <unordered_map>
 #include <cmath>
 #include <string>
+#include <chrono>
 
 namespace {
 
@@ -34,12 +35,14 @@ layout(location=7) in vec4 a_b1;
 uniform sampler2D u_bake;
 uniform vec4 u_grid;
 uniform vec4 u_ring;
+uniform float u_ringIn;  // fade width at the inner edge (= the previous ring's outer fade, so the two cross-fade exactly)
 uniform vec4 u_blade;
 uniform vec4 u_tramp[8];
 out vec3 v_col;
 out vec3 v_uv;   // grass atlas uv (+ kind)
 out vec4 v_fog;  // fog colour, amount (applied after the texture)
 uniform float u_texOn;
+uniform float u_tuft;  // far ring: untextured 3-blade tufts (9 vertices, starting at vertex 21)
 uniform sampler2D u_waterLv;  // envmap water surface map (unit 21): r = surface height, g = lake/river mask
 void kill(){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); v_col = vec3(0.0); v_uv = vec3(0.0); v_fog = vec4(0.0); }
 void main(){
@@ -47,11 +50,15 @@ void main(){
   vec2 p = a_b0.xz;
   float d = distance(p, u_camPos.xz);
   float fade = u_ring.w;
-  if (d > u_ring.z || d < u_ring.y - fade) { kill(); return; }
+  if (d > u_ring.z || d < u_ring.y - u_ringIn) { kill(); return; }
   if (h.z > a_b0.w * u_blade.z) { kill(); return; }
   // ring edges thin out blade by blade (dithered) instead of shrinking them, so nothing visibly grows as you walk
-  float ringK = (1.0 - smoothstep(u_ring.z - fade, u_ring.z, d)) * (u_ring.y > 0.0 ? smoothstep(u_ring.y - fade, u_ring.y, d) : 1.0);
-  if (fract(h.x * 17.31 + h.z * 5.77 + h.w * 3.3) > ringK) { kill(); return; }
+  float ringK = (1.0 - smoothstep(u_ring.z - fade, u_ring.z, d)) * (u_ring.y > 0.0 ? smoothstep(u_ring.y - u_ringIn, u_ring.y, d) : 1.0);
+  float thr = fract(h.x * 17.31 + h.z * 5.77 + h.w * 3.3);
+  if (thr > ringK) { kill(); return; }
+  // each blade then rises out of the ground over the next few metres instead of appearing at full height
+  float emerge = clamp((ringK - thr) / max(1.0 - thr, 1e-3) * 3.0, 0.0, 1.0);
+  emerge = emerge * emerge * (3.0 - 2.0 * emerge);
   vec2 wv = textureLod(u_waterLv, envUV(p), 0.0).rg;
   if (wv.g > 0.3 && wv.r > a_b0.y - 0.05) { kill(); return; }  // nothing grows under lake or river water
   float grow = 1.0 - 0.65 * u_snow;
@@ -67,13 +74,23 @@ void main(){
   vec2 side = vec2(cos(ang), sin(ang));
   vec2 face = vec2(-side.y, side.x);
   float H = mix(0.32, 0.72, fract(h.x * 7.13 + h.y * 3.7)) * u_blade.y * grow;
-  float W = u_blade.x * mix(0.8, 1.25, h.z) * (0.4 + 0.6 * grow);
+  if (fade > 15.0) H *= 0.72 + 0.28 * (1.0 - smoothstep(u_ring.z - fade, u_ring.z, d));  // only the wide outer edge of the 3D grass: blades also settle lower, so the thinning tufts melt into the ground
+  H *= emerge;
+  float W = u_blade.x * mix(0.8, 1.25, h.z) * (0.4 + 0.6 * grow) * mix(0.5, 1.0, emerge);
   // textured grass (Foliage001 atlas): the nearest ring draws single real blades, the outer rings draw whole
   // clump cards that turn to face the camera, so one far instance reads as a tuft instead of a sliver
   // Poly Haven grass_bermuda_01 cards (4x4 atlas of whole plants): every ring draws camera-facing plant cards,
   // so one 4-triangle card shows a full photo plant instead of one blade
   bool tblade = false;
-  bool card = u_texOn > 0.5;
+  bool card = u_texOn > 0.5 && u_tuft < 0.5;
+  if (u_tuft > 0.5) {
+    // three crossed blades per tuft, each its own angle, height and outward lean
+    float k = float((gl_VertexID - 21) / 3);
+    float a2 = ang + k * 2.0944 + 0.4 * fract(h.y * 5.1 + k * 0.37);
+    side = vec2(cos(a2), sin(a2));
+    face = vec2(-side.y, side.x);
+    H *= 0.75 + 0.5 * fract(h.x * 3.9 + k * 0.61);
+  }
   if (tblade) W = H * 0.125 * 1.7 * (0.4 + 0.6 * grow) + 0.004;  // keep the atlas slot's 1:8 shape (slightly widened so blades read at distance)
   if (card) {
     vec2 vd = normalize(p - u_camPos.xz + vec2(1e-4));
@@ -81,7 +98,7 @@ void main(){
     H *= 1.1 * mix(0.8, 1.2, h.z);
     W = H;  // square atlas cells
   }
-  float taper = u_texOn > 0.5 ? 0.0 : 0.85;
+  float taper = u_texOn > 0.5 && u_tuft < 0.5 ? 0.0 : 0.85;
   float t = a_pos.y;
   float gust = u_windS * (0.6 + 0.4 * sin(u_windT * 1.1 + p.x * 0.05 + p.y * 0.04));
   // gust waves rolling across the meadow along the wind
@@ -118,14 +135,19 @@ void main(){
   tip = mix(tip, vec3(0.6, 0.52, 0.28) * (gc.g * 4.0 + 0.3), dryTip * 0.6);
   vec3 alb = mix(gc * 0.62, tip, smoothstep(0.0, 1.0, t)) * (0.85 + 0.3 * h.z) * mix(0.9, 1.08, clump);
   alb *= 1.0 + 0.16 * wave * t * u_windS;  // silvery sheen on the bent crest of each wave
-  alb = mix(gc * 0.9, alb, smoothstep(0.0, 0.6, ringK));  // fade into the ground colour at the ring edge
+  alb = mix(gc * 0.9, alb, smoothstep(0.0, 0.6, ringK) * (0.4 + 0.6 * emerge));
+  // far clumps: a few pixels each, so their dark bases and texture streaks read as black speckles on the hills.
+  // Past ~30 m they take on the lit ground colour and lose texture contrast, leaving just a soft grassy texture
+  float farK = u_blade.w > 1.5 ? smoothstep(28.0, 90.0, d) : 0.0;
+  alb = mix(alb, gc * vec3(1.12, 1.15, 1.0), farK * 0.7);  // fade into the ground colour at the ring edge
   vec3 n = normalize(vec3(0.0, 1.0, 0.0) + (u_sunDir.xyz * vec3(1.0, 0.0, 1.0)) * 0.35);
   float sh = u_blade.w > 1.5 ? envLight(vec3(p.x, base, p.y)) : shadowAt(t > 0.5 ? wpos : vec3(p.x, base + 0.3, p.y), vec3(0.0, 1.0, 0.0));  // outer rings skip the shadow map
   vec3 c = outColor(lambert(alb, n, sh) * (0.7 + 0.3 * t));
   v_col = c;
+  if (u_tuft > 1.5) v_col = vec3(1.0, 0.0, 0.0);
   v_fog = vec4(fogTint(wpos), fogGround(wpos, -vp.z));
   if (tblade) v_uv = vec3((floor(h.x * 8.0) + a_pos.x + 0.5) / 16.0, 1.0 - t, 0.0);
-  else if (card) { float k = floor(h.y * 15.999); v_uv = vec3((mod(k, 4.0) + a_pos.x + 0.5) * 0.25, (floor(k / 4.0) + 1.0 - t) * 0.25, 1.0); }
+  else if (card && u_tuft < 0.5) { float k = floor(h.y * 15.999); v_uv = vec3((mod(k, 4.0) + a_pos.x + 0.5) * 0.25, (floor(k / 4.0) + 1.0 - t) * 0.25, 1.0 - 0.8 * farK); }
   else v_uv = vec3(0.0);
   gl_Position = u_proj * vp;
 }
@@ -140,13 +162,14 @@ uniform float u_texOn;
 uniform vec3 u_texAvg;
 out vec4 fragColor;
 void main(){
+  g_hwVel = vec4(0.0, 0.0, 2.0, 1.0);  // moving thing without its own motion vector: temporal upscaling trusts this frame more
   vec3 c = v_col;
   if (u_texOn > 0.5) {
     vec4 tx = texture(u_grassTex, v_uv.xy);
     // sharpened alpha test: thin blades stay solid in the mip levels instead of dissolving at distance
     float a = (tx.a - 0.4) / max(fwidth(tx.a), 1e-4) + 0.5;
     if (a < 0.5) discard;
-    c *= clamp(tx.rgb / u_texAvg, 0.35, 1.9);  // real blade streaks and brown tips on top of the season colour
+    c *= mix(vec3(1.0), clamp(tx.rgb / u_texAvg, 0.35, 1.9), v_uv.z > 0.0 ? v_uv.z : 1.0);  // real blade streaks and brown tips on top of the season colour
   }
   fragColor = vec4(mix(c, v_fog.rgb, v_fog.a), 1.0);
 }
@@ -192,7 +215,7 @@ void main(){
   float fadeK = 1.0 - smoothstep(u_leaf.y * 0.7, u_leaf.y, d);
   if (fract(h.w * 13.7) > fadeK) { kill(); return; }
   vec2 wv = textureLod(u_waterLv, (p + 620.0) * (1.0 / 1240.0), 0.0).rg;
-  if (wv.g > 0.3 && wv.r > heightAt(g) - 0.1) { kill(); return; }  // no leaves lying under lake or river water
+  if (wv.g > 0.25) { kill(); return; }  // no leaves on lakes or rivers (mask alone: the coarse height grid misses the carved river bed)
   {  // only on fairly level ground: on steep slopes and cliffs a flat leaf reads as a floating flake from below
     float h0 = heightAt(g), hx = heightAt(g + vec2(0.5, 0.0)), hz = heightAt(g + vec2(0.0, 0.5));
     float grad = length(vec2(hx - h0, hz - h0)) / (0.5 * u_grid.y);
@@ -265,7 +288,7 @@ void main(){
   if (fract(h.w * 13.7) > 1.0 - smoothstep(u_fl.y * 0.6, u_fl.y, d)) { kill(); return; }
   vec2 wv = textureLod(u_waterLv, (p + 620.0) * (1.0 / 1240.0), 0.0).rg;
   float y0 = heightAt(g);
-  if (wv.g > 0.3 && wv.r > y0 - 0.1) { kill(); return; }
+  if (wv.g > 0.25) { kill(); return; }  // no flowers standing in lakes or rivers
   vec4 cc = u_viewProj * vec4(p.x, y0 + 0.2, p.y, 1.0);
   if (cc.w < -0.5 || abs(cc.x) > cc.w * 1.1 + 0.5) { kill(); return; }
   float W = mix(0.07, 0.12, fract(h.x * 9.1)), H = mix(0.18, 0.42, fract(h.y * 5.3));
@@ -297,6 +320,7 @@ vec3 petalCol(float k){
   return vec3(0.88, 0.28, 0.02);                 // orange
 }
 void main(){
+  g_hwVel = vec4(0.0, 0.0, 2.0, 1.0);  // moving thing without its own motion vector: temporal upscaling trusts this frame more
   vec2 c = vec2(v_q.x, v_q.y - (v_top - 1.0));
   float r = length(c);
   float n = 4.0 + floor(fract(v_h.x * 3.7) * 5.0);
@@ -453,7 +477,10 @@ void tileWorkerLoop() {
       j = g_jobs.front();
       g_jobs.pop_front();
     }
+    auto t0 = std::chrono::steady_clock::now();
     std::vector<float> v = buildTileData(j.s, j.tx, j.tz);
+    static const bool dbg = std::getenv("HW_TILEDBG") != nullptr;
+    if (dbg) { size_t q; { std::lock_guard<std::mutex> lk(g_tq); q = g_jobs.size(); } std::printf("tile ring %d %.2f ms queue %zu\n", j.ring, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(), q); }
     std::lock_guard<std::mutex> lk(g_tq);
     g_done.push_back({j.key, std::move(v)});
   }
@@ -481,16 +508,29 @@ void drainTiles() {
   }
 }
 
-GTile* tileFor(int ring, float s, int tx, int tz, bool prewarm = false) {
+int g_syncBuilds = 0;  // per frame: tiles built right away because they were missing in plain view
+GTile* tileFor(int ring, float s, int tx, int tz, bool prewarm = false, bool urgent = false) {
   uint64_t key = ((uint64_t)ring << 56) ^ ((uint64_t)(uint32_t)(tx + 100000) << 28) ^ (uint64_t)(uint32_t)(tz + 100000);
   auto it = g_tiles.find(key);
   if (it != g_tiles.end()) { it->second.used = g_frame; return &it->second; }
   if (g_noCap || !g_tileWorker.joinable()) { g_newTiles++; return &storeTile(key, buildTileData(s, tx, tz)); }  // loading: synchronous
+  // a near tile in plain view that still isn't there: build it now (~1-2 ms, rare) - a whole patch of grass
+  // appearing in front of the player is far worse than one slightly longer frame
+  if (urgent && g_syncBuilds < 2) {
+    g_syncBuilds++;
+    { std::lock_guard<std::mutex> lk(g_tq); for (auto q = g_jobs.begin(); q != g_jobs.end(); ++q) if (q->key == key) { g_jobs.erase(q); break; } }
+    g_pending.erase(key);
+    return &storeTile(key, buildTileData(s, tx, tz));
+  }
+  std::lock_guard<std::mutex> lk(g_tq);
   if (g_pending.insert(key).second) {
-    std::lock_guard<std::mutex> lk(g_tq);
     if (prewarm) g_jobs.push_back({key, ring, s, tx, tz});
     else g_jobs.push_front({key, ring, s, tx, tz});  // visible tiles jump the queue
     g_tcv.notify_one();
+  } else if (!prewarm) {
+    // already queued as a prewarm job (at the back, behind far tiles): move it to the front now it's in view
+    for (auto q = g_jobs.begin(); q != g_jobs.end(); ++q)
+      if (q->key == key) { TileJob j = *q; g_jobs.erase(q); g_jobs.push_front(j); break; }
   }
   return nullptr;
 }
@@ -541,7 +581,8 @@ void init() {
   const float V[] = {-0.5f, 0, 0.5f, 0, -0.42f, 0.3f, 0.42f, 0.3f, -0.28f, 0.62f, 0.28f, 0.62f, 0, 1,
                      -0.5f, 0, 0.5f, 0, -0.34f, 0.5f, 0.34f, 0.5f, 0, 1,
                      -0.5f, 0, 0.5f, 0, 0, 1,
-                     -0.5f, 0, 0.5f, 0, -0.5f, 0.5f, 0.5f, 0.5f, -0.5f, 1, 0.5f, 1};  // 7-, 5-, 3-vertex blades, 6-vertex textured strip
+                     -0.5f, 0, 0.5f, 0, -0.5f, 0.5f, 0.5f, 0.5f, -0.5f, 1, 0.5f, 1,
+                     -0.5f, 0, 0.5f, 0, 0, 1, -0.5f, 0, 0.5f, 0, 0, 1, -0.5f, 0, 0.5f, 0, 0, 1};  // 7-, 5-, 3-vertex blades, 6-vertex textured strip, 3-blade far tuft (triangles)
   glGenVertexArrays(1, &g_vao);
   glBindVertexArray(g_vao);
   glGenBuffers(1, &g_vbo);
@@ -583,15 +624,32 @@ void init() {
 void draw() {
   drainTiles();
   float R = g_settings.fullMap ? 220.0f : std::max(40.0f, g_settings.grassRadius * 3.3f);
-  R *= (0.5f + 0.5f * forest::detailLevel()) * g_settings.grassAuto * (1.0f - 0.3f * season.snow) * (1.0f - 0.3f * sky::rainAmount());
+  const float weatherK = (1.0f - 0.3f * season.snow) * (1.0f - 0.3f * sky::rainAmount());
+  // near rings never follow the automatic quality: their edge sits a few metres ahead, so a moving radius made grass
+  // visibly grow and vanish in front of the player whenever detail adjusted. Only the far rings scale, and slowly.
+  static float RnS = -1;
+  const float RnT = R * weatherK;
+  RnS = RnS < 0 ? RnT : RnS + clampf(RnT - RnS, -0.05f, 0.05f);  // ~1.5 m/s: radius changes (auto quality, rain) creep
+  const float Rn = RnS;
+  float Rt = R * (0.5f + 0.5f * forest::detailLevel()) * g_settings.grassAuto * weatherK;
+  static float Rs = -1;
+  Rs = Rs < 0 ? Rt : Rs + clampf(Rt - Rs, -0.15f, 0.15f);  // eases ~4 m/s: the far edge creeps under the haze
+  R = std::max(Rs, Rn * 0.55f + 10.0f);
   float RF = std::max(R + 40.0f, 300.0f * std::min(1.5f, g_settings.drawDist() / 2.0f));
   if (!g_settings.fullMap) RF = std::max(R + 10.0f, std::min(RF, envmap::g_cullQ));  // far blades end where the haze is opaque
   const float cs = g_grassTex ? 1.6f : 1.0f;  // clump cards carry 15-30 blades each: fewer far instances for the same density
   // 3D blades only within ~48 m: beyond that the photo grass on the ground carries the look (Far Cry-style)
   Ring rings[4] = {
-      {g_grassTex ? 0.26f : 0.17f, 0, std::min(26.0f, R * 0.25f), 6, 0.055f, 1.0f, 1.0f},  // whole-plant cards: ~2.3x fewer near instances
-      {0.36f * cs, std::min(26.0f, R * 0.25f), g_farBlades ? R * 0.55f : std::min(R * 0.55f, 48.0f), 10, 0.1f, 1.05f, 0.95f},
-      {1.15f * cs, R * 0.55f, R, 14, 0.34f, 1.1f, 0.9f},
+      {g_grassTex ? 0.26f : 0.17f, 0, clampf(Rn * 0.25f, 22.0f, 26.0f), 6, 0.055f, 1.0f, 1.0f},  // dense grass always reaches 22-26 m  // whole-plant cards: ~2.3x fewer near instances
+      // outer edge: a long 22 m thinning band ending under the haze, so the edge of the 3D grass never reads as a line
+      // of blades appearing in front of the player
+      // bigger clumps: 4.9x fewer per m2 than the near ring, so each covers ~2x the area and the ground doesn't
+      // suddenly look sparse past the hand-over
+      {0.36f * cs, clampf(Rn * 0.25f, 22.0f, 26.0f), g_farBlades ? Rn * 0.55f : clampf(Rn * 0.6f, 50.0f, 58.0f), 22, 0.1f, 1.4f, 1.0f},
+      // far tufts: 3 crossed untextured triangles per instance (~3 tris), from inside the 3D grass's thinning band out
+      // to ~150 m, so distant meadows keep a broken grassy surface instead of a flat ground texture
+      g_farBlades ? Ring{1.15f * cs, Rn * 0.55f, R, 14, 0.34f, 1.1f, 0.9f}
+                  : Ring{1.25f, clampf(Rn * 0.6f, 50.0f, 58.0f) - 8.0f, std::max(90.0f, std::min(RF, 150.0f)), 45, 0.55f, 1.3f, 0.9f},
       {3.0f * cs, R, RF, 40, 0.75f, 1.25f, 0.85f},  // narrower so far blades read as grass, not triangles  // sparse wide blades out to the horizon
   };
   static const std::string vs = std::string(terrain_render::groundCommon()) + GRASS_VS;
@@ -614,9 +672,17 @@ void draw() {
   const Camera& cam = render::cam;
   float snowK = 1.0f - 0.75f * season.snow;
   for (int ri = 0; ri < 4; ri++) {
-    if (ri >= 2 && !g_farBlades) continue;
+    if (ri >= 3 && !g_farBlades) continue;
     const Ring& r = rings[ri];
+    // far ring draws the same photo clumps as the near rings (sparser): plain triangle tufts there changed style at
+    // the hand-over and the player saw grass "turn into" proper grass. HW_TUFTS=1 brings the triangle tufts back.
+    static const bool useTufts = std::getenv("HW_TUFTS") != nullptr;
+    const bool tuft = ri == 2 && !g_farBlades && (useTufts || !g_grassTex);
+    static const bool tuftDbg = std::getenv("HW_TUFTDBG") != nullptr;
+    s.set1f("u_tuft", tuft ? (tuftDbg ? 2.0f : 1.0f) : 0.0f);
+    s.set1f("u_texOn", g_grassTex && !tuft ? 1.0f : 0.0f);
     s.set4f("u_ring", r.spacing, r.rIn, r.rOut, r.fade);
+    s.set1f("u_ringIn", tuft ? 14.0f : ri > 0 ? rings[ri - 1].fade : r.fade);
     s.set4f("u_blade", r.width, r.height, r.density * snowK, (float)ri);
     if (ri > 0) { float z[32] = {}; glUniform4fv(s.loc("u_tramp"), 8, z); }  // far rings: no per-blade trample loop
     if (ri == 0) {
@@ -654,22 +720,26 @@ void draw() {
         }
         float h0 = bit->second.first, h1 = bit->second.second;
         if (!cam.box({x0, h0 - 4, z0}, {x1, h1 + 6, z1})) continue;
-        GTile* tp = tileFor(ri, r.spacing, tx, tz);
+        // urgent: inner ring tiles whose nearest point is well inside the dense grass
+        bool urgent = ri <= 1 && nx * nx + nz * nz < (ri == 0 ? 18.0f * 18.0f : 30.0f * 30.0f);
+        GTile* tp = tileFor(ri, r.spacing, tx, tz, false, urgent);
         if (!tp || tp->n <= 0) continue;
         GTile& t = *tp;
         glBindBuffer(GL_ARRAY_BUFFER, t.vbo);
         glVertexAttribPointer(6, 4, GL_FLOAT, GL_FALSE, 32, (void*)0);
         glVertexAttribPointer(7, 4, GL_FLOAT, GL_FALSE, 32, (void*)16);
-        if (g_grassTex) glDrawArraysInstanced(GL_TRIANGLE_STRIP, 15, 6, t.n);  // textured strip (blade or clump card)
+        if (tuft) glDrawArraysInstanced(GL_TRIANGLES, 21, 9, t.n);
+        else if (g_grassTex) glDrawArraysInstanced(GL_TRIANGLE_STRIP, 15, 6, t.n);  // textured strip (blade or clump card)
         else glDrawArraysInstanced(GL_TRIANGLE_STRIP, ri == 0 ? 0 : 7, ri == 0 ? 7 : 5, t.n);  // all outer rings: tapered 5-vertex blades (3-vertex read as flat triangles)
         gfx::drawCalls++;
         g_lastBlades += t.n;
       }
   }
+  g_syncBuilds = 0;
   for (int ri = 0; ri < 4; ri++) {
-    if (ri >= 2 && !g_farBlades) continue;
+    if (ri >= 3 && !g_farBlades) continue;
     const Ring& r = rings[ri];
-    float ts = GT * r.spacing, R2 = r.rOut + ts;
+    float ts = GT * r.spacing, R2 = r.rOut + ts * (ri <= 1 ? 2.0f : 1.0f);  // near rings: two tiles of margin (sprinting)
     int tx0 = (int)std::floor((cam.pos.x - R2) / ts), tx1 = (int)std::floor((cam.pos.x + R2) / ts);
     int tz0 = (int)std::floor((cam.pos.z - R2) / ts), tz1 = (int)std::floor((cam.pos.z + R2) / ts);
     for (int tz = tz0; tz <= tz1; tz++)

@@ -1,3 +1,4 @@
+#include "../render/water.h"
 #include "../render/skinned.h"
 #include "extras.h"
 #include "village.h"
@@ -33,9 +34,9 @@ const Spec SPEC[SP_COUNT] = {
 
 struct PredDef { float sight, reach, dmg, cd, windup, pounce, score, growl; };
 const PredDef PREDS[3] = {
-    {30, 1.7f, 12, 1.1f, 0.35f, 0, 300, 140},
-    {20, 2.2f, 28, 1.8f, 0.6f, 0, 600, 70},
-    {24, 1.8f, 16, 1.0f, 0.3f, 9, 450, 110},
+    {30, 1.7f, 18, 1.1f, 0.35f, 0, 300, 140},   // wolf bite 18 (was 12)
+    {20, 2.2f, 42, 1.8f, 0.6f, 0, 600, 70},     // bear swipe 42 (was 28)
+    {24, 1.8f, 24, 1.0f, 0.3f, 9, 450, 110},    // leopard 24 (was 16); pounce x1.5
 };
 const PredDef* PRED(Species sp) { return sp >= SP_WOLF ? &PREDS[sp - SP_WOLF] : nullptr; }
 #define VILLAGE_SAFE settlementSafe()  // grows as the settlement expands
@@ -55,6 +56,7 @@ struct Herd {
 
 namespace {
 
+bool g_cloak = false;  // player owns the leopard cloak (refreshed each update)
 std::vector<std::unique_ptr<Herd>> herds;
 // danger memory: places where the player hunted. Prey herds avoid them for a few in-game hours (game clock seconds)
 struct Danger { float x, z, until; };
@@ -240,6 +242,18 @@ float hearingRadius(Species sp) {
 
 void updatePredator(Animal* a, float dt);
 
+void hurtPlayer(Animal* a, float dmg);
+// animals wading through a river or lake leave ripples (and splash when they run)
+static void wadeRipple(const Animal* a, float d, float dt) {
+  float sp = std::fabs(a->speed);
+  if (d > 70 || sp < 0.3f) return;
+  float period = sp > 4 ? 0.22f : 0.45f;
+  if (std::fmod(E.clock + a->id * 0.37f, period) >= dt) return;
+  float ws = world::waterHeightAt(a->x, a->z);
+  if (ws < world::getTerrainHeight(a->x, a->z) + 0.1f) return;
+  water::ripple(a->x, ws, a->z, 0.6f + std::min(0.6f, sp * 0.08f), sp > 4 ? 0.7f : 0.1f);
+}
+
 void updateAnimal(Animal* a, float dt) {
   if (PRED(a->sp)) { updatePredator(a, dt); return; }
   const Spec& S = SPEC[a->sp];
@@ -315,6 +329,7 @@ void updateAnimal(Animal* a, float dt) {
       a->yaw = turnToward(a->yaw, toPlayer, dt * 3.5f);
       a->t -= dt;
       if (d < 1.5f) {
+        hurtPlayer(a, 14);  // tusks: the charge now hurts, not just knocks you back
         float dd = std::max(d, 0.1f);
         E.player.knock = Vec3(-dx / dd, 0, -dz / dd) * -11.0f;
         HudEvent e;
@@ -347,6 +362,7 @@ void updateAnimal(Animal* a, float dt) {
   a->x += std::sin(a->yaw) * a->speed * dt;
   a->z += std::cos(a->yaw) * a->speed * dt;
   if (d < 140) forest::resolveTreeCollision(a->x, a->z, 0.35f);
+  wadeRipple(a, d, dt);
   a->x = clampf(a->x, -MAP_HALF + 6, MAP_HALF - 6);
   a->z = clampf(a->z, -MAP_HALF + 6, MAP_HALF - 6);
   a->y = world::getTerrainHeight(a->x, a->z);
@@ -383,12 +399,13 @@ void hurtPlayer(Animal* a, float dmg) {
   e.kind = HudEvent::Hurt;
   e.amount = dmg;
   emitEvent(e);
-  float g = PRED(a->sp)->growl;
-  audio::tone(Wave::Sawtooth, g * 1.7f, g, 0.28f, 0.13f);
+  if (const PredDef* pd = PRED(a->sp)) audio::tone(Wave::Sawtooth, pd->growl * 1.7f, pd->growl, 0.28f, 0.13f);  // boars are not predators: no growl entry (null here crashed the game)
+  else audio::tone(Wave::Sawtooth, 160, 110, 0.28f, 0.13f);  // boar squeal-grunt
   if (P.hp <= 0) playerDown(a);
 }
 
 void growl(Animal* a) {
+  if (!PRED(a->sp)) return;  // only predators have a growl
   const Vec3& p = E.player.pos;
   if (hypot2(p.x - a->x, p.z - a->z) > 35) return;
   float g = PRED(a->sp)->growl;
@@ -454,6 +471,7 @@ void updatePredator(Animal* a, float dt) {
   if (a->raid && a->state != S_RAID && a->state != S_CHASE && a->state != S_ATTACK && a->state != S_STALK) a->raid = false;
   float sight = D.sight * (P.crouching ? 0.6f : P.sprinting ? 1.3f : 1) * (E.isNight ? 1.3f : 1);
   if (a->state == S_FEED) sight *= 0.75f;
+  if (g_cloak) sight *= 0.7f;  // leopard cloak
   auto& n = E.noise;
   bool heardShot = E.clock - n.t < 0.15f && hypot2(n.x - a->x, n.z - a->z) < n.r * 0.8f;
   bool noticed = !safe && (d < sight || (heardShot && d < sight * 2));
@@ -633,6 +651,7 @@ void updatePredator(Animal* a, float dt) {
       if (ox * ox + oz * oz < 9 && ax * ax + az * az < 9) a->yaw += dt * 1.2f;
     }
   }
+  wadeRipple(a, d, dt);
   a->x += std::sin(a->yaw) * a->speed * dt;
   a->z += std::cos(a->yaw) * a->speed * dt;
   if (d < 140 && a->state != S_POUNCE) forest::resolveTreeCollision(a->x, a->z, a->sp == SP_BEAR ? 0.55f : 0.35f);
@@ -932,6 +951,7 @@ void spawn(uint32_t seed) {
 void update(float dt) {
   const Vec3& p = E.player.pos;
   auto& P = E.player;
+  g_cloak = invCount("leopard_cloak") > 0;
   nightEvents(dt);
   if (P.hp < P.maxHp && E.clock - P.hurtT > 6) P.hp = std::min(P.maxHp, P.hp + dt * (hypot2(p.x, p.z) < VILLAGE_SAFE ? 10 : 2.5f));
   bool paused = E.uiOpen || !E.playing;
@@ -1099,6 +1119,7 @@ void initRender() {
   if (std::getenv("HW_TRIS")) { for (int sp = 0; sp < 6; sp++) { models::species(sp, false); models::species(sp, true); } std::fflush(stdout); std::exit(0); }
   registerMarkers("wildlife", [](std::vector<Marker>& out) {
     { float bx, bz; if (extras::banditCamp(bx, bz)) out.push_back({bx, world::getTerrainHeight(bx, bz) + 3.0f, bz, MI_BANDIT, "Bandit camp (level " + std::to_string(extras::banditLevel()) + ")"}); }
+    { float bh[16 * 3]; int n = extras::banditHeads(bh, 16); for (int i = 0; i < n; i++) out.push_back({bh[i * 3], bh[i * 3 + 1], bh[i * 3 + 2], MI_FOE, "Bandit"}); }
     const Vec3& p = E.player.pos;
     float r2 = E.world.bonus.animalRadar * E.world.bonus.animalRadar;
     for (auto& ap : animals) {
@@ -1184,6 +1205,7 @@ static const skinned::Model* skinFor(const Animal* a, float& scale) {
     M[4] = skinned::load("animals/bear.anim");            // "Bear" by Nyilonelycompany (CC BY 4.0)
     M[6] = skinned::load("animals/goat.anim");     // "himalayan mountain goat" by all of life (CC BY 4.0), auto-rigged with tools/rig2anim.py
     M[7] = skinned::load("animals/leopard.anim");  // "Leopard" by planeta-elefante (CC BY 4.0)
+    if (M[7]) M[7]->spots = 13.0f / M[7]->height;    // ~7 cm rosettes on a 0.85 m-tall cat
     M[5] = skinned::load("animals/stag_realistic.anim");  // "Deer Idle" by kenchoo (CC BY 4.0)  // "Boar" by anru97580 (CC BY 4.0), converted with tools/fbx2anim.py
   }
   if (a->sp == SP_DEER) {
@@ -1278,6 +1300,7 @@ static void fill(bool shadow) {
     if (shadow && hypot2(a->x - p.x, a->z - p.z) > (SPEC[a->sp].hp < 100 ? 30.0f : 46.0f)) continue;  // deer and goral are small at range: shadows only within 30 m
     const SpeciesModel& M = models::species(a->sp);
     if (!shadow && !render::cam.sphere({a->x, a->y + 0.8f, a->z}, 2.2f)) continue;
+    if (!shadow && (!forest::horizonVisible({a->x - 1.5f, a->y, a->z - 1.5f}, {a->x + 1.5f, a->y + 2.2f, a->z + 1.5f}) || !render::hizVisible({a->x - 1.5f, a->y, a->z - 1.5f}, {a->x + 1.5f, a->y + 2.2f, a->z + 1.5f}))) continue;  // behind a ridge or a house
     {
       float sc = 1;
       if (const skinned::Model* sm = skinFor(a, sc)) {

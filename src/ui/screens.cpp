@@ -31,8 +31,8 @@ namespace {
 
 uint32_t C(const char* h, float a = 1) { return rgba(h, a); }
 
-const char* ICON_HEX[MI_COUNT] = {"#c2773a", "#7d9bc1", "#9bc53d", "#b26ad6", "#e05d44", "#f2b31d", "#3fb6a8", "#ffd23f", "#e8a15c", "#d6c3a1", "#f2d16b", "#ef4444", "#e2e8f0"};
-float ICON_RANGE[MI_COUNT] = {55, 55, 50, 50, 70, 140, 110, 600, 0, 0, 0, 0, 0};
+const char* ICON_HEX[MI_COUNT] = {"#c2773a", "#7d9bc1", "#9bc53d", "#b26ad6", "#e05d44", "#f2b31d", "#3fb6a8", "#ffd23f", "#e8a15c", "#d6c3a1", "#f2d16b", "#ef4444", "#e2e8f0", "#f87171"};
+float ICON_RANGE[MI_COUNT] = {55, 55, 50, 50, 70, 140, 110, 600, 0, 0, 0, 0, 0, 120};
 
 struct Popup { std::string text; uint32_t color; double t0; };
 std::vector<Popup> g_popups;
@@ -111,6 +111,10 @@ void glyph(MarkerIcon icon, float cx, float cy, float r, float alpha = 1) {
         line(cx - k * 4.4f * u, cy + 4.4f * u, cx - k * 5.4f * u, cy + 2.6f * u, 1.0f * u, col);
         line(cx - k * 4.4f * u, cy + 4.4f * u, cx - k * 2.6f * u, cy + 5.4f * u, 1.0f * u, col);
       }
+      break;
+    case MI_FOE:  // one bandit: a hooded head over a downward chevron
+      circle(cx, cy - 2.2f * u, 2.6f * u, col);
+      tri({cx - 4.6f * u, cy + 0.9f * u}, {cx + 4.6f * u, cy + 0.9f * u}, {cx, cy + 5.6f * u}, col);
       break;
     case MI_QUEST:
       poly({{cx, cy - 5.5f * u}, {cx + 4 * u, cy}, {cx, cy + 5.5f * u}, {cx - 4 * u, cy}}, col);
@@ -1526,8 +1530,8 @@ void drawOptions(float W, float H) {
   if (button({x1 + colW - 90, y + 2, 90, 26}, SHN[si], ST_STONE, 11, nullptr, SANS)) { st.shadowSize = SH[(si + 1) % 3]; g_settingsDirty = true; }
   y += 36;
   {
-    const int FL[8] = {30, 45, 60, 75, 90, 120, 144, 0};
-    int fi = 2;
+    const int FL[8] = {30, 40, 45, 60, 90, 120, 144, 0};
+    int fi = 3;
     for (int i = 0; i < 8; i++) if (FL[i] == st.fpsLimit) fi = i;
     text("FPS limit (lower = cooler GPU)", x1, y + 14, 12, C("#d6d3d1"), SANS);
     char lb[16];
@@ -1536,6 +1540,16 @@ void drawOptions(float W, float H) {
   }
   y += 36;
   if (toggle(x1, y, colW, "Render full map (high-end GPU)", st.fullMap)) { st.fullMap = !st.fullMap; g_settingsDirty = true; }
+  y += 36;
+  if (toggle(x1, y, colW, "Temporal upscaling (faster)", st.temporalUpscale)) { st.temporalUpscale = !st.temporalUpscale; g_settingsDirty = true; }
+  y += 36;
+  if (toggle(x1, y, colW, "Eco mode (GPU at most ~half busy)", st.eco)) { st.eco = !st.eco; g_settingsDirty = true; }
+  y += 36;
+  {
+    const char* PN[3] = {"Off", "On", "Auto"};
+    text("Leaf pre-pass (off if leaves speckle)", x1, y + 14, 12, C("#d6d3d1"), SANS);
+    if (button({x1 + colW - 90, y + 2, 90, 26}, PN[std::max(0, std::min(2, st.leafPrepass))], ST_STONE, 11, nullptr, SANS)) { st.leafPrepass = (st.leafPrepass + 1) % 3; g_settingsDirty = true; }
+  }
 
   text("AUDIO & CONTROLS", x2, y0, 10, C("#78716c"), SANS);
   y = y0 + 16;

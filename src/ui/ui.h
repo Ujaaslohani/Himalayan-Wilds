@@ -22,6 +22,7 @@ uint32_t withAlpha(uint32_t c, float a);
 bool init();
 void shutdown();
 void begin(int width, int height, float scale);
+bool inFrame();  // between begin() and end()
 void end();
 float scale();
 void setScale(float s);

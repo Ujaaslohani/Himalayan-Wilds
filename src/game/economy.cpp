@@ -35,6 +35,7 @@ const GearDef GEAR[] = {
     {"recurve_bow", "Recurve Bow", "Horn-backed bow: every arrow hits 30% harder.", {{"goral_horn", 2}, {"sinew", 3}, {"wood", 6}}},
     {"quiver", "Hunter's Quiver", "Fletch 15 arrows per timber instead of 10 (40 per bundle).", {{"deer_pelt", 2}, {"fiber", 4}, {"bone", 2}}},
     {"snowshoes", "Snowshoes", "Walk over deep snow without slowing down.", {{"wood", 4}, {"sinew", 2}, {"fiber", 4}}},
+    {"leopard_cloak", "Leopard Cloak", "A rosetted cloak that melts into rock and brush: animals and bandits notice you 30% later, and it keeps out the winter cold like a fur coat.", {{"leopard_pelt", 1}, {"sinew", 2}, {"fiber", 3}}},
 };
 static_assert(sizeof(GEAR) / sizeof(GEAR[0]) == GEAR_COUNT, "GEAR_COUNT must match the GEAR table (a missing entry crashes the crafting page)");
 

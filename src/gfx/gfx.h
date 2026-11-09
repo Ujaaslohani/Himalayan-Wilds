@@ -104,6 +104,20 @@ Texture createRGBA8Texture(const uint8_t* data, int w, int h, bool linear);
 
 namespace gfx {
 void init();
+// OpenGL 4.3 extras (compute shaders, indirect draws), loaded by hand: the generated loader is 3.3 only
+typedef void(GLAD_API_PTR* PfnDispatchCompute)(GLuint, GLuint, GLuint);
+typedef void(GLAD_API_PTR* PfnMemoryBarrier)(GLbitfield);
+typedef void(GLAD_API_PTR* PfnDrawElementsIndirect)(GLenum, GLenum, const void*);
+typedef void(GLAD_API_PTR* PfnDrawArraysIndirect)(GLenum, const void*);
+extern PfnDispatchCompute dispatchCompute;
+extern PfnMemoryBarrier memoryBarrier;
+extern PfnDrawElementsIndirect drawElementsIndirect;
+extern PfnDrawArraysIndirect drawArraysIndirect;
+void loadExtras(void* (*get)(const char*));
+bool hasCompute();  // GL 4.3 context with compute + indirect draws
+GLuint compileCompute(const std::string& src);  // 0 on failure
+constexpr GLenum COMPUTE_SHADER = 0x91B9, SHADER_STORAGE_BUFFER = 0x90D2, DRAW_INDIRECT_BUFFER = 0x8F3F;
+constexpr GLbitfield SHADER_STORAGE_BARRIER = 0x2000, COMMAND_BARRIER = 0x40, VERTEX_ATTRIB_BARRIER = 0x1;
 bool hasS3TC();
 float maxAniso();
 size_t textureBytes();

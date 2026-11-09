@@ -21,6 +21,9 @@ struct FrameUBO {
   float shadowMatPrev[16];
   float shadowMix[4];
   float lantern[4];  // hand lantern: xyz position, w intensity (0 = off)
+  float prevVP[16];  // temporal upscaling: last frame's un-jittered view-projection
+  float vpNoJit[16]; // this frame's un-jittered view-projection
+  float taa[4];      // x: last frame's wind clock (for leaf motion vectors)
 };
 
 struct Camera {
@@ -36,7 +39,7 @@ struct Camera {
 
 enum InstMode { IM_NONE = 0, IM_LITE = 1, IM_FULL = 2 };
 namespace render { extern int dbgMode; }
-enum ObjFlag { OF_CUTOUT = 1, OF_DOUBLE = 2, OF_WIND = 4, OF_TINTWHITE = 8, OF_SOFT = 16, OF_CAPTURE = 32, OF_DEPTH = 64, OF_FUR = 128 };
+enum ObjFlag { OF_CUTOUT = 1, OF_DOUBLE = 2, OF_WIND = 4, OF_TINTWHITE = 8, OF_SOFT = 16, OF_CAPTURE = 32, OF_DEPTH = 64, OF_FUR = 128, OF_DEFERRED = 256 };
 
 inline InstFull toInst(const Mat4& m, uint32_t tint = 0xffffffffu) {
   InstFull f;
@@ -92,11 +95,21 @@ Shader& program(const std::string& name, const char* vs, const char* fs, const s
 GLuint shadowTexture();
 void beginShadowPass(const Mat4& lightVP, int size, int target = 0);
 void endShadowPass();
+void scrollStaticShadow(int dx, int dy, float dz);
 void bindShadow();
 void drawFullscreen();
 // pre-baked tileable fbm (r = 4 octaves, g = 3 octaves; 32 noise units per repeat): one read instead of 3-4
 GLuint fbmTexture();
 bool sphereVisible(const Vec3& c, float r);
+// temporal upscaling: object shaders with wind also write per-pixel motion (set around the world pass)
+extern bool velocityPass;
+// hierarchical-Z occlusion: last frame's depth, max-filtered to 160x90 and read back a frame later.
+// hizCapture: call after the opaque world (before the view model); hizVisible: false only when the box is
+// certainly behind what covered that part of the screen last frame
+void hizCapture(unsigned depthTex, int w, int h);
+bool hizVisible(const Vec3& mn, const Vec3& mx);
+// the Hi-Z texture itself (max linear depth of an earlier frame) for GPU-side culling, with the camera it was made from
+bool hizTexture(unsigned& tex, Mat4& vp, Vec3& camPos, int& w, int& h);
 std::string commonHeader();
 GLuint quadVao();
 GLuint quadVaoBuffer();

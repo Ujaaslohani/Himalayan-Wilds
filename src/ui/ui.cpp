@@ -33,6 +33,8 @@ int g_w = 0, g_h = 0;
 float g_scale = 1;
 float g_defShadow = 0;
 unsigned g_curImg = 0;
+int g_depth = 0;
+GLint g_fbo = 0, g_vp[4] = {0, 0, 0, 0};
 std::vector<Rect> g_clips;
 MouseState g_mouse{};
 bool g_consumed = false;
@@ -184,6 +186,24 @@ void buildAtlas() {
 
 void flush() {
   if (g_verts.empty()) return;
+  // re-apply the UI's GL state: a menu action can run heavy work in the middle of a UI frame (pressing Continue
+  // loads the save, bakes and photographs trees), which leaves other programs and textures bound. Drawing the
+  // rest of the frame with them was the garbled menu text.
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)g_fbo);
+  glViewport(g_vp[0], g_vp[1], g_vp[2], g_vp[3]);
+  glUseProgram(g_prog);
+  glUniform2f(g_locScreen, (float)g_w, (float)g_h);
+  glUniform1f(g_locScale, g_scale);
+  glUniform1i(g_locAtlas, 0);
+  glUniform1i(g_locImg, 1);
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, g_curImg);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, g_atlas);
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_CULL_FACE);
+  glEnable(GL_BLEND);
+  glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
   size_t bytes = g_verts.size() * sizeof(UIV);
   if (bytes > g_vcap) {
@@ -293,7 +313,12 @@ void shutdown() {
   if (g_prog) glDeleteProgram(g_prog);
 }
 
+
+bool inFrame() { return g_depth > 0; }
 void begin(int w, int h, float s) {
+  g_depth++;
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &g_fbo);
+  glGetIntegerv(GL_VIEWPORT, g_vp);
   g_w = w;
   g_h = h;
   g_scale = s;
@@ -314,6 +339,7 @@ void begin(int w, int h, float s) {
 }
 
 void end() {
+  if (g_depth > 0) g_depth--;
   flush();
   glDisable(GL_SCISSOR_TEST);
   glDisable(GL_BLEND);
@@ -384,6 +410,7 @@ void poly(const std::vector<Vec2>& pts, uint32_t c) {
 
 void image(unsigned tex, const Rect& r, uint32_t c, float u0, float v0, float u1, float v1) {
   flush();
+  g_curImg = tex;
   glActiveTexture(GL_TEXTURE1);
   glBindTexture(GL_TEXTURE_2D, tex);
   glActiveTexture(GL_TEXTURE0);

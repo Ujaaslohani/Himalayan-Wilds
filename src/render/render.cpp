@@ -19,7 +19,7 @@ int render::frameNo = 0;
 
 namespace {
 GLuint g_ubo = 0;
-GLuint g_shadowFbo = 0, g_shadowTex = 0, g_staticFbo = 0, g_staticTex = 0, g_prevFbo = 0, g_prevTex = 0;
+GLuint g_shadowFbo = 0, g_shadowTex = 0, g_staticFbo = 0, g_staticTex = 0, g_prevFbo = 0, g_prevTex = 0, g_static2Fbo = 0, g_static2Tex = 0;
 int g_shadowSize = 0;
 GLuint g_emptyVao = 0, g_quadVao = 0, g_quadVbo = 0;
 std::unordered_map<uint32_t, std::unique_ptr<Shader>> g_objects;
@@ -155,9 +155,11 @@ static const char* kindDefine(SeasonKind k) {
 }
 
 int dbgMode = std::getenv("HW_DBG") ? std::atoi(std::getenv("HW_DBG")) : 0;
+bool velocityPass = false;
 Shader& object(VFmt fmt, InstMode inst, SeasonKind kind, int flags) {
   bool sp = shadowPass;
-  uint32_t key = (uint32_t)fmt | ((uint32_t)inst << 4) | ((uint32_t)kind << 8) | ((uint32_t)flags << 16) | (sp ? 1u << 24 : 0);
+  bool vel = velocityPass && (flags & OF_WIND) && !(flags & (OF_CAPTURE | OF_DEPTH)) && !sp;
+  uint32_t key = (uint32_t)fmt | ((uint32_t)inst << 4) | ((uint32_t)kind << 8) | ((uint32_t)flags << 16) | (sp ? 1u << 26 : 0) | (vel ? 1u << 27 : 0);
   auto it = g_objects.find(key);
   Shader* s;
   if (it == g_objects.end()) {
@@ -174,7 +176,9 @@ Shader& object(VFmt fmt, InstMode inst, SeasonKind kind, int flags) {
     if (flags & OF_CAPTURE) def += "#define CAPTURE\n";
     if (flags & OF_DEPTH) def += "#define DEPTH_ONLY\n";
     if (flags & OF_FUR) def += "#define FUR\n";
+    if (flags & OF_DEFERRED) def += "#define DEFERRED\n";
     if (sp) def += "#define SHADOW_PASS\n";
+    if (vel) def += "#define VELOCITY\n";
     auto sh = std::make_unique<Shader>();
     std::string head = commonHeader();
     if (!compileShader(*sh, head + glsl::OBJECT_VS, head + glsl::SEASON_FRAG + glsl::OBJECT_FS, def)) std::fprintf(stderr, "object shader failed: %s\n", def.c_str());
@@ -274,6 +278,7 @@ void beginShadowPass(const Mat4& lightVP, int size, int target) {
     makeDepth(g_shadowTex, g_shadowFbo, size, true);
     makeDepth(g_staticTex, g_staticFbo, size, false);
     makeDepth(g_prevTex, g_prevFbo, size, true);
+    makeDepth(g_static2Tex, g_static2Fbo, size, false);
     g_shadowSize = size;
   }
   (void)lightVP;
@@ -288,15 +293,60 @@ void beginShadowPass(const Mat4& lightVP, int size, int target) {
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_shadowFbo);
     glBlitFramebuffer(0, 0, size, size, 0, 0, size, size, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
   }
-  glBindFramebuffer(GL_FRAMEBUFFER, target == 1 ? g_staticFbo : g_shadowFbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, target == 1 || target == 3 ? g_staticFbo : g_shadowFbo);
   glViewport(0, 0, size, size);
-  if (target != 2) glClear(GL_DEPTH_BUFFER_BIT);
+  if (target != 2 && target != 3) glClear(GL_DEPTH_BUFFER_BIT);  // 3: scrolled static cache, only new strips drawn
   glEnable(GL_DEPTH_TEST);
   glDepthMask(GL_TRUE);
   glDisable(GL_CULL_FACE);
   glEnable(GL_POLYGON_OFFSET_FILL);
   glPolygonOffset(1.5f, 2.0f);
   shadowPass = true;
+}
+
+// shift the cached static shadow depth by whole texels (and a constant depth offset): the uncovered strip is left
+// empty (1.0) for the caller to redraw with a scissor
+void scrollStaticShadow(int dx, int dy, float dz) {
+  if (!g_staticTex || !g_static2Fbo) return;
+  static const char* VS = "out vec2 v_uv;\nvoid main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); v_uv = p; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }\n";
+  static const char* FS = R"(in vec2 v_uv;
+uniform sampler2D u_old;
+uniform vec2 u_shift;
+uniform float u_dz;
+out vec4 fragColor;
+void main(){
+  ivec2 sz = textureSize(u_old, 0);
+  ivec2 t = ivec2(gl_FragCoord.xy) + ivec2(u_shift);
+  fragColor = vec4(0.0);
+  if (t.x < 0 || t.y < 0 || t.x >= sz.x || t.y >= sz.y) { gl_FragDepth = 1.0; return; }
+  float d = texelFetch(u_old, t, 0).r;
+  gl_FragDepth = d >= 0.99999 ? 1.0 : clamp(d + u_dz, 0.0, 1.0);
+}
+)";
+  GLint vp[4], df = GL_LESS;
+  glGetIntegerv(GL_VIEWPORT, vp);
+  glGetIntegerv(GL_DEPTH_FUNC, &df);
+  glBindFramebuffer(GL_FRAMEBUFFER, g_static2Fbo);
+  glViewport(0, 0, g_shadowSize, g_shadowSize);
+  glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_ALWAYS);
+  glDepthMask(GL_TRUE);
+  glDisable(GL_BLEND);
+  glDisable(GL_CULL_FACE);
+  Shader& sh = program("shadowscroll", VS, FS);
+  glActiveTexture(GL_TEXTURE31);
+  glBindTexture(GL_TEXTURE_2D, g_staticTex);
+  sh.set1i("u_old", 31);
+  sh.set2f("u_shift", (float)dx, (float)dy);
+  sh.set1f("u_dz", dz);
+  drawFullscreen();
+  glBindTexture(GL_TEXTURE_2D, 0);
+  glActiveTexture(GL_TEXTURE0);
+  glDepthFunc((GLenum)df);
+  std::swap(g_staticTex, g_static2Tex);
+  std::swap(g_staticFbo, g_static2Fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glViewport(vp[0], vp[1], vp[2], vp[3]);
 }
 
 void endShadowPass() {
@@ -638,6 +688,128 @@ void bindShadow() {
   envmap::bind();
 }
 
+
+// ---- hierarchical-Z occlusion culling ----
+namespace {
+const int HZ_W = 160, HZ_H = 90;
+GLuint g_hzTex = 0, g_hzFbo = 0, g_hzPbo[2] = {0, 0};
+GLsync g_hzFence[2] = {nullptr, nullptr};
+Mat4 g_hzVPq[2]; Vec3 g_hzCamQ[2];
+Mat4 g_hzTexVP; Vec3 g_hzTexCam; int g_hzTexFrame = -100;  // what the GPU-side Hi-Z texture currently shows
+int g_hzW = 0;
+std::vector<float> g_hz;     // max linear distance per texel (the farthest thing that block could hide behind)
+Mat4 g_hzVP; Vec3 g_hzCam;
+bool g_hzReady = false;
+int g_hzFrame = 0;
+const char* HZ_FS = R"(in vec2 v_uv;
+uniform sampler2D u_d;
+uniform vec2 u_nf;
+uniform ivec2 u_src;
+out vec4 o;
+void main(){
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  vec2 b0 = vec2(t) * vec2(u_src) / vec2(160.0, 90.0), b1 = vec2(t + 1) * vec2(u_src) / vec2(160.0, 90.0);
+  float m = 0.0;
+  for (int y = 0; y < 5; y++) for (int x = 0; x < 5; x++) {
+    ivec2 p = ivec2(mix(b0, b1 - 1.0, vec2(x, y) / 4.0));
+    float d = texelFetch(u_d, p, 0).r;
+    m = max(m, d);
+  }
+  float z = m * 2.0 - 1.0;
+  float lin = m >= 0.99999 ? 1e6 : 2.0 * u_nf.x * u_nf.y / (u_nf.y + u_nf.x - z * (u_nf.y - u_nf.x));
+  o = vec4(lin, 0.0, 0.0, 1.0);
+}
+)";
+}
+void hizCapture(unsigned depthTex, int w, int h) {
+  if (std::getenv("HW_NOHIZ")) { g_hzReady = false; return; }
+  if (!g_hzTex) {
+    glGenTextures(1, &g_hzTex);
+    glBindTexture(GL_TEXTURE_2D, g_hzTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, HZ_W, HZ_H, 0, GL_RED, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glGenFramebuffers(1, &g_hzFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_hzFbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_hzTex, 0);
+    glGenBuffers(2, g_hzPbo);
+    for (int i = 0; i < 2; i++) { glBindBuffer(GL_PIXEL_PACK_BUFFER, g_hzPbo[i]); glBufferData(GL_PIXEL_PACK_BUFFER, HZ_W * HZ_H * 4, nullptr, GL_STREAM_READ); }
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+  }
+  // collect the read-back started on an earlier frame, if the GPU is done with it
+  int r = g_hzW ^ 1;
+  if (g_hzFence[r]) {
+    GLenum st = glClientWaitSync(g_hzFence[r], 0, 0);
+    if (st == GL_ALREADY_SIGNALED || st == GL_CONDITION_SATISFIED) {
+      glBindBuffer(GL_PIXEL_PACK_BUFFER, g_hzPbo[r]);
+      if (void* p = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, HZ_W * HZ_H * 4, GL_MAP_READ_BIT)) {
+        g_hz.assign((const float*)p, (const float*)p + HZ_W * HZ_H);
+        glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+        g_hzVP = g_hzVPq[r]; g_hzCam = g_hzCamQ[r]; g_hzReady = true; g_hzFrame = frameNo;
+      }
+      glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+      glDeleteSync(g_hzFence[r]); g_hzFence[r] = nullptr;
+    }
+  }
+  if (frameNo - g_hzFrame > 4) g_hzReady = false;  // stale: never cull from old data
+  if (g_hzFence[g_hzW]) return;  // that slot is still in flight
+  GLint vp[4], prev = 0;
+  glGetIntegerv(GL_VIEWPORT, vp);
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev);
+  GLboolean dt = glIsEnabled(GL_DEPTH_TEST), bl = glIsEnabled(GL_BLEND);
+  glBindFramebuffer(GL_FRAMEBUFFER, g_hzFbo);
+  glViewport(0, 0, HZ_W, HZ_H);
+  glDisable(GL_DEPTH_TEST); glDisable(GL_BLEND);
+  static const char* VS = "out vec2 v_uv;\nvoid main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); v_uv = p; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }\n";
+  Shader& s = program("hiz", VS, HZ_FS);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, depthTex);
+  s.set1i("u_d", 0);
+  s.set2f("u_nf", cam.nearZ, cam.farZ);
+  glUniform2i(s.loc("u_src"), w, h);
+  drawFullscreen();
+  glBindBuffer(GL_PIXEL_PACK_BUFFER, g_hzPbo[g_hzW]);
+  glReadPixels(0, 0, HZ_W, HZ_H, GL_RED, GL_FLOAT, nullptr);
+  glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+  g_hzFence[g_hzW] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+  g_hzVPq[g_hzW] = cam.viewProj; g_hzCamQ[g_hzW] = cam.pos;
+  g_hzW ^= 1;
+  g_hzTexVP = cam.viewProj; g_hzTexCam = cam.pos; g_hzTexFrame = frameNo;
+  glBindFramebuffer(GL_FRAMEBUFFER, prev);
+  glViewport(vp[0], vp[1], vp[2], vp[3]);
+  if (dt) glEnable(GL_DEPTH_TEST);
+  if (bl) glEnable(GL_BLEND);
+}
+bool hizTexture(unsigned& tex, Mat4& vp, Vec3& camPos, int& w, int& h) {
+  if (!g_hzTex || std::getenv("HW_NOHIZ") || frameNo - g_hzTexFrame > 3 || frameNo == g_hzTexFrame) return false;
+  tex = g_hzTex; vp = g_hzTexVP; camPos = g_hzTexCam; w = HZ_W; h = HZ_H;
+  return true;
+}
+bool hizVisible(const Vec3& mn, const Vec3& mx) {
+  if (!g_hzReady || g_hz.size() != (size_t)HZ_W * HZ_H) return true;
+  // nearest distance from that frame's camera to the box
+  Vec3 c = g_hzCam;
+  float dx = std::max(0.0f, std::max(mn.x - c.x, c.x - mx.x)), dy = std::max(0.0f, std::max(mn.y - c.y, c.y - mx.y)), dz = std::max(0.0f, std::max(mn.z - c.z, c.z - mx.z));
+  float nearD = std::sqrt(dx * dx + dy * dy + dz * dz);
+  if (nearD < 6.0f) return true;
+  float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+  for (int k = 0; k < 8; k++) {
+    Vec3 p{k & 1 ? mx.x : mn.x, k & 2 ? mx.y : mn.y, k & 4 ? mx.z : mn.z};
+    Vec4 q = g_hzVP.transform4(p, 1);
+    if (q.w <= 0.1f) return true;  // crosses the camera plane
+    float sx = q.x / q.w, sy = q.y / q.w;
+    x0 = std::min(x0, sx); x1 = std::max(x1, sx); y0 = std::min(y0, sy); y1 = std::max(y1, sy);
+  }
+  if (x1 < -1 || x0 > 1 || y1 < -1 || y0 > 1) return true;     // was off-screen last frame: no data, keep it
+  if (x0 < -1 || x1 > 1 || y0 < -1 || y1 > 1) return true;      // partly off-screen: may have just turned into view
+  int tx0 = std::max(0, (int)((x0 * 0.5f + 0.5f) * HZ_W) - 1), tx1 = std::min(HZ_W - 1, (int)((x1 * 0.5f + 0.5f) * HZ_W) + 1);
+  int ty0 = std::max(0, (int)((y0 * 0.5f + 0.5f) * HZ_H) - 1), ty1 = std::min(HZ_H - 1, (int)((y1 * 0.5f + 0.5f) * HZ_H) + 1);
+  if ((tx1 - tx0 + 1) * (ty1 - ty0 + 1) > HZ_W * HZ_H / 3) return true;  // big on screen: not worth the risk
+  float far = 0;
+  for (int y = ty0; y <= ty1; y++)
+    for (int x = tx0; x <= tx1; x++) far = std::max(far, g_hz[(size_t)y * HZ_W + x]);
+  return nearD < far * 1.03f + 1.5f;
+}
 }  // namespace render
 
 void CulledBatch::cull() {

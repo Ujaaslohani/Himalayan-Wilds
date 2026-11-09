@@ -1,5 +1,6 @@
 #include "platform.h"
 #include "../gfx/gl.h"
+#include "../gfx/gfx.h"
 #include <GLFW/glfw3.h>
 #include <cstdio>
 #include <cstdlib>
@@ -188,7 +189,7 @@ void loadSettings() {
       else if (k == "gravity") s.gravity = fv;
       else if (k == "music_volume") s.musicVolume = fv;
       else if (k == "sfx_volume") s.sfxVolume = fv;
-      else if (k == "grass_radius") s.grassRadius = fv;
+      else if (k == "grass_radius") s.grassRadius = std::max(26.0f, fv);  // older builds' auto quality saved shrunken values
       else if (k == "undergrowth_radius") s.undergrowthRadius = fv;
       else if (k == "tree_radius") s.treeRadius = fv;
       else if (k == "rock_radius") s.rockRadius = fv;
@@ -202,6 +203,9 @@ void loadSettings() {
       else if (k == "full_map") s.fullMap = bv;
       else if (k == "fps_limit") s.fpsLimit = iv;
       else if (k == "menu_fps") s.menuFps = iv;
+      else if (k == "leaf_prepass") s.leafPrepass = v == "auto" ? 2 : bv ? 1 : 0;
+      else if (k == "eco_mode") s.eco = bv;
+      else if (k == "temporal_upscale_v2") s.temporalUpscale = bv;  // new key: the old one defaulted on
       else if (k == "weather") s.weather = v == "rain" ? 1 : v == "clear" ? 2 : 0;
     }
     break;
@@ -230,7 +234,9 @@ bool init(int argc, char** argv) {
   if (!msaa.empty()) g_settings.msaa = std::atoi(msaa.c_str());
 
   if (!glfwInit()) { std::fprintf(stderr, "Failed to start GLFW\n"); return false; }
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+  // ask for OpenGL 4.3 (GPU-side culling with compute shaders); fall back to 3.3 when the driver has no 4.3
+  bool want43 = !std::getenv("HW_GL33");
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, want43 ? 4 : 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
@@ -245,6 +251,10 @@ bool init(int argc, char** argv) {
     g_fullscreen = true;
   }
   g_win = glfwCreateWindow(W, H, "Himalayan Wilds", mon, nullptr);
+  if (!g_win && want43) {
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    g_win = glfwCreateWindow(W, H, "Himalayan Wilds", mon, nullptr);
+  }
   if (!g_win && g_settings.msaa > 0) {
     glfwWindowHint(GLFW_SAMPLES, 0);
     g_win = glfwCreateWindow(W, H, "Himalayan Wilds", mon, nullptr);
@@ -252,6 +262,7 @@ bool init(int argc, char** argv) {
   if (!g_win) { std::fprintf(stderr, "Failed to create an OpenGL 3.3 window\n"); glfwTerminate(); return false; }
   glfwMakeContextCurrent(g_win);
   if (!gladLoadGL((GLADloadfunc)glfwGetProcAddress)) { std::fprintf(stderr, "Failed to load OpenGL\n"); return false; }
+  gfx::loadExtras([](const char* n) { return (void*)glfwGetProcAddress(n); });
   glfwSwapInterval(g_settings.vsync ? 1 : 0);
   glfwSetKeyCallback(g_win, onKey);
   glfwSetMouseButtonCallback(g_win, onButton);
@@ -320,8 +331,8 @@ bool saveSettings() {
   const Settings& s = g_settings;
   char b[2048];
   std::snprintf(b, sizeof b,
-                "; Himalayan Wilds settings (also editable from Options in game)\n[video]\nwidth = %d\nheight = %d\nfullscreen = %s\nvsync = %s\nmsaa = %d\nfxaa = %s\n; SSAO: soft screen-space contact shadows (costs ~0.3-0.6 ms; baked AO already covers most of it)\nssao = %s\nshadow_size = %d\ntexture_size = %d\nadaptive_quality = %s\nadaptive_detail = %s\ntri_budget = %d\nui_scale = %.2f\nrender_scale = %.2f\ndraw_distance = %.2f\nfull_map = %s\nfps_limit = %d\nmenu_fps = %d\n\n[world]\n; weather: auto (showers come and go), rain (always raining, except in snow), clear (never rains)\nweather = %s\ngrass_radius = %.0f\nundergrowth_radius = %.0f\ntree_radius = %.0f\nrock_radius = %.0f\n\n[player]\nfov = %.0f\nmouse_sensitivity = %.4f\nplayer_speed = %.2f\nsprint_multiplier = %.2f\ngravity = %.1f\n\n[audio]\nmusic_volume = %.2f\nsfx_volume = %.2f\n",
-                s.width, s.height, g_fullscreen ? "true" : "false", s.vsync ? "true" : "false", s.msaa, s.fxaa ? "true" : "false", s.ssao ? "true" : "false", s.shadowSize, s.textureSize, s.adaptiveQuality ? "true" : "false", s.adaptiveDetail ? "true" : "false", s.triBudget, s.uiScale, s.renderScale, s.drawDistance, s.fullMap ? "true" : "false", s.fpsLimit, s.menuFps,
+                "; Himalayan Wilds settings (also editable from Options in game)\n[video]\nwidth = %d\nheight = %d\nfullscreen = %s\nvsync = %s\nmsaa = %d\nfxaa = %s\n; SSAO: soft screen-space contact shadows (costs ~0.3-0.6 ms; baked AO already covers most of it)\nssao = %s\nshadow_size = %d\ntexture_size = %d\nadaptive_quality = %s\nadaptive_detail = %s\ntri_budget = %d\nui_scale = %.2f\nrender_scale = %.2f\ndraw_distance = %.2f\nfull_map = %s\nfps_limit = %d\nmenu_fps = %d\n; leaf depth pre-pass: auto (timed on your GPU), on or off. Turn off if leaves show speckles\nleaf_prepass = %s\n; temporal upscaling: renders fewer pixels and rebuilds detail from previous frames\ntemporal_upscale_v2 = %s\n; eco: automatic quality only raises detail while the GPU stays under ~50%% busy (cooler, quieter)\neco_mode = %s\n\n[world]\n; weather: auto (showers come and go), rain (always raining, except in snow), clear (never rains)\nweather = %s\ngrass_radius = %.0f\nundergrowth_radius = %.0f\ntree_radius = %.0f\nrock_radius = %.0f\n\n[player]\nfov = %.0f\nmouse_sensitivity = %.4f\nplayer_speed = %.2f\nsprint_multiplier = %.2f\ngravity = %.1f\n\n[audio]\nmusic_volume = %.2f\nsfx_volume = %.2f\n",
+                s.width, s.height, g_fullscreen ? "true" : "false", s.vsync ? "true" : "false", s.msaa, s.fxaa ? "true" : "false", s.ssao ? "true" : "false", s.shadowSize, s.textureSize, s.adaptiveQuality ? "true" : "false", s.adaptiveDetail ? "true" : "false", s.triBudget, s.uiScale, s.renderScale, s.drawDistance, s.fullMap ? "true" : "false", s.fpsLimit, s.menuFps, s.leafPrepass == 2 ? "auto" : s.leafPrepass ? "on" : "off", s.temporalUpscale ? "true" : "false", s.eco ? "true" : "false",
                 s.weather == 1 ? "rain" : s.weather == 2 ? "clear" : "auto", s.grassRadius, s.undergrowthRadius, s.treeRadius, s.rockRadius, s.fov, s.mouseSensitivity, s.playerSpeed, s.sprintMultiplier, s.gravity, s.musicVolume, s.sfxVolume);
   return writeFile(g_exeDir + "/config.ini", b);
 }

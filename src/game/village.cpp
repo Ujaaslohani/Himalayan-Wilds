@@ -748,7 +748,8 @@ void initRender() {
   glBindVertexArray(0);
 }
 
-static Mesh g_merged;
+struct StructCluster { Mesh mesh; Vec3 mn, mx; };
+static std::vector<StructCluster> g_clusters;  // structures merged per 24 m block: few draws, but culled by frustum and ridges
 static void rebuildStructures() {
   sky::invalidateStaticShadow();
   g_structDirty = false;
@@ -778,12 +779,16 @@ static void rebuildStructures() {
   }
   for (auto& b : g_structBatches) b->batch.upload();
   // merge every placed structure into one static mesh: one draw call for the whole village instead of one per style
-  g_merged.destroy();
-  MeshData md;
-  md.fmt = VFmt::P3C4;
+  for (auto& c : g_clusters) c.mesh.destroy();
+  g_clusters.clear();
+  std::map<long long, MeshData> blocks;
+  bool okAll = true;
   for (auto& s : A.structures) {
     const BuiltModel& m = structureModel(s.kind, s.look);
-    if (!m.data || m.data->fmt != VFmt::P3C4) { md.verts.clear(); break; }
+    if (!m.data || m.data->fmt != VFmt::P3C4) { okAll = false; break; }
+    long long bk = (long long)std::floor(s.x / 24.0f) * 100003LL + (long long)std::floor(s.z / 24.0f);
+    MeshData& md = blocks[bk];
+    if (md.vertexCount == 0) { md.fmt = VFmt::P3C4; md.bmin = {1e9f, 1e9f, 1e9f}; md.bmax = {-1e9f, -1e9f, -1e9f}; }
     const MeshData& src = *m.data;
     MeshData t;  // this structure in world space
     t.fmt = VFmt::P3C4;
@@ -814,16 +819,19 @@ static void rebuildStructures() {
     for (uint32_t ix : t.idx) md.idx.push_back(ix + base);
     md.vertexCount += t.vertexCount;
   }
-  if (!md.verts.empty() && md.vertexCount > 0) g_merged = uploadMesh(md);
+  if (okAll && !blocks.empty()) {
+    for (auto& kv : blocks) if (kv.second.vertexCount > 0) g_clusters.push_back({uploadMesh(kv.second), kv.second.bmin, kv.second.bmax});
+  }
 }
 
 void drawStructures() {
   if (g_structDirty) rebuildStructures();
   glEnable(GL_CULL_FACE);
-  if (g_merged.valid()) {
+  if (!g_clusters.empty()) {
     Shader& s = render::object(VFmt::P3C4, IM_NONE, SeasonKind::Build, OF_WIND);
     render::setModel(s, Mat4());
-    g_merged.draw();
+    for (auto& c : g_clusters)
+      if (render::cam.box(c.mn, c.mx) && forest::horizonVisible(c.mn, c.mx) && render::hizVisible(c.mn, c.mx)) c.mesh.draw();  // off-screen or behind a ridge: skipped
     return;
   }
   render::object(VFmt::P3C4, IM_FULL, SeasonKind::Build, OF_WIND);
@@ -933,7 +941,9 @@ static void fillResidentsInner(bool shadow) {
       MhItem it;
       it.look.kind = v == 1 ? mh::WOMAN : v == 2 ? mh::ELDER : mh::MAN;
       float ms = v == 1 ? 0.95f : v == 2 ? 0.95f : 0.98f;
-      it.base = Mat4::compose({r.x, r.y, r.z}, Quat::axisAngle({0, 1, 0}, r.yaw), {ms, ms, ms});
+      // no two villagers alike: height +-8 % and build (shoulders/girth) +-6 %, fixed per person
+      float hgt = 1.0f + (float)((r.id * 53 + 7) % 17 - 8) * 0.01f, bld = 1.0f + (float)((r.id * 29 + 3) % 13 - 6) * 0.01f;
+      it.base = Mat4::compose({r.x, r.y, r.z}, Quat::axisAngle({0, 1, 0}, r.yaw), {ms * bld, ms * hgt, ms * bld});
       it.look.tunic = lin(r.tint);
       it.look.skin = 0.84f + 0.03f * (float)((r.id * 37) % 11);
       it.look.trousers = lin(hashTint(PANTS, 8, r.id, 3));
@@ -945,7 +955,8 @@ static void fillResidentsInner(bool shadow) {
       it.pose.walk = std::min(1.0f, r.speed * (v == 1 ? 0.45f : 0.55f));
       it.pose.speed = r.speed;
       it.pose.headYaw = look;
-      it.pose.lean = r.carry >= 0 && r.speed > 0.1f ? 0.15f : 0.0f;
+      if (std::getenv("HW_MHWALK")) { it.pose.walk = 1; it.pose.speed = 1.3f; it.pose.walkPhase = (float)r.id * 0.9f; }  // test: freeze mid-stride
+      it.pose.lean = r.carry >= 0 ? 0.15f : 0.0f;
       bool dance = !chop && E.festival.t > 0 && hypot2(r.x, r.z) < 8;
       if (chop) {
         // the work pose fits the job: axe / pick swings at wood and stone, stooped gathering at herbs, hands on the counter otherwise
@@ -962,9 +973,9 @@ static void fillResidentsInner(bool shadow) {
       else if (dance) { it.pose.armL = 2.4f - std::sin(E.clock * 7 + r.id) * 0.4f; it.pose.armR = 2.4f - std::sin(E.clock * 7 + r.id + 1) * 0.4f; it.pose.walk = std::max(it.pose.walk, 0.3f); it.pose.speed = -1; it.pose.walkPhase = E.clock * 6 + r.id; }
       else if (r.speed < 0.1f) { it.pose.armL = it.pose.armR = std::sin(E.clock * 1.6f + r.id) * 0.04f; }
       if (talking) { float g = 0.22f + std::sin(E.clock * 2.1f + r.id) * 0.1f; if (r.id & 1) it.pose.armR = g, it.pose.elbowR = 0.45f; else it.pose.armL = g, it.pose.elbowL = 0.45f; }  // small, natural hand gesture
-      if (r.carry >= 0 && r.speed > 0.1f) {
+      if (r.carry >= 0) {
         // doko basket on the back: both hands hold the shoulder straps at the chest, arms barely swing
-        it.pose.armL = it.pose.armR = 0.1f; it.pose.elbowL = it.pose.elbowR = 1.3f; it.pose.armSwing = 0.25f;
+        it.pose.armL = it.pose.armR = -0.05f; it.pose.elbowL = it.pose.elbowR = 2.35f; it.pose.armOutL = it.pose.armOutR = -0.28f; it.pose.armSwing = 0.15f;  // fists up at the collarbones on the straps, elbows tucked in
         if (!shadow && g_hauls.size() < 24) {
           Vec3 sp = mh::jointWorld(it.base, it.pose, "spine_03");
           Mat4 m = Mat4::compose(sp, Quat::axisAngle({0, 1, 0}, r.yaw) * Quat::axisAngle({1, 0, 0}, it.pose.lean + 0.05f), {ms, ms, ms});
@@ -1007,13 +1018,17 @@ static void fillResidentsInner(bool shadow) {
         it.pose.speed = 1.3f; it.pose.walkPhase = E.clock * TAU * (0.85f + 0.3f * 1.3f) + k;
         it.base = Mat4::compose({x, world::getTerrainHeight(x, z), z}, Quat::axisAngle({0, 1, 0}, k == 1 ? 0.0f : 2.3f), {0.97f, 0.97f, 0.97f});
         if (k == 4) {
-          it.pose.lean = 0.15f; it.pose.armL = it.pose.armR = 0.1f; it.pose.elbowL = it.pose.elbowR = 1.3f; it.pose.armSwing = 0.25f;
+          it.pose.lean = 0.15f; it.pose.armL = it.pose.armR = -0.05f; it.pose.elbowL = it.pose.elbowR = 2.35f; it.pose.armOutL = it.pose.armOutR = -0.28f; it.pose.armSwing = 0.15f;
           if (!shadow) g_hauls.push_back({Mat4::compose(mh::jointWorld(it.base, it.pose, "spine_03"), Quat::axisAngle({0, 1, 0}, 2.3f) * Quat::axisAngle({1, 0, 0}, 0.2f), {0.97f, 0.97f, 0.97f}), 0});
         }
       }
       if (k == 2) { it.pose.armR = 0.6f; it.pose.elbowR = 0.6f; }
       if (k == 5) { it.pose.armL = it.pose.armR = 1.3f; it.pose.elbowL = it.pose.elbowR = 0.3f; }
       it.pose.headYaw = (k - 2.5f) * -0.15f;
+      if (std::getenv("HW_MHBACK")) {  // test: everyone walking, seen from behind
+        it.pose.walk = 1; it.pose.speed = 1.3f; it.pose.walkPhase = k * 1.1f; it.pose.headYaw = 0;
+        it.base = Mat4::compose({x, world::getTerrainHeight(x, z), z}, Quat::axisAngle({0, 1, 0}, PI), {0.97f, 0.97f, 0.97f});
+      }
       it.dist = 5;
       it.look.skin = it.look.skin; MH.push_back(it);
 
@@ -1094,10 +1109,10 @@ void drawResidents() {
 
 void drawShadowStatic() {
   if (g_structDirty) rebuildStructures();
-  if (g_merged.valid()) {
+  if (!g_clusters.empty()) {
     Shader& s = render::object(VFmt::P3C4, IM_NONE, SeasonKind::Build, OF_WIND);
     render::setModel(s, Mat4());
-    g_merged.draw();
+    for (auto& c : g_clusters) c.mesh.draw();
     return;
   }
   render::object(VFmt::P3C4, IM_FULL, SeasonKind::Build, OF_WIND);

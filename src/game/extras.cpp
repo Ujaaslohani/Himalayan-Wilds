@@ -1,3 +1,4 @@
+#include "../render/water.h"
 #include "extras.h"
 #include "economy.h"
 #include "season.h"
@@ -41,6 +42,7 @@ const AchDef ACH[] = {
     {"bandits", "Peacekeeper", "Clear a bandit camp", "bandit_camps", 1},
     {"sleep", "Well Rested", "Sleep through 10 nights", "slept", 10},
     {"trophies", "Trophy Hall", "Mount 5 trophies", "trophies", 5},
+    {"yeti", "Footprints of the Migoi", "A secret of the high gorge", "yeti_found", 1},
 };
 
 // ---------------------------------------------------------------- sleep
@@ -87,6 +89,9 @@ struct Bandit {
   float yaw = 0, phase = 0, speed = 0, drawT = 0, strafe = 1, strafeT = 0, wanderT = 0, tx = 0, tz = 0;
   float dodgeT = 0, dodgeCd = 0, dodgeDir = 1;  // quick sidestep out of the player's aim
   float deadT = 0;                               // seconds since killed (death fall, then the body lies a while)
+  bool melee = false;                            // axe man: charges in instead of shooting (camp level 4+)
+  float swingT = 0;                              // axe swing in progress
+  float coverX = 0, coverZ = 0, coverT = 0;      // tree he is using as cover, and when to re-pick it
   bool alert = false;
 };
 struct BArrow { Vec3 p, v; float life; bool stuck; };
@@ -110,6 +115,8 @@ void placeBandits(int n, float hp) {
     float a = k * TAU / n + 0.3f, r = 3.2f + (k & 1) * 1.6f + (n > 5 ? 1.0f : 0.0f);
     g_bandits.push_back({g_campX + std::cos(a) * r, g_campZ + std::sin(a) * r, hp, 2 + k * 0.5f});
   }
+  if (g_campLevel >= 4 && !g_bandits.empty()) g_bandits[0].melee = true;           // one axe man from level 4,
+  if (g_campLevel >= 6 && g_bandits.size() > 3) g_bandits[3].melee = true;          // two at level 6
 }
 Mesh g_tent, g_banditMesh;
 
@@ -375,7 +382,7 @@ void startBandits() {
 }
 // bandits on the MakeHuman body: dark clothes, hood, blood-red face cloth, quiver; the bow rides the left hand
 void drawBanditsMh(Shader& s) {
-  struct Item { Mat4 base; mh::Pose pose; float yaw, pull; bool alert, drawing, dead = false; Vec3 pos; };
+  struct Item { Mat4 base; mh::Pose pose; float yaw, pull; bool alert, drawing, dead = false, melee = false; Vec3 pos; };
   std::vector<Item> items;
   for (auto& b : g_bandits) {
     if (b.hp <= 0 && b.deadT > 32) continue;
@@ -409,7 +416,17 @@ void drawBanditsMh(Shader& s) {
     P.walkPhase = b.phase;
     P.walk = std::min(1.0f, b.speed * 0.4f);
     P.speed = b.speed;
-    if (b.alert) {
+    it.melee = b.melee;
+    if (b.melee) {
+      // axe man: axe ready at the shoulder; a swing raises it overhead and chops down
+      float sw = b.swingT > 0 ? b.swingT / 0.75f : 0.0f;
+      float up = sw < 0.5f ? sw / 0.5f : 1.0f - (sw - 0.5f) / 0.5f;
+      float chop = sw > 0.5f ? 1.0f - (sw - 0.5f) / 0.5f : 1.0f;
+      P.armR = b.alert ? (sw > 0 ? 0.4f + 2.4f * up * chop + 0.2f * (sw > 0.5f) : 0.9f) : 0.3f;
+      P.elbowR = b.alert ? (sw > 0 ? 0.3f + 0.8f * (1 - up) : 1.1f) : 0.5f;
+      P.armL = b.alert ? 0.5f : 0.1f; P.elbowL = 0.8f;
+      P.lean = b.alert ? 0.12f + (sw > 0.5f ? 0.15f : 0.0f) : 0.0f;
+    } else if (b.alert) {
       P.armL = 1.5f; P.armOutL = 0.25f; P.elbowL = -0.55f;                 // bow arm straight at the target
       P.armR = 1.5f; P.armOutR = 0.15f; P.elbowR = -0.5f; P.foldR = 1.0f + 1.2f * it.pull;  // string hand drawn back to the cheek
       P.headPitch = 0.05f;
@@ -432,8 +449,24 @@ void drawBanditsMh(Shader& s) {
   mh::end();
   s.use();
   const Mesh& bow = people::banditBow();
+  static Mesh axe;
+  if (!axe.valid()) {
+    Shape a;  // long-handled axe along +z: ash haft, iron head with a bearded blade
+    a.rod("#6b4a2b", {0, 0, -0.12f}, {0, 0, 0.62f}, 0.016f, 0.014f, 5)
+        .box("#4b5563", {0, 0.05f, 0.56f}, {0.012f, 0.06f, 0.045f})
+        .box("#9ca3af", {0, 0.115f, 0.55f}, {0.008f, 0.02f, 0.085f});
+    axe = uploadMesh(a.build(false));
+  }
   for (auto& it : items) {
-    if (it.dead) continue;  // the bow fell with him
+    if (it.dead) continue;  // weapons fall with him
+    if (it.melee) {
+      Vec3 h = mh::jointWorld(it.base, it.pose, "hand_r"), e = mh::jointWorld(it.base, it.pose, "lowerarm_r");
+      Vec3 dir = h - e; if (dir.length() < 1e-3f) dir = {0, 1, 0}; dir.normalize();
+      Vec3 haft = (dir + Vec3{0, 0.6f, 0}); haft.normalize();   // haft points up-forward out of the fist
+      render::setModel(s, Mat4::compose(h, Quat::fromUnitVectors({0, 0, 1}, haft), {1, 1, 1}));
+      axe.draw();
+      continue;
+    }
     Vec3 hand = mh::jointWorld(it.base, it.pose, "hand_l");
     Vec3 fwd{std::sin(it.yaw), 0, std::cos(it.yaw)}, side{std::cos(it.yaw), 0, -std::sin(it.yaw)}, up{0, 1, 0};
     if (!it.alert) { fwd = {0, -1, 0}; up = {std::sin(it.yaw), 0, std::cos(it.yaw)}; }  // lowered: bow points along the walk
@@ -662,6 +695,16 @@ int trophyAppeal() { int n = 0; for (auto& kv : g_trophy) n += kv.second; return
 bool banditsActive() { return g_banditOn; }
 bool banditCamp(float& x, float& z) { x = g_campX; z = g_campZ; return g_banditOn; }
 int banditLevel() { return g_campLevel; }
+int banditHeads(float* xyz, int maxN) {
+  if (!g_banditOn) return 0;
+  int n = 0;
+  for (auto& b : g_bandits) {
+    if (b.hp <= 0 || n >= maxN) continue;
+    xyz[n * 3] = b.x; xyz[n * 3 + 1] = world::getTerrainHeight(b.x, b.z) + 2.35f; xyz[n * 3 + 2] = b.z;
+    n++;
+  }
+  return n;
+}
 void debugTrophies() { for (auto* id : TROPHY_IDS) g_trophy[id] = id[0] == 'd' || id[0] == 'w' ? 2 : 1; }
 void debugBandits(float x, float z, int level) {
   g_campX = x; g_campZ = z; g_campLevel = level; g_campsSpawned = level;
@@ -796,7 +839,8 @@ void update(float dt) {
     { Vec3 f = render::cam.forward(); float fl = hypot2(f.x, f.z); if (fl > 0.01f) { aimX = f.x / fl; aimZ = f.z / fl; } }
     // the band fights together: one sees you or is hit, all of them turn on you
     bool camp = false;
-    for (auto& b : g_bandits) if (b.hp > 0 && (b.alert || hypot2(p.x - b.x, p.z - b.z) < T.range + 14)) camp = true;
+    float spotR = (T.range + 14) * (invCount("leopard_cloak") > 0 ? 0.7f : 1.0f);  // the leopard cloak hides you longer
+    for (auto& b : g_bandits) if (b.hp > 0 && (b.alert || hypot2(p.x - b.x, p.z - b.z) < spotR)) camp = true;
     int alive = 0; for (auto& b : g_bandits) if (b.hp > 0) alive++;
     int slot = 0;
     for (size_t i = 0; i < g_bandits.size(); i++) {
@@ -807,28 +851,63 @@ void update(float dt) {
       b.alert = camp && pCamp < 110 && E.playing;
       float mx = 0, mz = 0, spd = 0;
       if (b.alert) {
-        float keep = T.range * 0.6f;
+        bool hurtBad = b.hp < T.hp * 0.35f;
+        float keep = T.range * (hurtBad ? 0.85f : 0.6f);              // badly hurt: hang back
         float ux = dx / std::max(d, 0.01f), uz = dz / std::max(d, 0.01f);
-        b.strafeT -= dt; b.dodgeCd -= dt;
+        b.strafeT -= dt; b.dodgeCd -= dt; b.coverT -= dt;
         if (b.strafeT <= 0) { b.strafe = randf() < 0.5f ? -1.0f : 1.0f; b.strafeT = 0.8f + randf() * 1.4f; }
-        // flank: each bandit holds its own bearing around the player so they spread out and surround
-        float spreadA = (slot - (alive - 1) * 0.5f) * 0.55f;
-        float ca = std::cos(spreadA), sa = std::sin(spreadA);
-        float hx = -ux * ca + uz * sa, hz = -uz * ca - ux * sa;   // from the player toward this bandit's post
-        float postX = p.x + hx * keep - b.x, postZ = p.z + hz * keep - b.z, postD = hypot2(postX, postZ);
-        if (postD > 4) { mx = postX / postD; mz = postZ / postD; spd = postD > 14 ? 4.6f : 3.6f; }
-        else { mx = -uz * b.strafe; mz = ux * b.strafe; spd = 3.0f; }
-        if (d < keep * 0.5f) { mx = -ux; mz = -uz; spd = 4.2f; }      // too close: back off fast
+        if (b.melee) {
+          // axe man: zig-zag straight at you, swing when close
+          float zig = std::sin(E.clock * 3.1f + i) * 0.45f;
+          mx = ux + -uz * zig; mz = uz + ux * zig; float ml = hypot2(mx, mz); mx /= ml; mz /= ml;
+          spd = d > 1.7f ? 5.2f : 0.0f;
+          b.cd -= dt;
+          if (b.swingT > 0) {
+            b.swingT += dt; spd = 0;
+            if (b.swingT >= 0.38f && b.swingT - dt < 0.38f && d < 2.3f) hurt(T.dmg * 1.4f);
+            if (b.swingT >= 0.75f) { b.swingT = 0; b.cd = 1.1f + randf() * 0.4f; }
+          } else if (d < 1.9f && b.cd <= 0) b.swingT = 0.001f;
+        } else {
+          // flank: each bandit holds its own bearing around the player so they spread out and surround
+          float spreadA = (slot - (alive - 1) * 0.5f) * 0.55f;
+          float ca = std::cos(spreadA), sa = std::sin(spreadA);
+          float hx = -ux * ca + uz * sa, hz = -uz * ca - ux * sa;   // from the player toward this bandit's post
+          float postX = p.x + hx * keep - b.x, postZ = p.z + hz * keep - b.z, postD = hypot2(postX, postZ);
+          if (postD > 4) { mx = postX / postD; mz = postZ / postD; spd = postD > 14 ? 4.6f : 3.6f; }
+          else { mx = -uz * b.strafe; mz = ux * b.strafe; spd = 3.0f; }
+          // cover: between shots, put a tree trunk between you and him; step out to the side to shoot
+          if (b.coverT <= 0) {
+            b.coverT = 2.5f + randf() * 2.0f; b.coverX = b.coverZ = 0;
+            static std::vector<float> tr;
+            forest::nearTrees(b.x, b.z, 11.0f, tr, 6);
+            float best = 1e9f;
+            for (size_t k = 0; k + 3 < tr.size(); k += 4) {
+              float tx = tr[k], tz = tr[k + 2], pd = hypot2(tx - p.x, tz - p.z);
+              if (pd < 8 || pd > T.range - 2) continue;
+              float sc = hypot2(tx - b.x, tz - b.z) + std::fabs(pd - keep) * 0.3f;
+              if (sc < best) { best = sc; b.coverX = tx; b.coverZ = tz; }
+            }
+          }
+          if (b.coverX != 0 || b.coverZ != 0) {
+            float cx = b.coverX - p.x, cz = b.coverZ - p.z, cd = std::max(hypot2(cx, cz), 0.01f);
+            float gx = b.coverX + cx / cd * 1.1f, gz = b.coverZ + cz / cd * 1.1f;   // tucked behind the trunk
+            if (b.cd < 0.5f) { gx += -cz / cd * 1.5f * b.strafe; gz += cx / cd * 1.5f * b.strafe; }  // lean out to shoot
+            float vx = gx - b.x, vz = gz - b.z, vd = hypot2(vx, vz);
+            if (vd > 0.4f) { mx = vx / vd; mz = vz / vd; spd = vd > 3 ? 4.4f : 2.4f; } else spd = 0;
+          }
+          if (d < keep * 0.5f) { mx = -ux; mz = -uz; spd = 4.2f; }      // too close: back off fast
+        }
         // evade: when the player draws a bow on this bandit, sidestep hard (not mid-draw, with a cooldown)
         float onTarget = -(aimX * ux + aimZ * uz);
-        if (E.bow.drawing && onTarget > 0.985f && b.dodgeCd <= 0 && b.drawT <= 0) {
+        if (E.bow.drawing && onTarget > 0.985f && b.dodgeCd <= 0 && b.drawT <= 0 && b.swingT <= 0) {
           b.dodgeT = 0.5f; b.dodgeCd = 1.6f + randf() * 1.2f; b.dodgeDir = randf() < 0.5f ? -1.0f : 1.0f;
         }
         if (b.dodgeT > 0) { b.dodgeT -= dt; mx = -uz * b.dodgeDir; mz = ux * b.dodgeDir; spd = 6.0f; b.drawT = 0; }
         if (fromCamp > 75) { mx = (g_campX - b.x) / fromCamp; mz = (g_campZ - b.z) / fromCamp; spd = 3.6f; }
         b.yaw = std::atan2(dx, dz);
-        b.cd -= dt;
-        if (b.drawT > 0) {
+        if (!b.melee) b.cd -= dt;
+        if (b.melee) {
+        } else if (b.drawT > 0) {
           spd = 0;  // feet planted while drawing
           b.drawT += dt;
           if (b.drawT >= DRAW_TIME) {
@@ -892,6 +971,8 @@ void update(float dt) {
       Vec3 q = a.p + ab * t;
       float hd = hypot2(q.x - c.x, q.z - c.z), vy = q.y - c.y;
       if (hd < 0.42f && vy > -0.9f && vy < 0.75f) { hurt(tier(g_campLevel).dmg); dead = true; }
+      else if (forest::treeTrunkAt(np.x, np.y, np.z)) { a.stuck = true; a.life = 4.0f; a.v = a.v * 0.001f; }  // thunk: cover works both ways
+      else if (float ws = world::waterHeightAt(np.x, np.z); ws > world::getTerrainHeight(np.x, np.z) + 0.08f && np.y < ws) { water::ripple(np.x, ws, np.z, 0.9f, 0.6f); dead = true; }
       else if (np.y < world::getTerrainHeight(np.x, np.z)) { a.stuck = true; a.life = 4.0f; a.p = np; a.p.y = world::getTerrainHeight(np.x, np.z) + 0.05f; }
       else a.p = np;
     }

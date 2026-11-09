@@ -5,6 +5,7 @@
 #include "../render/render.h"
 #include "../models/shape.h"
 #include "../audio/audio.h"
+#include "extras.h"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -117,6 +118,101 @@ void buildMesh() {
   for (int i = 0; i < 6; i++) b.box("#ef4444", {std::cos(i * 1.047f) * 0.46f, 0.22f, std::sin(i * 1.047f) * 0.46f}, {0.06f, 0.06f, 0.06f});  // painted mani marks
   g_base = uploadMesh(b.build(true));
 }
+// ---- secret: the Migoi's footprints. Deep in the narrow river gorge north of the valley (~ -62, 593) a line of
+// giant bare footprints climbs out of the water to a carved stone head of the yeti with ice-blue eyes. No marker,
+// no compass entry, no map icon: it only shows within ~40 m. Touch the stone once for the reward (saved as a stat).
+struct Egg { bool placed = false; float x = 0, y = 0, z = 0, yaw = 0; std::vector<Vec3> prints; bool howled = false; };
+Egg g_egg;
+Mesh g_eggHead, g_eggPrint;
+void placeEgg() {
+  g_egg.placed = true;
+  const float ex = -62.4f, ez = 592.9f;
+  float bx = ex, bz = ez, best = 1e9f;
+  for (float rr = 2; rr <= 16; rr += 1)
+    for (int k = 0; k < 32; k++) {
+      float a = k * TAU / 32, x = ex + std::cos(a) * rr, z = ez + std::sin(a) * rr;
+      if (world::waterHeightAt(x, z) > world::getTerrainHeight(x, z) - 0.05f) continue;  // under water
+      if (rr < best) { best = rr; bx = x; bz = z; }
+    }
+  g_egg.x = bx; g_egg.z = bz; g_egg.y = world::getTerrainHeight(bx, bz);
+  g_egg.yaw = std::atan2(ex - bx, ez - bz);  // the head looks back down the gorge, at the river
+  // footprints: from the water's edge up to the stone, alternating left / right, ~1.1 m strides
+  float dx = bx - ex, dz = bz - ez, L = std::max(0.1f, hypot2(dx, dz));
+  dx /= L; dz /= L;
+  for (int i = 0; i < 7; i++) {
+    float t = L - 1.4f - i * 1.1f;
+    float side = (i & 1) ? 0.28f : -0.28f;
+    float x = ex + dx * t - dz * side, z = ez + dz * t + dx * side;
+    float g = world::getTerrainHeight(x, z), w = world::waterHeightAt(x, z);
+    if (w > g - 0.05f) continue;  // no prints under the water
+    g_egg.prints.push_back({x, g + 0.015f, z});
+  }
+  if (std::getenv("HW_EGG")) std::printf("egg at %.1f %.1f %.1f, %zu prints\n", g_egg.x, g_egg.y, g_egg.z, g_egg.prints.size());
+}
+void buildEgg() {
+  Shape h;  // weathered stone yeti head on a cairn: shaggy brow, deep sockets, a glint of blue
+  h.ball("#6b6560", {0, 0.18f, 0}, {0.55f, 0.22f, 0.5f}, {0, 0, 0}, 1);
+  h.ball("#78716c", {0, 0.45f, 0}, {0.42f, 0.2f, 0.4f}, {0, 0.6f, 0}, 1);
+  h.ball("#d6d3d1", {0, 1.0f, 0}, {0.42f, 0.48f, 0.4f}, {0, 0, 0}, 2);           // head, frost-white stone
+  h.ball("#e7e5e4", {0, 1.32f, 0.02f}, {0.36f, 0.22f, 0.34f}, {0, 0, 0}, 2);      // crown of matted fur
+  h.ball("#a8a29e", {0, 1.12f, 0.27f}, {0.34f, 0.08f, 0.14f}, {0, 0, 0}, 1);      // heavy brow
+  h.ball("#57534e", {0.13f, 1.02f, 0.33f}, {0.09f, 0.07f, 0.05f}, {0, 0, 0}, 1);   // sockets
+  h.ball("#57534e", {-0.13f, 1.02f, 0.33f}, {0.09f, 0.07f, 0.05f}, {0, 0, 0}, 1);
+  h.ball("#a8a29e", {0, 0.86f, 0.36f}, {0.16f, 0.1f, 0.09f}, {0, 0, 0}, 1);       // muzzle
+  h.box("#292524", {0, 0.78f, 0.38f}, {0.16f, 0.025f, 0.03f});                     // mouth line
+  for (int i = 0; i < 9; i++) {  // offerings: little stones and a red thread around the cairn
+    float a = i * TAU / 9;
+    h.ball(i % 3 == 0 ? "#b91c1c" : "#8a847d", {std::cos(a) * 0.62f, 0.05f, std::sin(a) * 0.58f}, {0.07f, 0.05f, 0.07f}, {0, a, 0}, 0);
+  }
+  g_eggHead = uploadMesh(h.build(true));
+  Shape f;  // one giant bare footprint (~45 cm): heel, sole, five toes, pressed dark into the ground
+  f.ball("#3f3a34", {0, 0, -0.13f}, {0.1f, 0.01f, 0.11f}, {0, 0, 0}, 1);
+  f.ball("#3f3a34", {0.01f, 0, 0.04f}, {0.12f, 0.01f, 0.13f}, {0, 0, 0}, 1);
+  const float TX[5] = {-0.1f, -0.04f, 0.02f, 0.07f, 0.11f}, TZ[5] = {0.2f, 0.225f, 0.225f, 0.21f, 0.185f}, TR[5] = {0.045f, 0.035f, 0.032f, 0.03f, 0.027f};
+  for (int i = 0; i < 5; i++) f.ball("#3f3a34", {TX[i], 0, TZ[i]}, {TR[i], 0.01f, TR[i] * 1.2f}, {0, 0, 0}, 0);
+  g_eggPrint = uploadMesh(f.build(true));
+}
+void updateEgg() {
+  if (!g_egg.placed) placeEgg();
+  if (extras::getStat("yeti_found") > 0) return;
+  const Vec3& p = E.player.pos;
+  float d = hypot2(p.x - g_egg.x, p.z - g_egg.z);
+  // a far-off howl down the gorge the first time you come near after dark
+  if (!g_egg.howled && d < 45 && E.daylight < 0.4f) { g_egg.howled = true; ambience::howl(60); }
+  if (d > 2.2f || std::fabs(p.y - 1.6f - g_egg.y) > 3.0f) return;
+  extras::stat("yeti_found");
+  E.player.maxHp += 15;
+  E.player.hp = E.player.maxHp;
+  actions::addScore(1000);
+  audio::victoryFanfare();
+  popup("Secret found!", rgbHex("#7dd3fc"));
+  actions::notify("Footprints of the Migoi. Deep in the gorge, a stone face of the snow-man watches the river. The old ones say it guards travellers who find it. +15 max health, +1000 renown.");
+}
+void drawEgg() {
+  if (!g_egg.placed) return;
+  const Vec3& p = E.player.pos;
+  float d = hypot2(p.x - g_egg.x, p.z - g_egg.z);
+  if (d > 40) return;  // a secret: nothing to see from afar
+  if (!g_eggHead.valid()) buildEgg();
+  Shader& s = render::object(VFmt::P3C4N4, IM_NONE, SeasonKind::None, 0);
+  render::setEmissive(s, Color(0, 0, 0), 0);
+  for (size_t i = 0; i < g_egg.prints.size(); i++) {
+    const Vec3& q = g_egg.prints[i];
+    render::setModel(s, Mat4::compose(q, Quat::axisAngle({0, 1, 0}, g_egg.yaw + PI + ((i & 1) ? 0.12f : -0.12f)), {1, 1, 1}));
+    g_eggPrint.draw();
+  }
+  if (!render::sphereVisible({g_egg.x, g_egg.y + 0.8f, g_egg.z}, 1.5f)) return;
+  render::setModel(s, Mat4::compose({g_egg.x, g_egg.y, g_egg.z}, Quat::axisAngle({0, 1, 0}, g_egg.yaw), {1.2f, 1.2f, 1.2f}));
+  g_eggHead.draw();
+  // ice-blue eyes: faint by day, glowing at night; they dim for good once you have found it
+  bool found = extras::getStat("yeti_found") > 0;
+  float glow = (found ? 0.35f : 1.0f) * (0.4f + 0.9f * (1 - E.daylight)) * (0.85f + 0.15f * std::sin(E.clock * 1.3f));
+  float c = std::cos(g_egg.yaw), sn = std::sin(g_egg.yaw);
+  for (int k = -1; k <= 1; k += 2) {
+    float lx = 0.13f * k * 1.2f, lz = 0.36f * 1.2f;
+    fx::glow(g_egg.x + lx * c + lz * sn, g_egg.y + 1.02f * 1.2f, g_egg.z - lx * sn + lz * c, 0.22f * glow);
+  }
+}
 }  // namespace
 
 namespace relics {
@@ -132,6 +228,7 @@ int total() { if (!g_placed) place(); return (int)g_list.size(); }
 
 void update(float) {
   if (!g_placed) place();
+  updateEgg();
   const Vec3& p = E.player.pos;
   for (auto& r : g_list) {
     if (r.found) continue;
@@ -161,6 +258,7 @@ bool position(int i, float& x, float& y, float& z) {
 
 void draw() {
   if (!g_placed) return;
+  drawEgg();
   if (!g_mesh.valid()) {
     buildMesh();
     if (std::getenv("HW_RELICAT") && !g_list.empty()) std::printf("relicdbg n=%zu r0=%.1f %.1f %.1f found=%d mesh=%d verts\n", g_list.size(), g_list[0].x, g_list[0].y, g_list[0].z, (int)g_list[0].found, g_mesh.vertexCount);

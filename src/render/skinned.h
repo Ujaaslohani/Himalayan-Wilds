@@ -18,6 +18,7 @@ struct Clip {
 };
 
 struct Model {
+  mutable float spots = 0;  // procedural leopard rosettes (cells per model unit), 0 = none
   bool ok = false;
   unsigned vao = 0, vbo = 0, ebo = 0;
   int nIdx = 0, nJ = 0;

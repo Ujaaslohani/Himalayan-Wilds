@@ -30,6 +30,51 @@ void init() {
     }
   }
 }
+PfnDispatchCompute dispatchCompute = nullptr;
+PfnMemoryBarrier memoryBarrier = nullptr;
+PfnDrawElementsIndirect drawElementsIndirect = nullptr;
+PfnDrawArraysIndirect drawArraysIndirect = nullptr;
+static bool s_compute = false;
+void loadExtras(void* (*get)(const char*)) {
+  GLint maj = 0, mnr = 0;
+  glGetIntegerv(GL_MAJOR_VERSION, &maj);
+  glGetIntegerv(GL_MINOR_VERSION, &mnr);
+  if (maj * 10 + mnr < 43 || std::getenv("HW_NOGPUCULL")) return;
+  dispatchCompute = (PfnDispatchCompute)get("glDispatchCompute");
+  memoryBarrier = (PfnMemoryBarrier)get("glMemoryBarrier");
+  drawElementsIndirect = (PfnDrawElementsIndirect)get("glDrawElementsIndirect");
+  drawArraysIndirect = (PfnDrawArraysIndirect)get("glDrawArraysIndirect");
+  s_compute = dispatchCompute && memoryBarrier && drawElementsIndirect && drawArraysIndirect;
+}
+bool hasCompute() { return s_compute; }
+GLuint compileCompute(const std::string& src) {
+  if (!s_compute) return 0;
+  std::string full = "#version 430 core\n" + src;
+  GLuint sh = glCreateShader(COMPUTE_SHADER);
+  const char* c = full.c_str();
+  glShaderSource(sh, 1, &c, nullptr);
+  glCompileShader(sh);
+  GLint ok = 0;
+  glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
+  if (!ok) {
+    char log[2048]; glGetShaderInfoLog(sh, sizeof log, nullptr, log);
+    std::fprintf(stderr, "compute shader failed: %s\n", log);
+    glDeleteShader(sh);
+    return 0;
+  }
+  GLuint p = glCreateProgram();
+  glAttachShader(p, sh);
+  glLinkProgram(p);
+  glDeleteShader(sh);
+  glGetProgramiv(p, GL_LINK_STATUS, &ok);
+  if (!ok) {
+    char log[2048]; glGetProgramInfoLog(p, sizeof log, nullptr, log);
+    std::fprintf(stderr, "compute program failed: %s\n", log);
+    glDeleteProgram(p);
+    return 0;
+  }
+  return p;
+}
 bool hasS3TC() { return s_s3tc; }
 float maxAniso() { return s_aniso; }
 size_t textureBytes() { return s_texBytes; }
@@ -302,7 +347,7 @@ bool compileShader(Shader& sh, const std::string& vs, const std::string& fs, con
   std::string head = "#version 330 core\n" + std::string(std::getenv("HW_NOGRADE") ? "#define NO_GRADE\n" : "") + defines + "\n";
   std::string cachePath;
   if (binReady()) {
-    cachePath = binPath(head + vs + "\n----\n" + fs);
+    cachePath = binPath(head + "#hwvel2\n" + vs + "\n----\n" + fs);  // tag: fragment shaders are wrapped (motion output)
     std::vector<uint8_t> bin;
     if (platform::readFile(cachePath, bin) && bin.size() > 8) {
       GLenum fmt;
@@ -316,7 +361,13 @@ bool compileShader(Shader& sh, const std::string& vs, const std::string& fs, con
     }
   }
   GLuint v = compileStage(GL_VERTEX_SHADER, head + vs);
-  GLuint f = compileStage(GL_FRAGMENT_SHADER, head + fs);
+  // every fragment shader also writes a motion vector to location 3 (scene colour attachment 1 when temporal
+  // upscaling is on; ignored by every other target). Shaders set g_hwVel; the default (0) means "static: rebuild
+  // motion from depth", and a = 0 keeps blended effects from overwriting what is behind them.
+  std::string fsw = fs;
+  if (fs.find("void main") != std::string::npos && fs.find("hw_user_main") == std::string::npos)
+    fsw = "vec4 g_hwVel = vec4(0.0);\n#define main hw_user_main\n" + fs + "\n#undef main\nlayout(location = 3) out vec4 hw_vel;\nvoid main(){ hw_user_main(); hw_vel = g_hwVel; }\n";
+  GLuint f = compileStage(GL_FRAGMENT_SHADER, head + fsw);
   if (!v || !f) return false;
   GLuint p = glCreateProgram();
   glAttachShader(p, v);
@@ -331,6 +382,10 @@ bool compileShader(Shader& sh, const std::string& vs, const std::string& fs, con
   glBindAttribLocation(p, 7, "a_i1");
   glBindAttribLocation(p, 8, "a_i2");
   glBindAttribLocation(p, 9, "a_itint");
+  // colour output pinned to location 0: the wrapper adds a location-3 motion output, and a driver may otherwise
+  // place an unqualified output anywhere (explicit layout() qualifiers still win)
+  glBindFragDataLocation(p, 0, "fragColor");
+  glBindFragDataLocation(p, 0, "o");
   if (!cachePath.empty()) pProgramParameteri(p, 0x8257 /*GL_PROGRAM_BINARY_RETRIEVABLE_HINT*/, 1);
   glLinkProgram(p);
   glDeleteShader(v);

@@ -13,7 +13,7 @@ struct Trade { const char* id; Cost give, get; };
 extern const Trade TRADES[9];
 extern const Trade CARAVAN[4];
 struct GearDef { const char *id, *name, *blurb; Cost cost; };
-constexpr int GEAR_COUNT = 5;
+constexpr int GEAR_COUNT = 6;
 extern const GearDef GEAR[GEAR_COUNT];
 
 struct Production { float every; Cost give; const char* label; };

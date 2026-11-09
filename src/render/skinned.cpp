@@ -20,8 +20,10 @@ uniform mat4 u_bones[52];
 out vec3 v_wpos;
 out vec3 v_nrm;
 out vec3 v_col;
+out vec3 v_bpos;
 out float v_depth;
 void main(){
+  v_bpos = a_pos;
   mat4 sk = u_bones[a_joints.x] * a_w.x + u_bones[a_joints.y] * a_w.y + u_bones[a_joints.z] * a_w.z + u_bones[a_joints.w] * a_w.w;
   vec4 wp = sk * vec4(a_pos, 1.0);
   v_wpos = wp.xyz;
@@ -41,15 +43,46 @@ const char* SKIN_FS = R"(
 in vec3 v_wpos;
 in vec3 v_nrm;
 in vec3 v_col;
+in vec3 v_bpos;
 in float v_depth;
+uniform float u_spots;  // >0: leopard rosettes, cells per model unit
 out vec4 fragColor;
+vec3 hash3(vec3 p) {
+  p = vec3(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6)));
+  return fract(sin(p) * 43758.5453);
+}
+// rosettes: broken dark rings round a slightly deeper tan centre, laid out on a jittered 3D cell grid in the
+// bind pose so they ride along with the skin
+float rosette(vec3 p) {
+  vec3 i = floor(p), f = fract(p);
+  float d1 = 9.0; vec3 h1 = vec3(0.0);
+  for (int z = -1; z <= 1; z++) for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec3 g = vec3(x, y, z), h = hash3(i + g), r = g + 0.15 + 0.7 * h - f;
+    float d = dot(r, r);
+    if (d < d1) { d1 = d; h1 = h; }
+  }
+  d1 = sqrt(d1);
+  float rad = 0.22 + 0.08 * h1.x, w = 0.07;
+  float ring = smoothstep(rad - w, rad - w * 0.4, d1) * (1.0 - smoothstep(rad + w * 0.4, rad + w, d1));
+  float a = atan(f.y - 0.5, f.x - 0.5) * 3.0 + h1.y * 6.283;
+  ring *= smoothstep(-0.3, 0.2, sin(a));             // break the ring into 2-4 blotches
+  float solid = 1.0 - smoothstep(0.08, 0.13, d1);    // a few small solid spots
+  return clamp(max(ring, solid * step(0.7, h1.z)), 0.0, 1.0) + 0.25 * (1.0 - smoothstep(0.0, rad, d1)) * (1.0 - step(0.7, h1.z));
+}
 void main(){
+  g_hwVel = vec4(0.0, 0.0, 2.0, 1.0);  // moving thing without its own motion vector: temporal upscaling trusts this frame more
 #ifdef SHADOW_PASS
   fragColor = vec4(1.0);
 #else
   vec3 n = normalize(v_nrm);
   if (!gl_FrontFacing) n = -n;
   vec3 alb = srgbToLinear(v_col);
+  if (u_spots > 0.0) {
+    float sat = max(max(v_col.r, v_col.g), v_col.b) - min(min(v_col.r, v_col.g), v_col.b);
+    float m = smoothstep(0.08, 0.2, sat);           // tan coat only: the white belly and muzzle stay clean
+    float r = rosette(v_bpos * u_spots);
+    alb = mix(alb, alb * vec3(0.10, 0.08, 0.06), clamp(r, 0.0, 1.0) * m);
+  }
   float sh = shadowAt(v_wpos, n);
   vec3 lit = lambert(alb, n, sh);
   // soft fur rim, like the hand-built animals
@@ -232,6 +265,7 @@ void draw(const Model& m, const Pose& p, const Mat4& xf, bool) {
   int n = std::min(m.nJ, MAX_BONES);
   for (int j = 0; j < n; j++) bones[j] = xf * p.skin[j];
   glUniformMatrix4fv(g_cur->loc("u_bones"), n, GL_FALSE, bones[0].m);
+  glUniform1f(g_cur->loc("u_spots"), m.spots);
   glBindVertexArray(m.vao);
   glDrawElements(GL_TRIANGLES, m.nIdx, GL_UNSIGNED_INT, nullptr);
   gfx::drawCalls++;

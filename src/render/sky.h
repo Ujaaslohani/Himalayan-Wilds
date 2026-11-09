@@ -13,6 +13,8 @@ Mat4 shadowMatrix();
 bool shadowNeedsUpdate();
 bool shadowStaticDirty();
 void clearStaticShadow();
+bool shadowScroll(int& dx, int& dy, float& dz);  // static cache must shift by (dx, dy) texels and dz depth
+void clearShadowScroll();
 void invalidateStaticShadow();
 void onStaticRebuild();
 Color horizon();

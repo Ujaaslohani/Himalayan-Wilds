@@ -59,7 +59,7 @@ namespace platform { void (*loadPump)() = nullptr; }
 namespace {
 
 struct SceneTarget {
-  GLuint fbo = 0, color = 0, depth = 0, msFbo = 0, msColor = 0, msDepth = 0;
+  GLuint fbo = 0, color = 0, depth = 0, vel = 0, msFbo = 0, msColor = 0, msDepth = 0;
   int w = 0, h = 0, samples = 0;
   void ensure(int W, int H) {
     if (W == w && H == h && fbo) return;
@@ -81,6 +81,16 @@ struct SceneTarget {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color, 0);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depth, 0);
+    // motion vectors for temporal upscaling (fragment location 3 -> attachment 1, enabled per frame)
+    glGenTextures(1, &vel);
+    glBindTexture(GL_TEXTURE_2D, vel);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, vel, 0);
+    { const GLenum one = GL_COLOR_ATTACHMENT0; glDrawBuffers(1, &one); }
     samples = 0;
     GLint maxS = 0;
     glGetIntegerv(GL_MAX_SAMPLES, &maxS);
@@ -113,6 +123,8 @@ struct SceneTarget {
     if (fbo) glDeleteFramebuffers(1, &fbo);
     if (color) glDeleteTextures(1, &color);
     if (depth) glDeleteTextures(1, &depth);
+    if (vel) glDeleteTextures(1, &vel);
+    vel = 0;
     if (msFbo) glDeleteFramebuffers(1, &msFbo);
     if (msColor) glDeleteRenderbuffers(1, &msColor);
     if (msDepth) glDeleteRenderbuffers(1, &msDepth);
@@ -245,6 +257,9 @@ void pumpLoading() {
   double t = platform::time();
   if (t - last < 0.05) return;
   last = t;
+  // called from inside a UI frame (a menu action that loads): drawing the loading screen here would flush and
+  // re-scale that frame's half-built text, so only keep the window responsive
+  if (ui::inFrame()) { platform::pollEvents(); return; }
   // may be called in the middle of off-screen GL work (bake, impostor capture): save and restore the GL state it touches
   GLint fbo = 0, rfbo = 0, vp[4], prog = 0, vao = 0, active = 0, tex[8], arr = 0;
   GLboolean depth = glIsEnabled(GL_DEPTH_TEST), blend = glIsEnabled(GL_BLEND), scis = glIsEnabled(GL_SCISSOR_TEST), cull = glIsEnabled(GL_CULL_FACE), dmask = GL_TRUE;
@@ -349,6 +364,7 @@ struct PassProf {
 } g_pp;
 #define PROF(x) do { if (g_pp.on && !g_prof) { int i_ = g_pp.open(#x); x; g_pp.close(i_); } else if (g_prof) { glFinish(); double t0_ = platform::time(); long long tr_ = gfx::triangles, dr_ = gfx::drawCalls; x; glFinish(); g_profDraw[#x] += gfx::drawCalls - dr_; g_profMs[#x] += (platform::time() - t0_) * 1000; g_profTri[#x] += gfx::triangles - tr_; } else { x; } } while (0)
 void drawShadows() {
+  bool staticRebuilt = false;
   if (sky::shadowStaticDirty()) {
     sky::onStaticRebuild();
     render::uploadFrame();
@@ -360,8 +376,41 @@ void drawShadows() {
     PROF(resources::drawShadow());
     render::endShadowPass();
     sky::clearStaticShadow();
+    staticRebuilt = true;
   }
-  render::beginShadowPass(sky::shadowMatrix(), g_settings.shadowSize, 2);
+  int sdx = 0, sdy = 0; float sdz = 0;
+  if (!staticRebuilt && sky::shadowScroll(sdx, sdy, sdz)) {
+    // walked a little: shift the cached static shadow and draw only the strips that scrolled in
+    const int S = g_settings.shadowSize;
+    render::scrollStaticShadow(sdx, sdy, sdz);
+    render::uploadFrame();
+    render::beginShadowPass(sky::shadowMatrix(), S, 3);
+    glEnable(GL_SCISSOR_TEST);
+    int rects[2][4]; int nr = 0;
+    if (sdx) { rects[nr][0] = sdx > 0 ? S - sdx : 0; rects[nr][1] = 0; rects[nr][2] = std::abs(sdx); rects[nr][3] = S; nr++; }
+    if (sdy) { rects[nr][0] = 0; rects[nr][1] = sdy > 0 ? S - sdy : 0; rects[nr][2] = S; rects[nr][3] = std::abs(sdy); nr++; }
+    for (int i = 0; i < nr; i++) {
+      glScissor(rects[i][0], rects[i][1], rects[i][2], rects[i][3]);
+      PROF(forest::drawShadow());
+      PROF(props::drawShadow());
+      PROF(buildings::drawShadow());
+      PROF(village::drawShadowStatic());
+      PROF(resources::drawShadow());
+    }
+    glDisable(GL_SCISSOR_TEST);
+    render::endShadowPass();
+    sky::clearShadowScroll();
+    staticRebuilt = true;  // the dynamic layer must be redone on top of the shifted cache
+  }
+  // moving things' shadows: redrawn every 2nd frame while the shadow map has not moved (a 1-frame lag at
+  // walking speed is ~3 cm, invisible), every frame when it has
+  static Mat4 lastDyn; static bool haveDyn = false; static bool staticWas = false;
+  Mat4 sm = sky::shadowMatrix();
+  bool same = haveDyn && std::memcmp(lastDyn.m, sm.m, sizeof sm.m) == 0 && !staticRebuilt;
+  (void)staticWas;
+  if (same && (render::frameNo & 1)) return;
+  lastDyn = sm; haveDyn = true;
+  render::beginShadowPass(sm, g_settings.shadowSize, 2);
   PROF(village::drawShadow());
   PROF(npcs::drawShadow());
   PROF(wildlife::drawShadow());
@@ -461,6 +510,111 @@ void main(){
   glEnable(GL_DEPTH_TEST);
   glDepthMask(GL_TRUE);
 }
+// ---- temporal upscaling (TAAU): the world renders at a lower resolution with a different sub-pixel jitter each
+// frame; a resolve pass at window resolution reprojects last frame's image with the depth buffer, clamps it to
+// this frame's local colour range (no ghosts) and blends 1/10 of the new frame in. Detail builds up over ~8
+// frames, so ~55-60% internal resolution looks close to native. Replaces the full-res FXAA pass.
+struct Taa {
+  GLuint tex[2] = {}, fbo[2] = {};
+  int w = 0, h = 0, cur = 0;
+  bool valid = false;
+  Mat4 prevVP;
+  Vec3 prevPos;
+  float jx = 0, jy = 0;  // this frame's jitter, in internal pixels
+  void ensure(int W, int H) {
+    if (W == w && H == h && fbo[0]) return;
+    release();
+    w = W; h = H;
+    for (int i = 0; i < 2; i++) {
+      glGenTextures(1, &tex[i]);
+      glBindTexture(GL_TEXTURE_2D, tex[i]);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glGenFramebuffers(1, &fbo[i]);
+      glBindFramebuffer(GL_FRAMEBUFFER, fbo[i]);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex[i], 0);
+      { const float z[4] = {0, 0, 0, 1}; glClearBufferfv(GL_COLOR, 0, z); }  // fresh memory can hold NaNs
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    valid = false;
+  }
+  void release() {
+    for (int i = 0; i < 2; i++) { if (fbo[i]) glDeleteFramebuffers(1, &fbo[i]); if (tex[i]) glDeleteTextures(1, &tex[i]); fbo[i] = tex[i] = 0; }
+    w = h = 0; valid = false;
+  }
+} g_taa;
+static float halton(int i, int b) { float f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i /= b; } return r; }
+const char* TAA_FS = R"(in vec2 v_uv;
+uniform sampler2D u_cur, u_depth, u_hist, u_vel;
+uniform mat4 u_invVP, u_taaPrevVP;  // not u_prevVP: that name is in the frame block (NVIDIA rejects the redefinition)
+uniform vec2 u_jit, u_ipx, u_nf, u_opx;
+uniform float u_valid;
+out vec4 o;
+vec3 toY(vec3 c){ return vec3(0.25 * c.r + 0.5 * c.g + 0.25 * c.b, 0.5 * c.r - 0.5 * c.b, -0.25 * c.r + 0.5 * c.g - 0.25 * c.b); }
+vec3 fromY(vec3 y){ return vec3(y.x + y.y - y.z, y.x + y.z, y.x - y.y - y.z); }
+// Catmull-Rom history fetch (5 bilinear taps): keeps the accumulated image sharp instead of blurring a little
+// every frame the way a plain bilinear re-read does
+vec3 histCR(vec2 uv){
+  vec2 sz = 1.0 / u_opx, p = uv * sz, tc = floor(p - 0.5) + 0.5, f = p - tc;
+  vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f)), w1 = 1.0 + f * f * (-2.5 + 1.5 * f), w2 = f * (0.5 + f * (2.0 - 1.5 * f)), w3 = f * f * (-0.5 + 0.5 * f);
+  vec2 w12 = w1 + w2, t0 = (tc - 1.0) * u_opx, t3 = (tc + 2.0) * u_opx, t12 = (tc + w2 / w12) * u_opx;
+  vec3 r = texture(u_hist, vec2(t12.x, t0.y)).rgb * (w12.x * w0.y)
+         + texture(u_hist, vec2(t0.x, t12.y)).rgb * (w0.x * w12.y)
+         + texture(u_hist, t12).rgb * (w12.x * w12.y)
+         + texture(u_hist, vec2(t3.x, t12.y)).rgb * (w3.x * w12.y)
+         + texture(u_hist, vec2(t12.x, t3.y)).rgb * (w12.x * w3.y);
+  float wt = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+  return max(r / wt, 0.0);
+}
+void main(){
+  vec2 cuv = v_uv - u_jit;  // undo this frame's jitter (a +j column-2 offset moves the image by -j pixels)
+  vec3 c = toY(texture(u_cur, cuv).rgb);
+  vec3 a = toY(texture(u_cur, cuv + vec2(u_ipx.x, 0.0)).rgb), b = toY(texture(u_cur, cuv - vec2(u_ipx.x, 0.0)).rgb);
+  vec3 d = toY(texture(u_cur, cuv + vec2(0.0, u_ipx.y)).rgb), e = toY(texture(u_cur, cuv - vec2(0.0, u_ipx.y)).rgb);
+  vec3 mn = min(c, min(min(a, b), min(d, e))), mx = max(c, max(max(a, b), max(d, e)));
+  // variance clip: a tighter box than min/max for flat areas, so stale colour cannot linger
+  vec3 m1 = (c + a + b + d + e) * 0.2, m2 = (c * c + a * a + b * b + d * d + e * e) * 0.2;
+  vec3 sd = sqrt(max(m2 - m1 * m1, 0.0));
+  mn = max(mn, m1 - 1.25 * sd); mx = min(mx, m1 + 1.25 * sd);
+  vec4 mv = texture(u_vel, cuv);
+  if (any(isnan(mv)) || any(isinf(mv))) mv = vec4(0.0);
+  vec2 puv;
+  float moving = 0.0;
+  if (mv.z > 0.5 && mv.z < 1.5) {
+    puv = v_uv - mv.xy;  // leaves in the wind: exact motion from the shader
+  } else {
+    // static world: rebuild motion from depth (nearest depth of the cross keeps edges with their object)
+    float dep = texture(u_depth, cuv).r;
+    dep = min(dep, min(min(texture(u_depth, cuv + vec2(u_ipx.x, 0.0)).r, texture(u_depth, cuv - vec2(u_ipx.x, 0.0)).r),
+                       min(texture(u_depth, cuv + vec2(0.0, u_ipx.y)).r, texture(u_depth, cuv - vec2(0.0, u_ipx.y)).r)));
+    float zn = min(dep, 0.99995) * 2.0 - 1.0;
+    vec4 wp = u_invVP * vec4(v_uv * 2.0 - 1.0, zn, 1.0);
+    wp /= wp.w;
+    vec4 pc = u_taaPrevVP * wp;
+    puv = pc.w > 1e-4 ? pc.xy / pc.w * 0.5 + 0.5 : vec2(-1.0);
+    float lin = 2.0 * u_nf.x * u_nf.y / (u_nf.y + u_nf.x - (dep * 2.0 - 1.0) * (u_nf.y - u_nf.x));
+    if (lin < 1.3) puv = v_uv;  // the bow and hands move with the camera
+    moving = mv.z > 1.5 ? 1.0 : 0.0;  // animals, people, grass: no vector, lean on this frame
+  }
+  // a bad motion vector or a degenerate reprojection (NaN/Inf) must never reach the history: one NaN pixel
+  // would spread and stay forever (the whole world turns black)
+  bool off = !(puv.x >= 0.0 && puv.y >= 0.0 && puv.x <= 1.0 && puv.y <= 1.0);
+  if (off) puv = v_uv;
+  vec3 h = toY(histCR(puv));
+  if (any(isnan(h)) || any(isinf(h))) { h = c; off = true; }
+  vec3 hc = min(max(h, mn), mx);  // max/min (not clamp) also scrub a NaN on GPUs that optimise isnan away
+  float rej = clamp(length(h - hc) * 5.0, 0.0, 1.0);
+  float alpha = (u_valid < 0.5 || off) ? 1.0 : mix(mix(0.08, 0.3, moving), 0.5, rej);
+  // alpha 1 must not touch the history at all: NaN * 0 is still NaN (uninitialised history texture)
+  vec3 r = alpha >= 1.0 ? fromY(c) : fromY(mix(hc, c, alpha));
+  if (any(isnan(r)) || any(isinf(r))) r = fromY(c);
+  o = vec4(clamp(r, 0.0, 4.0), 1.0);
+}
+)";
+
 int g_sunW = 0, g_sunH = 0;
 void drawWorld(float dt, bool viewModel) {
   fx::beginFrame();
@@ -501,6 +655,12 @@ void drawWorld(float dt, bool viewModel) {
   PROF(sky::drawWeather(dt));
   PROF(water::drawParticles());
   if (g_sunDepth) { if (g_scene) g_scene->resolve(GL_DEPTH_BUFFER_BIT); PROF(sunfx::occlusion(g_sunDepth, g_sunW, g_sunH)); }
+  // hierarchical-Z: last opaque depth (before the bow) feeds next frame's occlusion culling
+  if (g_scene && g_scene->fbo && !g_scene->samples) {
+    GLint cur = 0; glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &cur);
+    // every 2nd frame: at 30 fps that is still 15 occlusion snapshots a second, at half the CPU / driver cost
+    if ((GLuint)cur == g_scene->fbo && (render::frameNo & 1) == 0) PROF(render::hizCapture(g_scene->depth, g_scene->w, g_scene->h));
+  }
   if (viewModel) archery::drawViewModel(dt, player::cameraWorld());
 }
 
@@ -696,6 +856,41 @@ int main(int argc, char** argv) {
         {520, "map", [=] { A.tab = Tab::Map; }},
         {550, "journal", [=] { A.tab = Tab::Quests; }},
         {600, "night", [=] { A.tab = Tab::None; E.time = 22.5f; look(10, 30, PI, -0.02f)(); }},
+        // shadow-cache scroll check: walk in, shoot, then force a full rebuild and shoot again (should match)
+        {600, "", [=] { A.tab = Tab::None; restoreSeason(1, 2, 12.0f); E.time = 13.0f; look(58.0f, -39.1f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(58.37f, -39.1f + 0.11f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(58.74f, -39.1f + 0.22f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(59.11f, -39.1f + 0.33f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(59.48f, -39.1f + 0.44f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(59.85f, -39.1f + 0.55f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(60.22f, -39.1f + 0.66f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(60.59f, -39.1f + 0.77f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(60.96f, -39.1f + 0.88f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(61.33f, -39.1f + 0.99f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(61.70f, -39.1f + 1.10f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(62.07f, -39.1f + 1.21f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(62.44f, -39.1f + 1.32f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(62.81f, -39.1f + 1.43f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(63.18f, -39.1f + 1.54f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(63.55f, -39.1f + 1.65f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(63.92f, -39.1f + 1.76f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(64.29f, -39.1f + 1.87f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(64.66f, -39.1f + 1.98f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(65.03f, -39.1f + 2.09f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(65.40f, -39.1f + 2.20f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(65.77f, -39.1f + 2.31f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(66.14f, -39.1f + 2.42f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(66.51f, -39.1f + 2.53f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(66.88f, -39.1f + 2.64f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(67.25f, -39.1f + 2.75f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(67.62f, -39.1f + 2.86f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(67.99f, -39.1f + 2.97f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(68.36f, -39.1f + 3.08f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(68.73f, -39.1f + 3.19f, 3.6f, -0.25f)(); }},
+        {600, "", [=] { look(69.10f, -39.1f + 3.30f, 3.6f, -0.25f)(); }},
+        {600, "shA", [=] {}},
+        {600, "", [=] { sky::invalidateStaticShadow(); }},
+        {600, "shB", [=] {}},
         {640, "dusk", [=] { A.tab = Tab::None; E.time = 18.5f; look(40, -60, 1.6f, 0.05f)(); }},
         {660, "dawn", [=] { E.time = 5.8f; look(40, -60, 1.6f, 0.05f)(); }},
         {640, "vnight", [=] { A.tab = Tab::None; A.population = 5; restoreSeason(3, 1, 4.7f); E.time = 4.7f; look(4, 18, 0.2f, -0.06f)(); g_profMs.clear(); g_profTri.clear(); g_profDraw.clear(); g_prof = platform::hasArg("--prof"); }},
@@ -793,6 +988,7 @@ int main(int argc, char** argv) {
         keep.push_back({f, s.name, s.setup});
       }
       shots = keep;
+      if (std::getenv("HW_SPIN")) shots.erase(std::remove_if(shots.begin(), shots.end(), [](const Shot& s) { return s.name == "end"; }), shots.end());
     }
   }
 
@@ -939,9 +1135,12 @@ int main(int argc, char** argv) {
     bool skipWorld = hold && frozenValid && frozenW == W && frozenH == H && (freeze || unfocused || (render::frameNo & 1));
     if (!skipWorld && (sky::shadowNeedsUpdate() || sky::shadowStaticDirty())) PROF(drawShadows());
     float rs = clampf(g_settings.adaptiveQuality ? renderScale : g_settings.renderScale, 0.4f, 1.0f);
+    bool taa = g_settings.temporalUpscale && (!test || std::getenv("HW_TAA"));
+    if (taa) rs = std::max(0.5f, rs * 0.9f);  // temporal upscaling rebuilds the rest of the detail over a few frames
+    if (const char* e = std::getenv("HW_RS")) rs = (float)std::atof(e);
     if (skipWorld) rs = frozenRs;
     bool sunOn = !cut && sunfx::wanted();
-    bool scaled = rs < 0.99f || g_settings.fxaa || sunOn || hold;  // full res and no effects: draw straight to the screen, no copy
+    bool scaled = rs < 0.99f || g_settings.fxaa || sunOn || hold || taa;  // full res and no effects: draw straight to the screen, no copy
     if (scaled) {
       scene.ensure(std::max(1, (int)(W * rs)), std::max(1, (int)(H * rs)));
       glBindFramebuffer(GL_FRAMEBUFFER, scene.drawFbo());
@@ -950,7 +1149,43 @@ int main(int argc, char** argv) {
     g_sunDepth = scaled && sunOn ? scene.depth : 0;
     g_sunW = scene.w;
     g_sunH = scene.h;
+    Mat4 vpPlain = render::cam.viewProj, projPlain = render::cam.proj;
+    {
+      // motion-vector inputs for leaf shaders: last frame's un-jittered camera and wind clock
+      static Mat4 lastVP; static float lastWind = 0; static bool haveLast = false;
+      std::memcpy(render::frame.vpNoJit, vpPlain.m, 64);
+      std::memcpy(render::frame.prevVP, (haveLast ? lastVP : vpPlain).m, 64);
+      render::frame.taa[0] = haveLast ? lastWind : render::frame.season2[2];
+      if (!skipWorld) { lastVP = vpPlain; lastWind = render::frame.season2[2]; haveLast = true; }
+    }
+    bool velOn = taa && scaled && !scene.samples && scene.vel;
+    if (scaled && scene.fbo && !scene.samples) {
+      glBindFramebuffer(GL_FRAMEBUFFER, scene.fbo);
+      const GLenum bufs[4] = {GL_COLOR_ATTACHMENT0, GL_NONE, GL_NONE, GL_COLOR_ATTACHMENT1};
+      glDrawBuffers(velOn ? 4 : 1, bufs);
+      if (velOn && !skipWorld) { const float z[4] = {0, 0, 0, 0}; glClearBufferfv(GL_COLOR, 3, z); }
+    }
+    render::velocityPass = velOn;
+    if (!taa || skipWorld) render::uploadFrame();
+    if (taa && !skipWorld) {
+      // sub-pixel jitter (Halton 2,3 over 8 frames) baked into the projection for this frame's world draw only
+      int k = (int)(render::frameNo % 8) + 1;
+      g_taa.jx = halton(k, 2) - 0.5f; g_taa.jy = halton(k, 3) - 0.5f;
+      render::cam.proj.m[8] += g_taa.jx * 2.0f / scene.w;
+      render::cam.proj.m[9] += g_taa.jy * 2.0f / scene.h;
+      render::cam.update();
+      std::memcpy(render::frame.proj, render::cam.proj.m, 64);  // every shader reads the projection from the frame block
+      std::memcpy(render::frame.viewProj, render::cam.viewProj.m, 64);
+      render::uploadFrame();
+    }
     if (!skipWorld) drawWorld(dt, E.playing && !E.uiOpen && !cut && !E.photo);
+    render::velocityPass = false;
+    if (taa && !skipWorld) {
+      render::cam.proj = projPlain; render::cam.update();
+      std::memcpy(render::frame.proj, render::cam.proj.m, 64);
+      std::memcpy(render::frame.viewProj, render::cam.viewProj.m, 64);
+      render::uploadFrame();
+    }
     if (hold && !skipWorld) { frozenValid = true; frozenW = W; frozenH = H; frozenRs = rs; }
     if (scaled) {
       if (!skipWorld) scene.resolve(GL_COLOR_BUFFER_BIT);
@@ -994,16 +1229,54 @@ void main(){
   o = vec4((f + (sharpen(m) - m) * u_sharp * 0.6) * vig(), 1.0);
 }
 )";
+      GLuint presentTex = scene.color;
+      int presW = scene.w, presH = scene.h;
+      if (taa && render::program("taa", UPVS, TAA_FS).prog) {  // resolve shader failed to build: show the plain frame
+        g_taa.ensure(W, H);
+        if (!skipWorld) {
+          if ((render::cam.pos - g_taa.prevPos).length() > 4.0f) g_taa.valid = false;  // teleport / cutscene cut
+          int dst = g_taa.cur ^ 1;
+          glBindFramebuffer(GL_FRAMEBUFFER, g_taa.fbo[dst]);
+          glViewport(0, 0, W, H);
+          glDisable(GL_DEPTH_TEST);
+          glDisable(GL_BLEND);
+          Shader& t = render::program("taa", UPVS, TAA_FS);
+          // own texture units: 1 and 2 hold the terrain height / colour maps that grass and terrain rely on
+          glActiveTexture(GL_TEXTURE27); glBindTexture(GL_TEXTURE_2D, scene.color);
+          glActiveTexture(GL_TEXTURE28); glBindTexture(GL_TEXTURE_2D, scene.depth);
+          glActiveTexture(GL_TEXTURE29); glBindTexture(GL_TEXTURE_2D, g_taa.tex[g_taa.cur]);
+          glActiveTexture(GL_TEXTURE30); glBindTexture(GL_TEXTURE_2D, scene.vel);
+          glActiveTexture(GL_TEXTURE0);
+          t.set1i("u_cur", 27); t.set1i("u_depth", 28); t.set1i("u_hist", 29); t.set1i("u_vel", 30);
+          t.set2f("u_opx", 1.0f / W, 1.0f / H);
+          Mat4 inv = vpPlain.inverse();
+          glUniformMatrix4fv(t.loc("u_invVP"), 1, GL_FALSE, inv.m);
+          glUniformMatrix4fv(t.loc("u_taaPrevVP"), 1, GL_FALSE, (g_taa.valid ? g_taa.prevVP : vpPlain).m);
+          t.set2f("u_jit", g_taa.jx / scene.w, g_taa.jy / scene.h);
+          t.set2f("u_ipx", 1.0f / scene.w, 1.0f / scene.h);
+          t.set2f("u_nf", render::cam.nearZ, render::cam.farZ);
+          t.set1f("u_valid", g_taa.valid && !std::getenv("HW_TAANOHIST") ? 1.0f : 0.0f);
+          PROF(render::drawFullscreen());
+          g_taa.cur = dst;
+          g_taa.valid = true;
+          g_taa.prevVP = vpPlain;
+          g_taa.prevPos = render::cam.pos;
+          glBindFramebuffer(GL_FRAMEBUFFER, 0);
+          glViewport(0, 0, W, H);
+        }
+        presentTex = g_taa.tex[g_taa.cur];
+        presW = W; presH = H;
+      } else g_taa.valid = false;
       Shader& up = render::program("upscale", UPVS, UPFS);
       glDisable(GL_DEPTH_TEST);
       glDisable(GL_BLEND);
       glActiveTexture(GL_TEXTURE0);
-      glBindTexture(GL_TEXTURE_2D, scene.color);
+      glBindTexture(GL_TEXTURE_2D, presentTex);
       up.set1i("u_src", 0);
-      up.set2f("u_px", 1.0f / scene.w, 1.0f / scene.h);
-      up.set1i("u_fxaa", g_settings.fxaa ? 1 : 0);
+      up.set2f("u_px", 1.0f / presW, 1.0f / presH);
+      up.set1i("u_fxaa", g_settings.fxaa && !taa ? 1 : 0);  // TAA already anti-aliases
       up.set1f("u_vig", E.playing ? 1.0f : 0.0f);  // vignette folded into this pass: no extra full-screen draw
-      up.set1f("u_sharp", clampf((1.0f - rs) / 0.28f, 0.0f, 1.0f) * 0.4f);
+      up.set1f("u_sharp", taa ? 0.55f : clampf((1.0f - rs) / 0.28f, 0.0f, 1.0f) * 0.4f);  // light sharpening offsets the history blur
       PROF(render::drawFullscreen());
       glEnable(GL_DEPTH_TEST);
       if (sunOn) PROF(sunfx::composite(W, H));
@@ -1039,6 +1312,23 @@ void main(){
     if (needClick && in.mousePressed[0] && !uiTookClick && E.playing && !app::uiOpen()) needClick = false;
 
     if (takeShot) screenshot(timestampName());
+    // HW_SPIN="x,z,yaw0,rate,pitch": from frame 260 stand at x,z and turn (rate rad/frame) for 60 frames, saving each
+    // frame, to catch anything that appears only while the camera turns
+    if (test) {
+      static const char* spin = std::getenv("HW_SPIN");
+      if (spin) {
+        float sx = 0, sz = 0, y0 = 0, rate = 0, pit = 0;
+        std::sscanf(spin, "%f,%f,%f,%f,%f", &sx, &sz, &y0, &rate, &pit);
+        if (frames >= 200 && frames < 380) {
+          int k = std::max(0, frames - 300);
+          E.player.pos = {sx, world::getTerrainHeight(sx, sz) + 1.7f, sz};
+          E.player.yaw = y0 + rate * k;
+          E.player.pitch = pit;
+          if (frames >= 300) screenshot(selftest + "/spin_" + std::to_string(frames - 300) + ".png");
+        }
+        if (frames == 380) platform::requestClose();
+      }
+    }
     if (test && shotIdx < shots.size() && frames == shots[shotIdx].frame) {
       if (!shots[shotIdx].name.empty() && shots[shotIdx].name != "end") {
         int sf = statFrames + 1;
@@ -1131,12 +1421,16 @@ void main(){
         // when well under budget, give detail back to whichever was trimmed most
         auto ms = [&](const char* k) { auto it = g_pp.gAcc.find(k); return it == g_pp.gAcc.end() ? 0.0 : it->second / g_pp.frames; };
         double tr = ms("forest::drawOpaque()"), gr = ms("grass::draw()");
-        float budget = 1000.0f / std::max(30.0f, (float)platform::refreshRate());
+        float budget = 1000.0f / std::max(30.0f, g_settings.fpsLimit > 0 ? std::min((float)g_settings.fpsLimit, (float)platform::refreshRate()) : (float)platform::refreshRate());  // a 30/40 fps cap buys detail back
+        if (g_settings.eco) budget *= 0.5f;  // Eco: keep the GPU idle at least half the time
         // target fps: the player's cap (or the display); missing it for any reason (GPU, driver, laptop
         // copy-to-display) now also trims detail, not only a busy GPU timer
         float target = g_settings.fpsLimit > 0 ? std::min((float)g_settings.fpsLimit, (float)platform::refreshRate()) : (float)platform::refreshRate();
         static float over = 0, under = 0;
-        if (fs.gpuMs > budget * 0.85f || fs.fps < target * 0.9f) { over += (float)statT; under = 0; }
+        // trim detail only when the GPU is what holds the frame back: a hot laptop throttles its CPU (every CPU timer
+        // goes up together) and cutting trees then only made the picture worse without getting the fps back
+        bool gpuLimits = fs.gpuMs > budget * 0.85f || (fs.fps < target * 0.9f && fs.gpuMs >= fs.cpuMs);
+        if (gpuLimits) { over += (float)statT; under = 0; }
         else if (fs.gpuMs < budget * 0.6f && fs.fps > target * 0.97f) { under += (float)statT; over = 0; }
         else over = under = 0;
         if (over >= 1.0f) {
@@ -1154,8 +1448,9 @@ void main(){
       if (g_settings.adaptiveDetail && !test && E.playing && fs.gpuMs > 0 && !g_pp.on) {
         static float dSlow = 0, dFast = 0;
         float budget = 1000.0f / (g_settings.fpsLimit > 0 ? std::min(g_settings.fpsLimit, platform::refreshRate()) : platform::refreshRate());
+        if (g_settings.eco) budget *= 0.5f;
         float target = g_settings.fpsLimit > 0 ? std::min((float)g_settings.fpsLimit, (float)platform::refreshRate()) : (float)platform::refreshRate();
-        if (fs.gpuMs > budget * 0.85f || fs.fps < target * 0.9f) dSlow += (float)statT, dFast = 0;  // GPU busy or fps below the cap
+        if (fs.gpuMs > budget * 0.85f || (fs.fps < target * 0.9f && fs.gpuMs >= fs.cpuMs)) dSlow += (float)statT, dFast = 0;  // GPU busy (not a throttled CPU)
         else if (fs.gpuMs < budget * 0.6f && fs.fps > target * 0.97f) dFast += (float)statT, dSlow = 0;
         else dSlow = dFast = 0;
         float& ds = g_settings.detailScale;
@@ -1164,6 +1459,7 @@ void main(){
       }
       if (g_settings.adaptiveQuality && !test && E.playing) {
         float budget = 1000.0f / (g_settings.fpsLimit > 0 ? g_settings.fpsLimit : 60);
+        if (g_settings.eco) budget *= 0.5f;
         // only the GPU's own time decides: a low fps from vsync misses, driver stalls or the CPU no longer
         // makes the picture blurrier (it used to drop render scale to ~68% on frames the GPU finished in 8 ms)
         if (fs.gpuMs > budget * 0.85f) slowT += (float)statT, fastT = 0;
@@ -1175,16 +1471,17 @@ void main(){
         if (slowT > 3 && gpuBound && renderScale > floorS) {
           renderScale = std::max(floorS, renderScale - 0.05f);
           slowT = 0;
-        } else if (slowT > 2 && g_settings.grassRadius > baseGrass * 0.55f) {
-          g_settings.grassRadius *= 0.85f;
+        } else if (slowT > 2 && g_settings.undergrowthRadius > baseUnder * 0.6f) {
+          // the grass radius itself is never touched any more: shrinking it pulled the dense near grass in to ~8 m
+          // (and was saved to config.ini, so it stayed small next session). Only undergrowth and the far grass trim.
           g_settings.undergrowthRadius *= 0.88f;
+          g_settings.grassAuto = std::max(0.6f, g_settings.grassAuto - 0.1f);
           forest::markDirty();
           slowT = 0;
         } else if (fastT > 3 && renderScale < g_settings.renderScale) {
           renderScale = std::min(g_settings.renderScale, renderScale + 0.1f);
           fastT = 0;
-        } else if (fastT > 8 && g_settings.grassRadius < baseGrass) {
-          g_settings.grassRadius = std::min(baseGrass, g_settings.grassRadius * 1.1f);
+        } else if (fastT > 8 && g_settings.undergrowthRadius < baseUnder) {
           g_settings.undergrowthRadius = std::min(baseUnder, g_settings.undergrowthRadius * 1.08f);
           forest::markDirty();
           fastT = 0;
@@ -1219,3 +1516,5 @@ void main(){
   platform::shutdown();
   return 0;
 }
+
+void hwWritePng(const char* path, int w, int h, const uint8_t* rgb) { stbi_write_png(path, w, h, 3, rgb, w * 3); }

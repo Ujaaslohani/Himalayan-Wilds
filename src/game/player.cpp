@@ -1,3 +1,4 @@
+#include "../render/water.h"
 #include "../render/envmap.h"
 #include "extras.h"
 #include "../ui/screens.h"
@@ -456,6 +457,10 @@ void update(float dt) {
   P.velY += g_settings.gravity * dt;
   g_feetY += P.velY * dt;
   if (g_feetY <= ground || (P.onGround && g_feetY - ground < 0.5f && P.velY <= 0)) {
+    if (!P.onGround && P.velY < -3.0f) {  // landing a jump in the water: a proper splash
+      float ws = world::waterHeightAt(P.pos.x, P.pos.z);
+      if (ws > ground - 0.05f && ws > world::getTerrainHeight(P.pos.x, P.pos.z) + 0.05f) water::ripple(P.pos.x, ws, P.pos.z, 1.4f, 1.3f);
+    }
     g_feetY = ground;
     P.velY = 0;
     P.onGround = true;
@@ -493,7 +498,8 @@ void update(float dt) {
       // the surface underfoot picks the sound
       float terr = world::getTerrainHeight(P.pos.x, P.pos.z);
       bool onFloor = ground > terr + 0.12f;  // floors, decks, bridges, stairs
-      if (ground < world::waterHeightAt(P.pos.x, P.pos.z) + 0.2f && !onFloor) audio::footstepWater();
+      float wsurf = world::waterHeightAt(P.pos.x, P.pos.z);
+      if (ground < wsurf + 0.2f && !onFloor) { audio::footstepWater(); water::ripple(P.pos.x, wsurf, P.pos.z, P.sprinting ? 1.0f : 0.6f, P.sprinting ? 0.5f : 0.15f); }
       else if (onFloor) audio::footstepWood();
       else if (season.snow > 0.45f) audio::footstepSnow();
       else {

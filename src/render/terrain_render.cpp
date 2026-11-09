@@ -1,3 +1,4 @@
+#include "../world/forest.h"
 #include <cstring>
 #include "terrain_render.h"
 #include "../world/terrain.h"
@@ -317,13 +318,15 @@ void main(){
 )";
 
 const char* TERRAIN_FS = R"(
+#ifndef CACHE_BAKE
 in vec3 v_wpos;
 in vec2 v_cell;
 in float v_depth;
 in vec3 v_nrm;
+in vec3 v_farCol;
+#endif
 uniform sampler2D u_color;
 uniform vec4 u_grid;
-in vec3 v_farCol;
 uniform sampler2D u_bake;
 uniform sampler2D u_height;
 uniform sampler2D u_litter;
@@ -351,37 +354,25 @@ vec3 grassRatio(vec2 xz, float y, float wet){
   float l = dot(t, vec3(0.3, 0.59, 0.11));
   return clamp(mix(vec3(l), t, 0.35), vec3(0.4), vec3(1.9));
 }
-out vec4 fragColor;
-void main(){
-  float fd = distance(v_wpos.xz, u_camPos.xz);
-  if (fd > 50.0) {
-    // far ground: per-pixel grass texture (clumps, dry tufts, darker hollows) instead of flat vertex colour;
-    // finer layers fade out with distance so nothing shimmers
-    vec3 c = v_farCol;
-    float green = clamp((c.g - max(c.r, c.b)) * 10.0, 0.0, 1.0);
-    vec2 q = v_wpos.xz;
-    float amp = green * (1.0 - smoothstep(250.0, 650.0, fd));
-    if (amp > 0.01) c *= mix(vec3(1.0), grassRatio(q, v_wpos.y, envAt(q).g), amp);  // photo grass texture
-    fragColor = vec4(c, 1.0);
-    return;
-  }
-  vec4 b = texture(u_bake, v_cell / (u_grid.z - 1.0));
-  vec3 sc = b.rgb * b.rgb;
-  float road = b.a;
+// ground material (colour, bumped normal, trail weight) for one point: shared by the live terrain shader and
+// the near-ground cache bake (CACHE_BAKE: full detail regardless of camera distance)
+void terrainMaterial(vec3 wp, vec3 n, vec2 cell, float fd, out vec3 sc, out vec3 nb, out float road){
+  vec4 b = texture(u_bake, cell / (u_grid.z - 1.0));
+  sc = b.rgb * b.rgb;
+  road = b.a;
   // per-pixel normal from the filtered height field: smooth curved shading instead of triangle facets
   // normals come precomputed per vertex from the smooth (bicubic) surface: no per-pixel height lookups
-  vec3 n = normalize(v_nrm);
   if (road > 0.01 && fd < 70.0) {
-    vec4 t = texture(u_color, (v_cell + 0.5) / u_grid.z);
-    sc = groundShade(srgbToLinear(t.rgb), v_wpos, n.y, t.a);
+    vec4 t = texture(u_color, (cell + 0.5) / u_grid.z);
+    sc = groundShade(srgbToLinear(t.rgb), wp, n.y, t.a);
   }
-  vec3 nb = groundBump(n, v_wpos, road);
+  nb = groundBump(n, wp, road);
   // snow surface: wind-carved ripples and soft blue shade in hollows
   {
     float lum = dot(sc, vec3(0.3, 0.59, 0.11));
     float snowy = smoothstep(0.42, 0.62, lum) * (1.0 - smoothstep(0.06, 0.16, max(sc.r, max(sc.g, sc.b)) - min(sc.r, min(sc.g, sc.b)))) * (1.0 - smoothstep(10.0, 16.0, fd));
     if (snowy > 0.01) {
-      vec2 q = v_wpos.xz;
+      vec2 q = wp.xz;
       float rip = vnoise(vec2(q.x * 0.35 + vnoise(q * 0.08) * 3.0, q.y * 1.4));
       float drift = vnoise(q * 0.05);
       float hol = clamp(rip * 0.6 + (1.0 - drift) * 0.4, 0.0, 1.0);
@@ -390,27 +381,27 @@ void main(){
       nb = normalize(nb + vec3(-g.x, 0.0, -g.y) * 0.35 * snowy);
     }
   }
-  if (fd < 50.0) {
+  if (fd < 40.0) {
     // photographed ground up close (Poly Haven CC0): each material goes where the baked maps say it belongs.
     // Only layers with weight are sampled, so most pixels read one or two textures.
-    float fadeG = (1.0 - smoothstep(30.0, 45.0, fd)) * (1.0 - u_snow);
-    vec4 dm = texture(u_detailMap, envUV(v_wpos.xz));
-    float wet = envAt(v_wpos.xz).g;
-    vec2 uv = v_wpos.xz * 0.5;  // ~2 m per tile
-    float macro = 0.85 + 0.3 * vnoise(v_wpos.xz * 0.13);
-    vec2 wv = texture(u_waterLv, envUV(v_wpos.xz)).rg;
-    float uw = wv.g > 0.3 ? smoothstep(0.03, 0.3, wv.r - v_wpos.y) : 0.0;  // under a lake or river
+    float fadeG = (1.0 - smoothstep(26.0, 38.0, fd)) * (1.0 - u_snow);
+    vec4 dm = texture(u_detailMap, envUV(wp.xz));
+    float wet = envAt(wp.xz).g;
+    vec2 uv = wp.xz * 0.5;  // ~2 m per tile
+    float macro = 0.85 + 0.3 * vnoise(wp.xz * 0.13);
+    vec2 wv = texture(u_waterLv, envUV(wp.xz)).rg;
+    float uw = wv.g > 0.3 ? smoothstep(0.03, 0.3, wv.r - wp.y) : 0.0;  // under a lake or river
     float dryG = 1.0 - uw;
     float green0 = clamp((sc.g - max(sc.r, sc.b)) / max(sc.g, 1e-3) * 3.0, 0.0, 1.0);
     float wForest = (1.0 - smoothstep(0.6, 0.92, dm.r)) * (1.0 - road) * dryG;
     float wTrail = smoothstep(0.05, 0.5, road) * dryG;
     float wMud = smoothstep(0.35, 0.7, wet) * (1.0 - road) * (1.0 - wForest * 0.5) * dryG;
     float wDirt = smoothstep(0.6, 0.74, dm.a) * (1.0 - road) * (1.0 - wForest) * dryG;
-    float wScree = smoothstep(0.93, 0.78, n.y) * (1.0 - road) * mix(0.5, 1.0, smoothstep(40.0, 110.0, v_wpos.y)) * dryG;
+    float wScree = smoothstep(0.93, 0.78, n.y) * (1.0 - road) * mix(0.5, 1.0, smoothstep(40.0, 110.0, wp.y)) * dryG;
     {
       if (wForest > 0.01 && fadeG > 0.01) {
-        float k = smoothstep(0.35, 0.65, vnoise(v_wpos.xz * 0.21));  // patches of fresh litter among the older floor
-        vec3 f = mix(texture(u_ground, vec3(uv, 0.0)).rgb, texture(u_ground, vec3(v_wpos.xz * 0.6, 5.0)).rgb, k) * mix(1.0, 1.15, u_autumn);
+        float k = smoothstep(0.35, 0.65, vnoise(wp.xz * 0.21));  // patches of fresh litter among the older floor
+        vec3 f = mix(texture(u_ground, vec3(uv, 0.0)).rgb, texture(u_ground, vec3(wp.xz * 0.6, 5.0)).rgb, k) * mix(1.0, 1.15, u_autumn);
         sc = mix(sc, f * macro, wForest * 0.85 * fadeG);
       }
       if (wMud > 0.01) sc = mix(sc, texture(u_ground, vec3(uv, 1.0)).rgb * macro, wMud * 0.8 * fadeG);
@@ -419,16 +410,96 @@ void main(){
       if (wScree > 0.01) sc = mix(sc, texture(u_ground, vec3(uv * 0.8, 4.0)).rgb * macro, wScree * 0.8 * fadeG);
       if (uw > 0.01) sc = mix(sc, texture(u_ground, vec3(uv * 0.7, 6.0)).rgb * macro * 0.8, uw * (wv.g > 0.8 ? 0.85 : 0.5) * fadeG);  // moss on lake beds, lighter in rivers
       float rest = (1.0 - max(max(max(wForest, wMud), max(wTrail, wDirt)), max(wScree, uw))) * green0;
-      if (rest > 0.01) sc *= mix(vec3(1.0), grassRatio(v_wpos.xz, v_wpos.y, wet), rest * 0.9 * (1.0 - u_snow));  // all the way to the far ground (same texture there)
+      if (rest > 0.01) sc *= mix(vec3(1.0), grassRatio(wp.xz, wp.y, wet), rest * 0.9 * (1.0 - u_snow));  // all the way to the far ground (same texture there)
     }
   }
-  float steepN = (1.0 - smoothstep(0.4, 0.82, n.y)) * (1.0 - smoothstep(20.0, 32.0, fd)) * mix(0.35, 1.0, max(smoothstep(70.0, 125.0, v_wpos.y), 1.0 - smoothstep(0.4, 0.62, n.y)));
+  float steepN = (1.0 - smoothstep(0.4, 0.82, n.y)) * (1.0 - smoothstep(20.0, 32.0, fd)) * mix(0.35, 1.0, max(smoothstep(70.0, 125.0, wp.y), 1.0 - smoothstep(0.4, 0.62, n.y)));
   if (steepN > 0.01) {
     vec3 nr = nb;
-    vec3 alb = ptexRock(v_wpos, nr, 0.16, 1.0);
+    vec3 alb = ptexRock(wp, nr, 0.16, 1.0);
     sc *= mix(vec3(1.0), alb, steepN);
     nb = normalize(mix(nb, nr, steepN));
   }
+}
+#ifdef CACHE_BAKE
+uniform vec4 u_cb;  // world xz of fragment = u_cb.xy + gl_FragCoord.xy * u_cb.z
+layout(location = 0) out vec4 fragColor;
+layout(location = 1) out vec4 fragNrm;
+float hAt(ivec2 c){ c = clamp(c, ivec2(0), ivec2(int(u_grid.z) - 1)); return texelFetch(u_height, c, 0).r; }
+float heightAt(vec2 g){
+  vec2 i = floor(g); vec2 f = g - i; ivec2 c = ivec2(i);
+  float a = hAt(c), b = hAt(c + ivec2(1, 0)), cc = hAt(c + ivec2(0, 1)), d = hAt(c + ivec2(1, 1));
+  if (f.x + f.y <= 1.0) return a + (b - a) * f.x + (cc - a) * f.y;
+  return d + (cc - d) * (1.0 - f.x) + (b - d) * (1.0 - f.y);
+}
+void main(){
+  vec2 w = u_cb.xy + gl_FragCoord.xy * u_cb.z;
+  vec2 g = (w - u_grid.x) / u_grid.y;
+  float h = heightAt(g);
+  vec2 i = floor(g); vec2 f = g - i; ivec2 c = ivec2(i);
+  float hl = mix(hAt(c), hAt(c + ivec2(0, 1)), f.y), hr = mix(hAt(c + ivec2(1, 0)), hAt(c + ivec2(1, 1)), f.y);
+  float hd = mix(hAt(c), hAt(c + ivec2(1, 0)), f.x), hu = mix(hAt(c + ivec2(0, 1)), hAt(c + ivec2(1, 1)), f.x);
+  vec3 n = normalize(vec3(hl - hr, u_grid.y, hd - hu));
+#ifdef CACHE_RATIO
+  fragColor = vec4(grassRatio(w, h, envAt(w).g) * 0.5, 1.0);  // far photo-grass detail ratio (0.4-1.9, stored halved)
+  fragNrm = vec4(0.5, 1.0, 0.5, 1.0);
+#else
+  vec3 sc, nb; float road;
+  terrainMaterial(vec3(w.x, h, w.y), n, g, 0.0, sc, nb, road);
+  fragColor = vec4(sqrt(max(sc, vec3(0.0))), road);
+  fragNrm = vec4(nb * 0.5 + 0.5, 1.0);
+#endif
+}
+#else
+uniform sampler2D u_cacheA, u_cacheN;    // ground clipmap L1 (toroidal, u_cache.x metres across)
+uniform sampler2D u_cache0A, u_cache0N;  // L0 (u_cache.z metres across)
+uniform sampler2D u_cache2;              // L2: far photo-grass ratio
+uniform vec4 u_cache;                    // x L1 size (m), y L1 on, z L0 size, w L0 on
+uniform vec4 u_cache2p;                  // x L2 size, y on, zw L2 centre
+out vec4 fragColor;
+void main(){
+  float fd = distance(v_wpos.xz, u_camPos.xz);
+  if (fd > 40.0) {
+    // far ground: per-pixel grass texture (clumps, dry tufts, darker hollows) instead of flat vertex colour;
+    // finer layers fade out with distance so nothing shimmers
+    vec3 c = v_farCol;
+    float green = clamp((c.g - max(c.r, c.b)) * 10.0, 0.0, 1.0);
+    vec2 q = v_wpos.xz;
+    float amp = green * (1.0 - smoothstep(250.0, 650.0, fd));
+    if (amp > 0.01) {
+      // photo grass texture: from the L2 cache out to ~185 m, computed live beyond
+      float cheb = max(abs(q.x - u_cache2p.z), abs(q.y - u_cache2p.w));
+      float k2 = u_cache2p.y > 0.5 ? 1.0 - smoothstep(u_cache2p.x * 0.5 - 22.0, u_cache2p.x * 0.5 - 6.0, cheb) : 0.0;
+      vec3 rc = k2 > 0.001 ? texture(u_cache2, q / u_cache2p.x).rgb * 2.0 : vec3(1.0);
+      vec3 rl = k2 < 0.999 ? grassRatio(q, v_wpos.y, envAt(q).g) : vec3(1.0);
+      c *= mix(vec3(1.0), mix(rl, rc, k2), amp);
+    }
+    fragColor = vec4(c, 1.0);
+    return;
+  }
+  vec3 n = normalize(v_nrm);
+  // the expensive photo-ground / snow / rock material comes ready-made from the clipmap: L0 at 2.5-11 m, L1 at
+  // 11-40 m; only the ground right at the feet (and anything a cache does not cover yet) is computed live
+  float w0 = u_cache.w > 0.5 ? smoothstep(2.0, 3.0, fd) * (1.0 - smoothstep(10.5, 11.5, fd)) : 0.0;
+  float w1 = u_cache.y > 0.5 ? smoothstep(10.5, 11.5, fd) : 0.0;
+  float wl = 1.0 - w0 - w1;
+  vec3 sc = vec3(0.0), nb = vec3(0.0); float road = 0.0;
+  if (w0 > 0.001) {
+    vec2 cu = v_wpos.xz / u_cache.z;
+    vec4 ca = texture(u_cache0A, cu);
+    sc += ca.rgb * ca.rgb * w0; road += ca.a * w0; nb += (texture(u_cache0N, cu).xyz * 2.0 - 1.0) * w0;
+  }
+  if (w1 > 0.001) {
+    vec2 cu = v_wpos.xz / u_cache.x;
+    vec4 ca = texture(u_cacheA, cu);
+    sc += ca.rgb * ca.rgb * w1; road += ca.a * w1; nb += (texture(u_cacheN, cu).xyz * 2.0 - 1.0) * w1;
+  }
+  if (wl > 0.001) {
+    vec3 s2, n2; float r2;
+    terrainMaterial(v_wpos, n, v_cell, fd, s2, n2, r2);
+    sc += s2 * wl; road += r2 * wl; nb += n2 * wl;
+  }
+  nb = normalize(nb);
   float sh = shadowAt(v_wpos, n);
   // rain: soaked ground darkens, puddles collect on trails and flat hollows and mirror the sky
   float wetG = u_wet * (1.0 - u_snow);
@@ -487,10 +558,11 @@ void main(){
   }
   vec3 c = outColor(litT);
   c = mix(c, fogTint(v_wpos), fogGround(v_wpos, v_depth));
-  if (fd > 40.0) c = mix(c, v_farCol, smoothstep(40.0, 50.0, fd));
-  if (fd > 40.0 && fcov > 0.0) c = mix(c, mix(outColor(lambert(fcol, vec3(0.0, 1.0, 0.0), sh)), fogTint(v_wpos), fogGround(v_wpos, v_depth)), fcov * smoothstep(40.0, 50.0, fd));
+  if (fd > 32.0) c = mix(c, v_farCol, smoothstep(32.0, 40.0, fd));  // full procedural detail ends at 40 m (was 50): ~1/3 fewer expensive pixels
+  if (fd > 32.0 && fcov > 0.0) c = mix(c, mix(outColor(lambert(fcol, vec3(0.0, 1.0, 0.0), sh)), fogTint(v_wpos), fogGround(v_wpos, v_depth)), fcov * smoothstep(32.0, 40.0, fd));
   fragColor = vec4(c, 1.0);
 }
+#endif
 )";
 
 const char* MESH_VS = R"(
@@ -750,6 +822,7 @@ void select(int L, int nx, int nz) {
   if (mn.x >= GRID_MIN + TERRAIN_SEGMENTS * GRID_STEP || mn.z >= GRID_MIN + TERRAIN_SEGMENTS * GRID_STEP) return;
   if (!render::cam.box(mn, mx)) return;
   float d = boxDist(render::cam.pos, mn, mx);
+  if (d > 60 && !forest::horizonVisible(mn, mx)) return;  // behind a ridge: never shaded
   if (L == 0 && d < FINE_R[0]) {
     for (int c = 0; c < 4; c++) selectFine(0, (float)(nx * size + (c & 1) * 8), (float)(nz * size + (c >> 1) * 8), mn.y, mx.y);
     return;
@@ -909,6 +982,108 @@ void updateBake() {
   glDepthMask(GL_TRUE);
 }
 
+// ---- ground clipmap (virtual-texture style): the expensive ground material baked into three toroidal
+// (wrap-around) textures centred on the camera. Walking only bakes the thin strip that newly enters a square.
+//   L0  26 m, 1.3 cm texels: full material (colour + bumped normal), read at 2.5-11 m
+//   L1  96 m, 4.7 cm texels: full material, read at 11-40 m
+//   L2 384 m, 19 cm texels: the photo-grass detail ratio of the far ground, read at 40-185 m
+struct GroundCache {
+  int N; float S, SNAP; bool ratio;
+  GLuint A = 0, Nm = 0, fbo = 0;
+  bool valid = false, dirtyMips = false;
+  float x = 0, z = 0, sig = -1;
+  float ts() const { return S / N; }
+};
+GroundCache g_gc[3] = {{2048, 26.0f, 2.0f, false}, {2048, 96.0f, 4.0f, false}, {2048, 384.0f, 12.0f, true}};
+void gcBakeTexels(GroundCache& c, int tx0, int tz0, int tx1, int tz1, Shader& b) {
+  // global texel range [tx0,tx1) x [tz0,tz1) -> split where it wraps around the texture
+  const int N = c.N;
+  const float TS = c.ts();
+  auto md = [N](int v) { return ((v % N) + N) % N; };
+  for (int x = tx0; x < tx1;) {
+    int xs = md(x), xn = std::min(tx1 - x, N - xs);
+    for (int z = tz0; z < tz1;) {
+      int zs = md(z), zn = std::min(tz1 - z, N - zs);
+      glViewport(xs, zs, xn, zn);
+      // fragment (xs + i + 0.5) shows world (x + i + 0.5) * ts
+      b.set4f("u_cb", (float)(x - xs) * TS, (float)(z - zs) * TS, TS, 0);
+      render::drawFullscreen();
+      z += zn;
+    }
+    x += xn;
+  }
+  c.dirtyMips = true;
+}
+void gcUpdate(GroundCache& c) {
+  if (!c.A) {
+    auto mk = [&c](GLuint& t) {
+      glGenTextures(1, &t);
+      glBindTexture(GL_TEXTURE_2D, t);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, c.N, c.N, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 5);
+      // anisotropic taps are costly on a small GPU: 4x for the near material, none for the soft far grass ratio
+      if (gfx::maxAniso() > 1.0f && !c.ratio) glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, std::min(4.0f, gfx::maxAniso()));
+      glGenerateMipmap(GL_TEXTURE_2D);
+      gfx::addBufferBytes((long long)c.N * c.N * 4 * 4 / 3);
+    };
+    mk(c.A);
+    if (!c.ratio) mk(c.Nm);
+    glGenFramebuffers(1, &c.fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, c.fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, c.A, 0);
+    if (!c.ratio) glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, c.Nm, 0);
+    const GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+    glDrawBuffers(c.ratio ? 1 : 2, bufs);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { glBindFramebuffer(GL_FRAMEBUFFER, 0); glDeleteFramebuffers(1, &c.fbo); c.fbo = 0; }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+  if (!c.fbo || std::getenv("HW_NOCACHE")) { c.valid = false; return; }
+  const Vec3& cp = render::cam.pos;
+  float cx = std::round(cp.x / c.SNAP) * c.SNAP, cz = std::round(cp.z / c.SNAP) * c.SNAP;
+  float sig = bakeSig();
+  bool full = !c.valid || sig != c.sig || std::fabs(cx - c.x) >= c.S * 0.5f || std::fabs(cz - c.z) >= c.S * 0.5f;
+  if (!full && cx == c.x && cz == c.z) {
+    if (c.dirtyMips) {
+      glBindTexture(GL_TEXTURE_2D, c.A); glGenerateMipmap(GL_TEXTURE_2D);
+      if (c.Nm) { glBindTexture(GL_TEXTURE_2D, c.Nm); glGenerateMipmap(GL_TEXTURE_2D); }
+      c.dirtyMips = false;
+    }
+    return;
+  }
+  GLint vp[4], prev = 0;
+  glGetIntegerv(GL_VIEWPORT, vp);
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev);
+  glBindFramebuffer(GL_FRAMEBUFFER, c.fbo);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  static const std::string fsC = std::string(GROUND_COMMON) + TERRAIN_FS;
+  Shader& b = c.ratio ? render::program("terraincacheR", BAKE_VS, fsC.c_str(), "#define CACHE_BAKE\n#define CACHE_RATIO\n")
+                      : render::program("terraincache", BAKE_VS, fsC.c_str(), "#define CACHE_BAKE\n");
+  b.set1i("u_height", 1); b.set1i("u_color", 2); b.set1i("u_gdet", 3); b.set1i("u_bake", 4); b.set1i("u_mdet", 5);
+  b.set4f("u_grid", GRID_MIN, GRID_STEP, (float)GRID_N, 0);
+  const float TS = c.ts();
+  auto T = [TS](float w) { return (int)std::floor(w / TS + 0.5f); };
+  float h = c.S * 0.5f;
+  if (full) gcBakeTexels(c, T(cx - h), T(cz - h), T(cx + h), T(cz + h), b);
+  else {
+    // only the strips that scrolled into the square
+    if (cx > c.x) gcBakeTexels(c, T(c.x + h), T(cz - h), T(cx + h), T(cz + h), b);
+    else if (cx < c.x) gcBakeTexels(c, T(cx - h), T(cz - h), T(c.x - h), T(cz + h), b);
+    if (cz > c.z) gcBakeTexels(c, T(cx - h), T(c.z + h), T(cx + h), T(cz + h), b);
+    else if (cz < c.z) gcBakeTexels(c, T(cx - h), T(cz - h), T(cx + h), T(c.z - h), b);
+  }
+  c.x = cx; c.z = cz; c.sig = sig; c.valid = true;
+  glBindFramebuffer(GL_FRAMEBUFFER, prev);
+  glViewport(vp[0], vp[1], vp[2], vp[3]);
+  glEnable(GL_DEPTH_TEST);
+  glDepthMask(GL_TRUE);
+}
+
 void draw() {
   updateBake();
   if (!g_mdetTex) buildMountainDetail();  // needs the rock texture, which exists once shadows are bound
@@ -946,6 +1121,19 @@ void draw() {
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, g_colorTex.id);
     glActiveTexture(GL_TEXTURE0);
+    for (auto& c : g_gc) gcUpdate(c);
+    s.use();
+    // 25/26 L1, 27/28 L0, 29 L2 (27-29 are the temporal-upscale inputs later in the frame; it binds its own)
+    glActiveTexture(GL_TEXTURE25); glBindTexture(GL_TEXTURE_2D, g_gc[1].A);
+    glActiveTexture(GL_TEXTURE26); glBindTexture(GL_TEXTURE_2D, g_gc[1].Nm);
+    glActiveTexture(GL_TEXTURE27); glBindTexture(GL_TEXTURE_2D, g_gc[0].A);
+    glActiveTexture(GL_TEXTURE28); glBindTexture(GL_TEXTURE_2D, g_gc[0].Nm);
+    glActiveTexture(GL_TEXTURE29); glBindTexture(GL_TEXTURE_2D, g_gc[2].A);
+    glActiveTexture(GL_TEXTURE0);
+    s.set1i("u_cacheA", 25); s.set1i("u_cacheN", 26);
+    s.set1i("u_cache0A", 27); s.set1i("u_cache0N", 28); s.set1i("u_cache2", 29);
+    s.set4f("u_cache", g_gc[1].S, g_gc[1].valid ? 1.0f : 0.0f, g_gc[0].S, g_gc[0].valid ? 1.0f : 0.0f);
+    s.set4f("u_cache2p", g_gc[2].S, g_gc[2].valid ? 1.0f : 0.0f, g_gc[2].x, g_gc[2].z);
     glBindBuffer(GL_ARRAY_BUFFER, g_ivbo);
     size_t bytes = g_inst.size() * 4;
     static std::vector<float> prev;

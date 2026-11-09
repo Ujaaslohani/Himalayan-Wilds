@@ -185,7 +185,7 @@ static void drawNpcsMh(bool shadow) {
     float bob = std::fabs(std::sin(n.phase)) * std::min(0.05f, n.speed * 0.02f);
     float sc = o.female ? 0.95f : 0.98f;
     Mat4 base = Mat4::compose({n.x, n.y, n.z}, Quat::axisAngle({0, 1, 0}, n.yaw), {sc, sc, sc});
-    if (E.daylight < 0.3f && d < 80 && !(n.speed < 0.1f && d < 6)) {  // after dark: a hand lantern, like the villagers
+    if (E.daylight < 0.3f && d < 80) {  // after dark: a hand lantern, like the villagers (kept while chatting: the gesture uses the left hand)
       P.armR = 0.3f; P.elbowR = 0.55f;
       if (!shadow && lanterns.size() < 6) lanterns.push_back(mh::jointWorld(base, P, "hand_r"));
     }

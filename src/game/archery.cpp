@@ -1,3 +1,4 @@
+#include "../render/water.h"
 #include "../render/envmap.h"
 #include "extras.h"
 #include "../render/sky.h"
@@ -106,6 +107,7 @@ void update(float dt) {
       a.quat = Quat::fromUnitVectors(FWD, Vec3(a.vel.x, 0, a.vel.z).normalized());
       a.state = 3;
       a.life = 18;
+      water::ripple(a.pos.x, wsurf, a.pos.z, 0.9f, 0.6f);
       audio::footstepWater();
       makeNoise(a.pos.x, a.pos.z, 6);
       continue;

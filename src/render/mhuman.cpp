@@ -56,6 +56,7 @@ uniform int u_part;           // 0 body (+ rigid garments), 1 eyes, 2 brows
 uniform vec3 u_tunic, u_trou, u_shoe, u_sash, u_cap;
 uniform float u_skinK;
 void main(){
+  g_hwVel = vec4(0.0, 0.0, 2.0, 1.0);  // moving thing without its own motion vector: temporal upscaling trusts this frame more
 #ifdef SHADOW_PASS
   fragColor = vec4(1.0);
 #else
@@ -167,6 +168,38 @@ void addShape(std::vector<Vtx>& V, std::vector<uint32_t>& I, const Shape& s, int
     V.push_back(o);
   }
 }
+// skirts and coat flares: skinned like cloth instead of riding the pelvis rigidly. The waistband blends into the
+// lower spine (so the chest can't twist away from it at the belt) and the hem increasingly follows the thigh on
+// its side (front and back split between both), so legs swing the cloth instead of stepping out from under a cone.
+void addSkirt(std::vector<Vtx>& V, std::vector<uint32_t>& I, const Shape& s, uint8_t code, float yTop, float yHem) {
+  int pel = jointIndex("pelvis"), sp1 = jointIndex("spine_01"), tl = jointIndex("thigh_l"), tr = jointIndex("thigh_r");
+  if (pel < 0 || sp1 < 0 || tl < 0 || tr < 0) { addShape(V, I, s, std::max(0, pel), code); return; }
+  for (auto& v : s.verts) {
+    Vtx o{};
+    o.p[0] = v.p.x; o.p[1] = v.p.y; o.p[2] = v.p.z;
+    o.n[0] = v.n.x; o.n[1] = v.n.y; o.n[2] = v.n.z;
+    o.uv[0] = -1; o.uv[1] = -1;
+    float low = clampf((yTop - 0.04f - v.p.y) / std::max(0.05f, yTop - yHem), 0, 1);   // 0 at the waist, 1 at the hem
+    // the garment rings were centred on a round waist; the body's real waist is ~0.26 m wide and sits forward (back
+    // at z -0.04, front +0.135): pull the upper part onto it so there is no 6-7 cm ledge across the back
+    float fit = 1.0f - low / 0.3f; fit = fit <= 0 ? 0 : fit >= 1 ? 1 : fit * fit * (3 - 2 * fit);
+    o.p[2] = o.p[2] + fit * ((0.045f + (o.p[2] - 0.025f) * 0.7f) - o.p[2]);
+    o.p[0] = o.p[0] * (1.0f - 0.1f * fit);
+    float top = clampf((v.p.y - (yTop - 0.12f)) / 0.12f, 0, 1);                       // 1 at the waistband
+    float a = clampf(v.p.x / 0.16f, -1, 1);                                             // character's left is +x
+    float leg = low * low * 0.6f;
+    float wl = leg * 0.5f * (1 + a), wr = leg * 0.5f * (1 - a), ws = top * 0.35f;
+    float wp = std::max(0.0f, 1 - wl - wr - ws);
+    float W[4] = {wp, ws, wl, wr};
+    int J[4] = {pel, sp1, tl, tr};
+    int sum = 0;
+    for (int i = 0; i < 4; i++) { o.j[i] = (uint8_t)J[i]; o.w[i] = (uint8_t)std::lround(W[i] * 255); sum += o.w[i]; }
+    o.w[0] = (uint8_t)std::max(0, std::min(255, o.w[0] + 255 - sum));
+    o.c[0] = v.c & 255; o.c[1] = (v.c >> 8) & 255; o.c[2] = (v.c >> 16) & 255; o.c[3] = code;
+    I.push_back((uint32_t)V.size());
+    V.push_back(o);
+  }
+}
 Shape openCyl(const char* hex, float y0, float r0, float y1, float r1, float zc, float zs, int seg = 14) {
   Shape s;
   Geo g = cylinderGeo(r1, r0, y1 - y0, seg, 2, true);
@@ -242,7 +275,7 @@ void buildKinds() {
     std::vector<uint32_t> I = keep;
     Shape fixedCol;  // accessories in fixed colours
     if (k == WOMAN) {
-      addShape(V, I, openCyl("#ffffff", 0.12f, 0.33f, 1.0f, 0.15f, 0.025f, 0.85f, 16), pelvis, 3);  // long ghagra skirt
+      addSkirt(V, I, openCyl("#ffffff", 0.12f, 0.33f, 1.0f, 0.15f, 0.025f, 0.85f, 16), 3, 1.0f, 0.12f);  // long ghagra skirt
       Shape sc;  // headscarf over the crown and back, falling to the shoulders
       sc.ball("#ffffff", {0, 1.592f, 0.018f}, {0.1f, 0.1f, 0.104f}, {0, 0, 0}, 2);
       sc.box("#ffffff", {0, 1.43f, -0.075f}, {0.2f, 0.26f, 0.03f}, {0.12f, 0, 0});
@@ -255,9 +288,9 @@ void buildKinds() {
       addShape(V, I, fixedCol, head, 255);
       fixedCol = Shape();
       Shape hem; hem.add(cylinderGeo(0.334f, 0.334f, 0.035f, 16, 1, true), "#ffffff", {0, 0.16f, 0.025f}, {0, 0, 0}, {1, 1, 0.85f});
-      addShape(V, I, hem, pelvis, 4);  // contrasting hem band
+      addSkirt(V, I, hem, 4, 1.0f, 0.12f);  // contrasting hem band
     } else if (k == BANDIT) {
-      addShape(V, I, openCyl("#ffffff", 0.6f, 0.23f, 1.0f, 0.15f, 0.025f, 0.85f), pelvis, 1);
+      addSkirt(V, I, openCyl("#ffffff", 0.6f, 0.23f, 1.0f, 0.15f, 0.025f, 0.85f), 1, 1.0f, 0.6f);
       Shape q;  // quiver on the back, crossed bandolier
       q.tube("#3b2418", {0.08f, 1.15f, -0.17f}, 0.055f, 0.05f, 0.5f, 9, {0.25f, 0, -0.35f}).cone("#57534e", {0.16f, 1.44f, -0.22f}, 0.035f, 0.1f, 4, {0.25f, 0, -0.35f});
       addShape(V, I, q, spine, 255);
@@ -275,7 +308,7 @@ void buildKinds() {
       fb.ball("#1a120c", {0, 1.452f, 0.118f}, {0.05f, 0.03f, 0.04f}, {0, 0, 0}, 1);
       addShape(V, I, fb, head, 255);
     } else {
-      addShape(V, I, openCyl("#ffffff", 0.62f, 0.22f, 1.0f, 0.15f, 0.025f, 0.85f), pelvis, 1);  // chola flare to mid-thigh
+      addSkirt(V, I, openCyl("#ffffff", 0.62f, 0.22f, 1.0f, 0.15f, 0.025f, 0.85f), 1, 1.0f, 0.62f);  // chola flare to mid-thigh
       Shape topi;  // Himachali topi: wool body, coloured velvet band in front
       topi.tube(k == ELDER ? "#8a8278" : "#d6d0c4", {0, 1.628f, 0.042f}, 0.093f, 0.095f, 0.072f, 18, {0, 0, 0}, {1, 1, 1.12f});
       addShape(V, I, topi, head, 255);
@@ -295,10 +328,10 @@ void buildKinds() {
       }
       addShape(V, I, fh, head, 255);
       Shape hem; hem.add(cylinderGeo(0.224f, 0.224f, 0.03f, 16, 1, true), "#ffffff", {0, 0.635f, 0.025f}, {0, 0, 0}, {1, 1, 0.85f});
-      addShape(V, I, hem, pelvis, 4);  // contrasting hem band on the chola
+      addSkirt(V, I, hem, 4, 1.0f, 0.62f);  // contrasting hem band on the chola
     }
     Shape belt; belt.tube("#ffffff", {0, 0.975f, 0.02f}, 0.148f, 0.152f, 0.06f, 16, {0, 0, 0}, {1, 1, 0.86f});
-    addShape(V, I, belt, pelvis, 4);
+    addSkirt(V, I, belt, 4, 1.0f, 0.62f);
     g_body[k] = upload(V, I);
   }
   (void)neckJ;
@@ -393,11 +426,20 @@ void evaluate(const Pose& P, Mat4* D) {
   float sw = std::sin(P.walkPhase) * amp;
   auto set = [&](const char* n, const Quat& q) { int j = jointIndex(n); if (j >= 0) R[j] = q; };
   // arms: out of MakeHuman's A-pose down to the sides, then swing / raise forward and bend the elbows
-  set("upperarm_l", X(-(-sw * 1.15f * P.armSwing + P.armL)) * Z(-0.66f + P.armOutL));
-  set("upperarm_r", X(-(sw * 1.15f * P.armSwing + P.armR)) * Z(0.66f - P.armOutR));
+  set("upperarm_l", X(-(-sw * 1.15f * P.armSwing + P.armL)) * Z(-0.74f + P.armOutL));
+  set("upperarm_r", X(-(sw * 1.15f * P.armSwing + P.armR)) * Z(0.74f - P.armOutR));
   // MakeHuman binds the forearm ~50 deg forward of the upper arm: relax it to a natural ~25 deg at rest
-  set("lowerarm_l", X(-(-0.45f + 0.25f * P.walk + P.elbowL)));
-  set("lowerarm_r", Z(P.foldR) * X(-(-0.45f + 0.25f * P.walk + P.elbowR)));  // fold about the bind-space Z: once the arm is raised forward that swings the forearm in toward the face
+  // the elbow hinges about its own axis (perpendicular to the A-posed upper arm), so a deep bend folds the
+  // forearm up in front of the chest instead of swinging the hand out sideways once the arm is lowered
+  auto hinge = [&](const char* up, const char* lo) {
+    int a = jointIndex(up), b = jointIndex(lo);
+    if (a < 0 || b < 0) return Vec3{1, 0, 0};
+    Vec3 d = g_piv[b] - g_piv[a];
+    Vec3 h{-d.y, d.x, 0};
+    return h.length() > 1e-5f ? h.normalized() : Vec3{1, 0, 0};
+  };
+  set("lowerarm_l", Quat::axisAngle(hinge("upperarm_l", "lowerarm_l"), -(-0.45f + 0.25f * P.walk + P.elbowL)));
+  set("lowerarm_r", Z(P.foldR) * Quat::axisAngle(hinge("upperarm_r", "lowerarm_r"), -(-0.45f + 0.25f * P.walk + P.elbowR)));  // fold about the bind-space Z: once the arm is raised forward that swings the forearm in toward the face
   set("clavicle_l", Z(-0.05f));
   set("clavicle_r", Z(0.05f));
   // legs: hip swing, knee bends through the recovery half of each stride
@@ -407,16 +449,26 @@ void evaluate(const Pose& P, Mat4* D) {
   float kr = (0.08f + 0.7f * std::pow(std::max(0.0f, std::sin(P.walkPhase + 1.75f + PI)), 2.0f)) * wk;
   // MakeHuman binds the feet 36 cm apart (A-stance): bring them in under the hips, more so in stride (feet ~ on one line)
   float add = 0.09f + 0.05f * wk;
-  set("thigh_l", Z(-add) * X(-sw - 0.05f * wk));  // hips flex further forward than they extend back
-  set("thigh_r", Z(add) * X(sw - 0.05f * wk));
+  // seen from the front a real walk is a side-to-side weight shift: the hips slide over the planted foot and tip
+  // down on the swinging side, the chest leans back the other way and the head stays level. Left leg swings
+  // around phase 0 (right foot planted), right leg around phase pi.
+  float cph = std::cos(P.walkPhase) * wk;
+  float tilt = 0.05f * cph;  // pelvis obliquity, ~3 deg
+  float slide = 0.032f * cph / 0.85f;  // legs angle back under the shifted hips so the planted foot doesn't slide
+  set("thigh_l", Z(-add + tilt + slide) * X(-sw - 0.05f * wk));  // hips flex further forward than they extend back
+  set("thigh_r", Z(add + tilt + slide) * X(sw - 0.05f * wk));     // (thighs undo the pelvis tilt: legs stay plumb)
   set("calf_l", X(kl));
   set("calf_r", X(kr));
   set("foot_l", Z(add) * X(-kl * 0.45f + std::cos(P.walkPhase) * 0.18f * wk));  // heel strike / toe off
   set("foot_r", Z(-add) * X(-kr * 0.45f - std::cos(P.walkPhase) * 0.18f * wk));
-  set("spine_01", X(P.lean * 0.5f));
-  set("pelvis", Y(-std::sin(P.walkPhase) * 0.07f * wk) * Z(std::cos(P.walkPhase * 2) * 0.015f * wk));  // hips turn with the stride and drop on the swing side
-  set("spine_02", Y(std::sin(P.walkPhase) * 0.09f * wk) * X(P.lean * 0.5f + 0.04f * wk));  // counter-rotating shoulders
-  set("neck_01", Y(P.headYaw * 0.4f));
+  // the hip turn and tilt are undone gradually over the three spine joints (never more than ~3-4 deg at one joint):
+  // a single sharp counter-twist at the waist made the coat and the robe below it look like two separate pieces
+  float hipYaw = -std::sin(P.walkPhase) * 0.07f * wk;
+  set("pelvis", Y(hipYaw) * Z(-tilt));  // hips turn with the stride and drop on the swing side
+  set("spine_01", Y(-hipYaw * 0.45f) * Z(tilt * 0.45f) * X(P.lean * 0.5f));
+  set("spine_03", Y(-hipYaw * 0.45f) * Z(tilt * 0.45f));
+  set("spine_02", Y(-hipYaw * 0.55f) * Z(tilt * 0.4f) * X(P.lean * 0.5f + 0.04f * wk));  // shoulders end up gently counter-rotated
+  set("neck_01", Z(-tilt * 0.3f) * Y(P.headYaw * 0.4f));  // head stays level
   set("head", Y(P.headYaw * 0.6f) * X(P.headPitch));
   for (int j = 0; j < g_nJ; j++) {
     const Vec3& pv = g_piv[j];
@@ -425,7 +477,8 @@ void evaluate(const Pose& P, Mat4* D) {
   }
   // body rises over the planted leg and dips at each heel strike (twice per cycle)
   float bob = (std::fabs(std::cos(P.walkPhase)) - 0.64f) * 0.025f * wk;
-  if (bob != 0) { Mat4 T = Mat4::translate({0, bob, 0}); for (int j = 0; j < g_nJ; j++) D[j] = T * D[j]; }
+  float sway = -0.032f * cph;  // body over the planted foot (character's right is -X)
+  if (bob != 0 || sway != 0) { Mat4 T = Mat4::translate({sway, bob, 0}); for (int j = 0; j < g_nJ; j++) D[j] = T * D[j]; }
 }
 }  // namespace
 

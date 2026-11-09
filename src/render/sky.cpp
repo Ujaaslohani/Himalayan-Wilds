@@ -352,8 +352,9 @@ void main(){
   float gy = envGround(envAt(p.xz));
   p.y = mix(em.y, gy + 0.06, fall);
   vec2 wv = textureLod(u_waterLv, envUV(p.xz), 0.0).rg;
-  float overWater = (wv.g > 0.3 && wv.r > gy - 0.1) ? 1.0 : 0.0;
-  float wet = overWater * smoothstep(wv.r + 0.4, wv.r, p.y);
+  float overWater = wv.g > 0.25 ? 1.0 : 0.0;  // mask alone: the coarse ground grid misses the carved river bed
+  float surf = max(wv.r, gy);
+  float wet = overWater * smoothstep(surf + 0.5, surf + 0.08, p.y);
   vec4 mv = u_view * vec4(p, 1.0);
   gl_Position = u_proj * mv;
   float on = step(sd.y, u_leafAmt) * step(0.5, em.y - em.w);
@@ -431,6 +432,9 @@ Mat4 g_shadowMat;
 Vec3 g_shadowC, g_lastShadowC{1e9f, 0, 0};
 int g_shadowTick = 0;
 bool g_shadowUpdate = true, g_staticDirty = true;
+bool g_scroll = false;
+int g_scrollDx = 0, g_scrollDy = 0;
+float g_scrollDz = 0;
 float g_shadowK = 1.0f;
 Mat4 g_builtMat, g_prevMat;
 float g_mixT = 1.0f;
@@ -633,22 +637,43 @@ void update(float dt) {
   g_cover = std::min(0.95f, 0.64f + 0.22f * season.fall + 0.08f * season.autumn + 0.25f * std::min(1.0f, g_rain * 2.5f));
 
   const Vec3& p = E.player.pos;
+  // Static shadow cache that scrolls: the light-space centre snaps to whole texels, so when the player walks the
+  // cached tree/rock/building depth is shifted by an exact number of texels (plus a constant depth offset) and only
+  // the strip that scrolled into view is drawn again. A full rebuild (with the short cross-fade) only happens when
+  // the light turns ~1 degree, the world changes, or the player jumps far.
   float texel = (SHADOW_HALF * 2) / (float)g_settings.shadowSize;
-  float step = texel * std::max(1.0f, std::round(6.0f / texel));
-  Vec3 c(std::round(p.x / step) * step, std::round(p.y / step) * step, std::round(p.z / step) * step);
+  float step = texel * std::max(1.0f, std::round(1.0f / texel));  // re-centre every ~1 m: scrolling is cheap
   static Vec3 s_light{0, 1, 0};
+  static Vec3 s_ls{1e9f, 0, 0};  // snapped light-space centre the cache was built / scrolled for
   static int s_size = 0;
-  bool moved = c.distanceSq(g_shadowC) > 0.01f || s_size != g_settings.shadowSize;
-  bool turned = g_lightDir.dot(s_light) < 0.99985f;  // re-render the static (tree/rock) shadow every ~1 degree of sun travel, not every 0.2
+  bool turned = g_lightDir.dot(s_light) < 0.99985f || s_size != g_settings.shadowSize;  // re-render every ~1 degree of sun travel
+  Vec3 L = turned || g_staticDirty ? g_lightDir : s_light;
+  Vec3 up = std::fabs(L.y) > 0.99f ? Vec3(0, 0, 1) : Vec3(0, 1, 0);
+  Mat4 R = Mat4::translate({0, 0, 1}) * Mat4::lookAt(L, {0, 0, 0}, up);  // pure rotation: world -> light axes
+  Vec3 q = R.transformPoint(p);
+  Vec3 ls(std::round(q.x / step) * step, std::round(q.y / step) * step, std::round(q.z / step) * step);
+  bool moved = ls.distanceSq(s_ls) > 1e-6f;
   if (moved || turned || g_staticDirty) {
-    g_shadowC = c;
-    s_light = g_lightDir;
-    s_size = g_settings.shadowSize;
-    Vec3 lp = g_shadowC + s_light * 150;
-    Mat4 lv = Mat4::lookAt(lp, g_shadowC, std::fabs(s_light.y) > 0.99f ? Vec3(0, 0, 1) : Vec3(0, 1, 0));
+    int dx = (int)std::lround((ls.x - s_ls.x) / texel), dy = (int)std::lround((ls.y - s_ls.y) / texel);
+    if (!turned && !g_staticDirty && std::abs(dx) < g_settings.shadowSize / 3 && std::abs(dy) < g_settings.shadowSize / 3) {
+      g_scrollDx += dx; g_scrollDy += dy; g_scrollDz += (ls.z - s_ls.z) / 319.0f;  // ortho depth: (dist - 1) / 319
+      g_scroll = true;
+    } else {
+      g_staticDirty = true;
+      s_light = g_lightDir;
+      s_size = g_settings.shadowSize;
+      L = s_light;
+      up = std::fabs(L.y) > 0.99f ? Vec3(0, 0, 1) : Vec3(0, 1, 0);
+      R = Mat4::translate({0, 0, 1}) * Mat4::lookAt(L, {0, 0, 0}, up);
+      q = R.transformPoint(p);
+      ls = Vec3(std::round(q.x / step) * step, std::round(q.y / step) * step, std::round(q.z / step) * step);
+      g_scroll = false; g_scrollDx = g_scrollDy = 0; g_scrollDz = 0;
+    }
+    s_ls = ls;
+    g_shadowC = p;
+    Mat4 lv = Mat4::translate({-ls.x, -ls.y, -ls.z - 150.0f}) * R;
     Mat4 lpj = Mat4::ortho(-SHADOW_HALF, SHADOW_HALF, -SHADOW_HALF, SHADOW_HALF, 1, 320);
     g_shadowMat = lpj * lv;
-    g_staticDirty = true;
   }
   g_shadowUpdate = true;  // moving things (people, animals) every frame so their shadows glide; trees, props and the village stay cached
   g_shadowTick++;
@@ -697,7 +722,12 @@ Mat4 shadowMatrix() { return g_shadowMat; }
 Vec3 sunDir() { return g_sunDir; }
 bool shadowNeedsUpdate() { return g_shadowUpdate; }
 bool shadowStaticDirty() { return g_staticDirty; }
-void clearStaticShadow() { g_staticDirty = false; }
+void clearStaticShadow() { g_staticDirty = false; g_scroll = false; g_scrollDx = g_scrollDy = 0; g_scrollDz = 0; }
+bool shadowScroll(int& dx, int& dy, float& dz) { dx = g_scrollDx; dy = g_scrollDy; dz = g_scrollDz; return g_scroll && !g_staticDirty; }
+// after a scroll the cached static shadow (and the combined map drawn from it) is in the new matrix: the next full
+// rebuild's 0.3 s cross-fade must sample the old map with THAT matrix, not the one of the last full rebuild
+// (that mismatch showed the old shadows shifted by the distance walked, fading out: shadows "jumping")
+void clearShadowScroll() { g_scroll = false; g_scrollDx = g_scrollDy = 0; g_scrollDz = 0; g_builtMat = g_shadowMat; }
 void invalidateStaticShadow() { g_staticDirty = true; }
 void onStaticRebuild() {
   g_prevMat = g_haveBuilt ? g_builtMat : g_shadowMat;

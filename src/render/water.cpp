@@ -2,11 +2,38 @@
 #include "render.h"
 #include "../world/terrain.h"
 #include "../game/season.h"
+#include "../game/engine.h"
+#include <cstdlib>
 #include <vector>
 
 namespace {
 
 struct WVert { float p[3]; float flow[4]; float t[2]; };
+float g_rip[16][4];
+int g_ripHead = 0;
+struct Drop { Vec3 p, v; float life; };
+std::vector<Drop> g_drops;
+GLuint g_dropVao = 0, g_dropVbo = 0;
+const char* DROP_VS = R"(
+layout(location = 0) in vec4 a_pd;
+out float v_a;
+void main(){
+  vec4 vp = u_view * vec4(a_pd.xyz, 1.0);
+  gl_Position = u_proj * vp;
+  gl_PointSize = clamp(90.0 / max(-vp.z, 0.5), 1.5, 9.0);
+  v_a = a_pd.w;
+}
+)";
+const char* DROP_FS = R"(
+in float v_a;
+out vec4 fragColor;
+void main(){
+  vec2 c = gl_PointCoord - 0.5;
+  float r = dot(c, c);
+  if (r > 0.25) discard;
+  fragColor = vec4(vec3(0.86, 0.92, 0.95) * (0.25 + 0.75 * u_daylight), v_a * (1.0 - r * 3.0));
+}
+)";
 
 const char* WATER_VS = R"(
 in vec3 a_pos;
@@ -32,6 +59,8 @@ in vec4 v_flow;
 in vec2 v_tan;
 in float v_depth;
 uniform float u_lake;
+uniform vec4 u_rip[16];  // ripple sources: x, z, start time, strength
+uniform int u_ripN;
 out vec4 fragColor;
 float ripples(vec2 p, float t){
   return vnoise(p * 1.7) * 0.55 + vnoise(p * 4.1 + vec2(4.3, -t * 0.7)) * 0.45;
@@ -66,6 +95,21 @@ void main(){
     vec2 cp = v_wpos.xz * 2.2 + wd * t * 0.6;  // fine capillary ripples
     gw += (vec2(vnoise(cp), vnoise(cp + 17.3)) - 0.5) * 0.12;
     wn = normalize(wn + vec3(-gw.x, 0.0, -gw.y) * (1.0 - 0.6 * clamp(rapid * 2.0, 0.0, 1.0)));
+  }
+  // disturbances: rings spreading out from footsteps, wading animals and arrows (2.4 s each)
+  float ringLight = 0.0;
+  for (int i = 0; i < u_ripN; i++) {
+    vec4 r = u_rip[i];
+    float age = u_clock - r.z;
+    if (age < 0.0 || age > 2.4) continue;
+    vec2 dv = v_wpos.xz - r.xy;
+    float d = length(dv);
+    float rad = 0.25 + age * 1.15, fade = (1.0 - age / 2.4) * r.w;
+    float band = exp(-pow((d - rad) * 3.2, 2.0)) * fade;
+    if (band < 0.003) continue;
+    float wave = sin((d - rad) * 18.0) * band;
+    wn = normalize(wn + vec3(dv.x, 0.0, dv.y) / max(d, 0.05) * wave * 0.55);
+    ringLight += max(wave, 0.0) * 0.5;
   }
   vec3 V = normalize(u_camPos - v_wpos);
   float fres = 0.02 + 0.98 * pow(1.0 - max(dot(wn, V), 0.0), 5.0);
@@ -115,6 +159,7 @@ void main(){
   float ice = u_ice * (0.55 + 0.45 * (1.0 - smoothstep(0.0, 0.35, depth))) * (0.85 + 0.15 * n1) * (1.0 - rapid * 0.7);
   col = mix(col, vec3(0.8, 0.88, 0.93), ice);
   float lightK = clamp(0.16 + 0.84 * u_daylight, 0.0, 1.0);
+  col += vec3(0.7, 0.8, 0.85) * ringLight * 0.08 * (1.0 - u_ice);
   col *= lightK;
   float alpha = mix(smoothstep(0.0, 0.05, depth) * 0.9, 0.97, max(ice, foam * 0.6));
   alpha = max(alpha, padA);
@@ -391,6 +436,8 @@ void draw() {
   glDepthMask(GL_FALSE);
   glDisable(GL_CULL_FACE);
   Shader& s = render::program("water", WATER_VS, WATER_FS);
+  glUniform4fv(s.loc("u_rip"), 16, &g_rip[0][0]);
+  glUniform1i(s.loc("u_ripN"), 16);
   s.set1f("u_lake", 0);
   g_river.draw();
   s.set1f("u_lake", 1);
@@ -408,7 +455,45 @@ void draw() {
   glDisable(GL_BLEND);
 }
 
+void ripple(float x, float y, float z, float strength, float splash) {
+  if (render::cam.pos.distanceTo({x, y, z}) > 90) return;
+  float* r = g_rip[g_ripHead]; g_ripHead = (g_ripHead + 1) % 16;
+  r[0] = x; r[1] = z; r[2] = E.clock; r[3] = std::min(1.5f, strength);
+  int n = (int)(splash * 14);
+  for (int k = 0; k < n && g_drops.size() < 160; k++) {
+    float a = (float)std::rand() / RAND_MAX * 6.2832f, sp = 0.6f + (float)std::rand() / RAND_MAX * 1.6f * splash;
+    g_drops.push_back({{x, y + 0.02f, z}, {std::cos(a) * sp, 1.6f + (float)std::rand() / RAND_MAX * 2.4f * splash, std::sin(a) * sp}, 0.5f + (float)std::rand() / RAND_MAX * 0.4f});
+  }
+}
+
 void drawParticles() {
+  if (!g_drops.empty()) {
+    // splash droplets: simple ballistic points, a few hundred bytes a frame
+    static double last = 0; double now = E.clock; float dt = (float)std::min(0.05, std::max(0.0, now - last)); last = now;
+    std::vector<float> buf; buf.reserve(g_drops.size() * 4);
+    for (size_t i = 0; i < g_drops.size();) {
+      Drop& d = g_drops[i];
+      d.life -= dt; d.v.y -= 9.8f * dt; d.p += d.v * dt;
+      if (d.life <= 0) { d = g_drops.back(); g_drops.pop_back(); continue; }
+      buf.insert(buf.end(), {d.p.x, d.p.y, d.p.z, std::min(1.0f, d.life * 2.5f) * 0.8f});
+      i++;
+    }
+    if (!buf.empty()) {
+      if (!g_dropVao) {
+        glGenVertexArrays(1, &g_dropVao); glGenBuffers(1, &g_dropVbo);
+        glBindVertexArray(g_dropVao); glBindBuffer(GL_ARRAY_BUFFER, g_dropVbo);
+        glEnableVertexAttribArray(0); glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 16, nullptr);
+      }
+      glBindVertexArray(g_dropVao); glBindBuffer(GL_ARRAY_BUFFER, g_dropVbo);
+      glBufferData(GL_ARRAY_BUFFER, buf.size() * 4, buf.data(), GL_STREAM_DRAW);
+      glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); glDepthMask(GL_FALSE); glEnable(GL_PROGRAM_POINT_SIZE);
+      render::program("drops", DROP_VS, DROP_FS);
+      glDrawArrays(GL_POINTS, 0, (GLsizei)(buf.size() / 4));
+      gfx::drawCalls++;
+      glBindVertexArray(0);
+      glDepthMask(GL_TRUE); glDisable(GL_BLEND);
+    }
+  }
   if (render::cam.pos.distanceTo(g_poolCenter) > 400 || !render::sphereVisible(g_poolCenter, 20)) return;
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
