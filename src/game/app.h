@@ -9,6 +9,7 @@ namespace app {
 void init();
 void newGame();
 bool continueGame(int slot = -1);
+extern int g_pendingContinue;   // slot to load at the start of the next frame (behind a loading screen), -2 none
 int latestSlot();
 void quitToTitle();
 void update(float dt);

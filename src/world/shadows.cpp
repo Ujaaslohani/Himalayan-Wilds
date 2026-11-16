@@ -46,6 +46,18 @@ CastInstance castInstance(float x, float y, float z, float r, float h) {
   float e = std::max(0.6f, r * 0.5f);
   Vec3 n(world::getTerrainHeight(x - e, z) - world::getTerrainHeight(x + e, z), 2 * e, world::getTerrainHeight(x, z - e) - world::getTerrainHeight(x, z + e));
   n.normalize();
+  // the blob is a flat card on the ground's tilt at the object: where the ground falls away under it (a crest, a
+  // trail cut, a bank) the card hangs in the air as a shadow with nothing under it. Drop those blobs.
+  float reach = r + std::min(h * 0.9f, h * 1.6f);
+  float g0 = world::getTerrainHeight(x, z);
+  for (int k = 0; k < 8; k++) {
+    float a = k * 0.785398f;
+    for (float f : {0.5f, 1.0f}) {
+      float dx = std::cos(a) * reach * f, dz = std::sin(a) * reach * f;
+      float plane = g0 - (n.x * dx + n.z * dz) / std::max(0.2f, n.y);
+      if (plane - world::getTerrainHeight(x + dx, z + dz) > 0.3f) return {{x, y, z}, 0, {0, 1, 0}, 0};
+    }
+  }
   return {{x, y, z}, r, {n.x, n.y, n.z}, h};
 }
 

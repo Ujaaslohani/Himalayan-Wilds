@@ -448,6 +448,53 @@ void thinCanopy(MeshData& d, float innerKeep, float outerKeep, float grow) {
   d.idx.swap(oi);
 }
 
+// Continuous crown detail. Every leaf card gets its own centre and an importance rank (outer shell first, inner fill
+// last). The vertex shader shrinks the least important cards to nothing as the tree recedes and enlarges the rest to
+// keep the crown as full, so the tree never swaps to a different model: leaves just grow in as you walk up to it.
+static void buildCardStream(MeshData& d) {
+  d.card.clear();
+  if (d.fmt != VFmt::GLB || d.idx.empty()) return;
+  const VtxGlb* v = (const VtxGlb*)d.verts.data();
+  size_t nv = d.vertexCount, nt = d.idx.size() / 3;
+  std::vector<uint32_t> parent(nv);
+  for (size_t i = 0; i < nv; i++) parent[i] = (uint32_t)i;
+  auto find = [&](uint32_t x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  for (size_t t = 0; t < nt; t++) {
+    uint32_t a = find(d.idx[t * 3]);
+    parent[find(d.idx[t * 3 + 1])] = a;
+    parent[find(d.idx[t * 3 + 2])] = a;
+  }
+  struct C { Vec3 sum{0, 0, 0}; int n = 0; float key = 0, rank = 0; };
+  std::unordered_map<uint32_t, C> cs;
+  Vec3 mn{1e9f, 1e9f, 1e9f}, mx{-1e9f, -1e9f, -1e9f};
+  std::vector<uint8_t> used(nv, 0);
+  for (uint32_t i : d.idx) used[i] = 1;
+  for (size_t i = 0; i < nv; i++) {
+    if (!used[i]) continue;
+    Vec3 p(v[i].p[0], v[i].p[1], v[i].p[2]);
+    C& c = cs[find((uint32_t)i)];
+    c.sum = c.sum + p; c.n++;
+    mn = {std::min(mn.x, p.x), std::min(mn.y, p.y), std::min(mn.z, p.z)};
+    mx = {std::max(mx.x, p.x), std::max(mx.y, p.y), std::max(mx.z, p.z)};
+  }
+  Vec3 cc = (mn + mx) * 0.5f;
+  float maxD = 1e-3f;
+  for (auto& kv : cs) { kv.second.sum = kv.second.sum * (1.0f / std::max(1, kv.second.n)); maxD = std::max(maxD, (kv.second.sum - cc).length()); }
+  std::vector<std::pair<float, uint32_t>> order;
+  for (auto& kv : cs) {
+    float outer = (kv.second.sum - cc).length() / maxD;
+    float rnd = (lodHash(kv.first * 2654435761u + 91) & 1023) / 1023.0f;
+    order.push_back({(1.0f - outer) * 0.55f + rnd * 0.45f, kv.first});
+  }
+  std::sort(order.begin(), order.end());
+  for (size_t i = 0; i < order.size(); i++) cs[order[i].second].rank = (float)i / std::max<size_t>(1, order.size());
+  d.card.assign(nv * 4, 0.0f);
+  for (size_t i = 0; i < nv; i++) {
+    if (!used[i]) { d.card[i * 4 + 3] = -1; continue; }
+    const C& c = cs[find((uint32_t)i)];
+    d.card[i * 4] = c.sum.x; d.card[i * 4 + 1] = c.sum.y; d.card[i * 4 + 2] = c.sum.z; d.card[i * 4 + 3] = c.rank;
+  }
+}
 MeshData makeLod(const MeshData& d, bool cutout, bool under, float cellDiv = 14.0f) {
   MeshData out;
   out.fmt = d.fmt;
@@ -964,6 +1011,47 @@ void tube(GeoB& g, Vec3 a, Vec3 b, float ra, float rb, int sides, float v0, floa
   }
 }
 
+// one continuous skin along a bent path: rings are shared between neighbouring segments and sit on the bisector of
+// each bend, so a limb reads as a single piece of wood instead of cylinders stacked end to end
+void sweepTube(GeoB& g, const std::vector<Vec3>& P, const std::vector<float>& Rr, int sides, float v0, float vScale) {
+  size_t n = P.size();
+  if (n < 2) return;
+  uint32_t base = (uint32_t)g.v.size();
+  Vec3 d0 = (P[1] - P[0]).normalized(), p = anyPerp(d0);
+  float v = v0;
+  for (size_t i = 0; i < n; i++) {
+    Vec3 din = i > 0 ? (P[i] - P[i - 1]).normalized() : d0;
+    Vec3 dout = i + 1 < n ? (P[i + 1] - P[i]).normalized() : din;
+    Vec3 t = din + dout;
+    t = t.length() > 1e-4f ? t.normalized() : dout;
+    p = p - t * p.dot(t);
+    p = p.length() > 1e-4f ? p.normalized() : anyPerp(t);
+    Vec3 q = t.cross(p);
+    if (i > 0) v += (P[i] - P[i - 1]).length() * vScale;
+    for (int k = 0; k <= sides; k++) {
+      float a = (float)k / sides * TAU;
+      Vec3 nn = p * std::cos(a) + q * std::sin(a);
+      g.vert(P[i] + nn * Rr[i], nn, (float)k / sides, v, 1.0f);
+    }
+  }
+  for (size_t i = 0; i + 1 < n; i++)
+    for (int k = 0; k < sides; k++) {
+      uint32_t a = base + (uint32_t)(i * (sides + 1) + k), b = a + sides + 1;
+      g.idx.insert(g.idx.end(), {a, a + 1, b, b, a + 1, b + 1});
+    }
+}
+// no foliage below head height: drop every leaf card that reaches under yMin (cards are 4 vertices, 6 indices)
+static void clipLowLeaves(GeoB& g, float yMin) {
+  std::vector<uint32_t> idx;
+  idx.reserve(g.idx.size());
+  for (size_t q = 0; q + 5 < g.idx.size(); q += 6) {
+    bool low = false;
+    for (int k = 0; k < 4; k++) if (g.v[g.idx[q] + k].p[1] < yMin) low = true;
+    if (!low) idx.insert(idx.end(), g.idx.begin() + q, g.idx.begin() + q + 6);
+  }
+  g.idx = idx;
+}
+const float CLEAR_Y = 3.5f;   // lowest leaf (m above the ground at the trunk)
 // branch built from several segments that bend progressively (gravity sag + random kinks)
 Vec3 curvedTube(GeoB& g, Vec3 a, Vec3 dir, float len, float ra, float rb, int segs, int sides, PRng& R, float sag, float kink, Vec3* endDir = nullptr) {
   Vec3 p = a, d = dir.normalized();
@@ -1010,8 +1098,12 @@ static void sortOuterFirst(GeoB& g, Vec3 c) {
   for (auto& k : key) for (int j = 0; j < 6; j++) idx.push_back(g.idx[k.second * 6 + j]);
   g.idx = idx;
 }
-Built growTree(TreeSp sp, uint32_t seed, bool indiv, bool fillIn = true) {
-  const SpecDef& S = SPD[sp];
+Built growTree(TreeSp sp, uint32_t seed, bool indiv, bool fillIn = true, float tallK = 1.0f) {
+  SpecDef S = SPD[sp];
+  // tall variant: a taller, slightly thicker stem and (for the cedar) more whorls; the crown keeps its proportions
+  S.trunkH *= tallK;
+  S.trunkR *= 0.8f + 0.2f * tallK;
+  if (sp == T_CEDAR) S.prim = (int)std::lround(S.prim * (0.6f + 0.4f * tallK));
   PRng R(seed);
   GeoB bark, leaf;
   std::vector<std::pair<Vec3, Vec3>> tips;  // (position, branch direction) for leaf cards
@@ -1021,7 +1113,7 @@ Built growTree(TreeSp sp, uint32_t seed, bool indiv, bool fillIn = true) {
   int tSeg = sp == T_CEDAR ? 5 : 3;
   float tLen = S.trunkH / tSeg, r = S.trunkR, vacc = 0;
   std::vector<std::pair<Vec3, Vec3>> trunkPts;
-  for (int i = 0; i < tSeg; i++) {
+  for (int i = 0; i < tSeg && sp == T_CEDAR; i++) {  // broadleaf trunks grow inside the branch recursion below
     Vec3 nd = (d + Vec3(R.r(-0.12f, 0.12f), 0, R.r(-0.12f, 0.12f))).normalized();
     if (sp == T_CEDAR) nd = Vec3(0, 1, 0);
     Vec3 e = p + nd * tLen;
@@ -1035,65 +1127,150 @@ Built growTree(TreeSp sp, uint32_t seed, bool indiv, bool fillIn = true) {
   crownC = top + Vec3(0, crownH * 0.4f, 0);
   if (sp == T_CEDAR) {
     // whorls of near-horizontal branches, shorter toward the top
-    for (int w = 0; w < S.prim; w++) {
-      float t = 0.12f + 0.86f * w / (S.prim - 1);
+    float tLow = std::max(0.12f, (CLEAR_Y + 1.0f) / S.trunkH);   // lowest whorl clears a standing person
+    int whorls = std::max(4, (int)std::lround(S.prim * (0.98f - tLow) / 0.86f));
+    for (int w = 0; w < whorls; w++) {
+      float t = tLow + (0.98f - tLow) * w / (whorls - 1);
       Vec3 at = Vec3(0, -0.3f + S.trunkH * t, 0);
       float bl = 3.4f * (1.0f - t) + 0.5f;
       int arms = 5;
       for (int k = 0; k < arms; k++) {
         float az = k * TAU / arms + w * 0.9f + R.r(-0.3f, 0.3f);
-        Vec3 bd = Vec3(std::cos(az), -0.18f + 0.1f * t, std::sin(az)).normalized();
-        Vec3 bdEnd;
-        Vec3 e = curvedTube(bark, at, bd, bl, 0.14f * (1.2f - t), 0.05f, 5, 4, R, 0.14f, 0.2f, &bdEnd);
+        // a real conifer limb: leaves the trunk almost level, bows outward and sweeps up toward the tip, with a
+        // sideways curl of its own; never drooping
+        Vec3 hd(std::cos(az), 0, std::sin(az)), sd(-std::sin(az), 0, std::cos(az));
+        float curl = R.r(-0.55f, 0.55f), lift = R.r(0.45f, 0.8f), r0b = 0.14f * (1.2f - t);
+        const int NS = 6;
+        std::vector<Vec3> bp{at};
+        std::vector<float> br{r0b * 1.5f};
+        Vec3 bdEnd(0, 1, 0);
+        for (int j = 0; j < NS; j++) {
+          float u = (j + 0.5f) / NS;
+          Vec3 dd = (hd * std::cos(curl * u) + sd * std::sin(curl * u) + Vec3(0, 0.06f + lift * u * u + 0.1f * t, 0)
+                     + Vec3(R.r(-0.07f, 0.07f), R.r(-0.03f, 0.05f), R.r(-0.07f, 0.07f))).normalized();
+          bp.push_back(bp.back() + dd * (bl / NS));
+          br.push_back(r0b + (0.04f - r0b) * (j + 1.0f) / NS);
+          bdEnd = dd;
+        }
+        sweepTube(bark, bp, br, 4, 0, 0.5f);
         int nc = std::max(1, (int)(bl / 0.75f));
-        for (int c = 0; c < nc; c++) tips.push_back({at + (e - at) * (0.35f + 0.65f * (c + 1) / nc), bdEnd});
+        for (int c = 0; c < nc; c++) {
+          float f = (0.35f + 0.65f * (c + 1) / nc) * NS;
+          int j = std::min(NS - 1, (int)f);
+          tips.push_back({bp[j] + (bp[j + 1] - bp[j]) * (f - j), (bp[j + 1] - bp[j]).normalized()});
+        }
       }
     }
     tips.push_back({top + Vec3(0, 0.4f, 0), Vec3(0, 1, 0)});
     crownC = Vec3(0, S.trunkH * 0.45f, 0);
   } else {
-    if (sp == T_RHODO) {
-      // multi-stem shrub: extra stems from the base
-      for (int k = 0; k < 2; k++) {
-        float az = R.r(0, TAU);
-        Vec3 sd = Vec3(std::cos(az) * 0.45f, 1, std::sin(az) * 0.45f).normalized();
-        Vec3 e = Vec3(0, -0.3f, 0) + sd * 1.8f;
-        tube(bark, Vec3(0, -0.3f, 0), e, 0.14f, 0.08f, 5, 0, 0.5f);
-        trunkPts.push_back({Vec3(0, -0.3f, 0), e});
-      }
+    // ---- recursive branching, like a real tree: the trunk carries on as one or more leaders that fork again and
+    // again, each child thinner (pipe model: the children's cross-sections add up to the parent's) and shorter,
+    // bending up toward the light while the thin outer twigs sag under their own weight. Laterals sprout along
+    // the length, not just at the tips, so the crown is filled by a real branch structure.
+    struct BP { int leaders, forks, laterals, levels; float trunkFrac, leaderAng, forkAng, latAng, lenRatio, photo, grav, kink, latLen; bool monopodial; };
+    BP B;
+    switch (sp) {
+      case T_OAK:   B = {3, 2, 1, 4, 0.5f, 0.62f, 0.55f, 0.95f, 0.7f, 0.10f, 0.10f, 0.32f, 0.6f, false}; break;  // wide, gnarled, spreading
+      case T_MAPLE: B = {3, 2, 1, 4, 0.52f, 0.42f, 0.45f, 0.8f, 0.72f, 0.22f, 0.06f, 0.22f, 0.55f, false}; break;  // rounded, upright
+      case T_BIRCH: B = {1, 2, 1, 3, 1.0f, 0.0f, 0.4f, 0.72f, 0.62f, 0.22f, 0.02f, 0.18f, 0.45f, true}; break;    // slim leader, thin upswept laterals
+      default:      B = {4, 2, 0, 3, 0.18f, 0.55f, 0.55f, 0.85f, 0.7f, 0.2f, 0.08f, 0.3f, 0.6f, false}; break;  // rhododendron: multi-stem shrub
     }
-    for (int i = 0; i < S.prim; i++) {
-      // pick an attachment point on the upper trunk
-      auto& seg = trunkPts[trunkPts.size() - 1 - (i % std::min<size_t>(trunkPts.size(), sp == T_BIRCH ? 3 : 2))];
-      float t = R.r(S.crownStart, 1.0f);
-      Vec3 at = seg.first + (seg.second - seg.first) * t;
-      if (sp == T_BIRCH) at = Vec3(0, -0.3f + S.trunkH * R.r(0.35f, 0.98f), 0);
-      float az = i * 2.39996f + R.r(-0.3f, 0.3f);
-      Vec3 out{std::cos(az), 0, std::sin(az)};
-      Vec3 bd = (out * std::sin(S.branchAng) + Vec3(0, std::cos(S.branchAng), 0)).normalized();
-      bd = (bd + Vec3(0, S.upBias * 0.3f, 0)).normalized();
-      float bl = (S.trunkH * S.lenK + 1.6f) * R.r(0.8f, 1.15f);
-      if (sp == T_BIRCH) bl *= 1.0f - 0.5f * (at.y / S.trunkH);
-      float br = S.trunkR * (sp == T_BIRCH ? 0.46f : 0.62f);
-      Vec3 bdEnd;
-      float sag = sp == T_BIRCH ? 0.14f : sp == T_OAK ? 0.09f : 0.05f;
-      Vec3 e = curvedTube(bark, at, bd, bl, br, br * 0.55f, 4, 5, R, sag, 0.22f, &bdEnd);
-      if (S.sec == 0) { tips.push_back({e, bd}); continue; }
-      for (int j = 0; j < S.sec; j++) {
-        float tt = 0.45f + 0.55f * (j + 1) / S.sec;
-        Vec3 sa = at + (e - at) * tt;
-        Vec3 sd = rotAxis(bd, anyPerp(bd), R.r(0.5f, 0.9f) * ((j % 2) ? 1 : -1));
-        sd = rotAxis(sd, bd, R.r(0, TAU));
-        if (sp == T_BIRCH) sd = (sd + Vec3(0, -0.6f, 0)).normalized();  // weeping tips
-        else sd = (sd + Vec3(0, S.upBias, 0)).normalized();
-        float sl = bl * R.r(0.4f, 0.6f);
-        Vec3 sdEnd;
-        Vec3 smid = curvedTube(bark, sa, sd, sl * 0.5f, br * 0.52f, br * 0.38f, 2, 4, R, sag, 0.3f, &sdEnd);
-        Vec3 se = curvedTube(bark, smid, sdEnd, sl * 0.5f, br * 0.38f, br * 0.22f, 2, 4, R, sag, 0.3f, &sdEnd);
-        tips.push_back({smid, sd});
-        tips.push_back({se, sdEnd});
+    float H0 = S.trunkH * (sp == T_RHODO ? 1.7f : 1.0f) * (sp == T_BIRCH ? 0.97f : 1.0f);
+    const bool midTips = sp == T_BIRCH || sp == T_RHODO;  // sparse species: leaves along the last branches too
+    float trunkLen = 1e9f, trunkR = 1e9f;
+    std::function<void(Vec3, Vec3, float, float, int, float)> grow = [&](Vec3 a, Vec3 dir, float len, float r0, int lvl, float rj) {
+      // a branch is never longer or thicker than the trunk it grows from
+      if (lvl == 0) { if (!B.monopodial) len = std::max(len, CLEAR_Y + 1.2f); trunkLen = len; trunkR = r0; }  // the crown forks above head height
+      else { len = std::min(len, trunkLen * 0.72f); r0 = std::min(r0, trunkR * 0.6f); }
+      bool last = lvl >= B.levels;
+      int segs = lvl == 0 ? (sp == T_BIRCH ? 6 : 4) : lvl == 1 ? 4 : 3;
+      int sides = lvl == 0 ? 8 : lvl == 1 ? 6 : lvl == 2 ? 5 : 4;
+      if (sp == T_RHODO) sides = std::max(4, sides - 2);
+      float r1 = r0 * (last ? 0.35f : 0.62f);
+      Vec3 pp = a, d = dir.normalized();
+      std::vector<std::pair<Vec3, Vec3>> pts;  // segment starts, for laterals
+      // the limb is one swept skin; it starts at the width of the wood it grows out of (rj) and narrows to its own
+      // girth along the first stretch, so forks and side branches flow out of their parent like a real collar
+      std::vector<Vec3> sp_;
+      std::vector<float> sr_;
+      if (lvl == 0) { sp_.push_back(pp - Vec3(0, 0.15f, 0)); sr_.push_back(r0 * 1.45f); sp_.push_back(pp + d * 0.35f); sr_.push_back(r0 * 1.05f); }  // root flare
+      else { sp_.push_back(pp); sr_.push_back(rj > 0 ? std::max(rj, r0) : r0); }
+      for (int i = 0; i < segs; i++) {
+        float t0 = (float)i / segs, t1 = (float)(i + 1) / segs;
+        // light pulls branches up, weight pulls the thin ends down (more so further out and on thinner wood)
+        float thin = clampf(1.0f - r0 * t1 / std::max(0.01f, S.trunkR), 0, 1);
+        Vec3 nd = d + Vec3(R.r(-B.kink, B.kink), R.r(-B.kink, B.kink) * 0.5f, R.r(-B.kink, B.kink)) * (lvl == 0 ? 0.35f : 1.0f);
+        nd = nd + Vec3(0, B.photo * (1 - thin) - B.grav * thin * thin * (lvl + 1) * 0.5f, 0);
+        if (lvl == 0 && B.monopodial) nd = (nd + Vec3(0, 1.2f, 0)).normalized();
+        nd = nd.normalized();
+        // no branch ever points down: every limb keeps rising (at least ~15 degrees above level)
+        if (nd.y < 0.26f) { nd.y = 0.26f; nd = nd.normalized(); }
+        Vec3 e = pp + nd * (len / segs);
+        float ra = r0 + (r1 - r0) * t0, rb = r0 + (r1 - r0) * t1;
+        (void)ra;
+        sp_.push_back(e); sr_.push_back(rb);
+        pts.push_back({pp, nd});
+        if (lvl == 0) trunkPts.push_back({pp, e});
+        pp = e; d = nd;
       }
-      tips.push_back({e, bdEnd});
+      sweepTube(bark, sp_, sr_, sides, 0, lvl == 0 ? 0.35f : 0.5f);
+      if (last) {
+        tips.push_back({pp, d});
+        if (midTips) tips.push_back({a + (pp - a) * 0.55f, d});
+        return;
+      }
+      auto childDir = [&](Vec3 base, float ang, float az) {
+        Vec3 c = rotAxis(base, anyPerp(base), ang);
+        c = rotAxis(c, base, az);
+        return c.normalized();
+      };
+      // forks at the end (sympodial) or a continuing leader (monopodial)
+      int nf = lvl == 0 ? B.leaders : B.forks;
+      float az0 = R.r(0, TAU);
+      if (B.monopodial && lvl == 0) {
+        // the birch leader itself carries the crown: laterals all along its upper part, a thin leader tip
+        grow(pp, d, len * 0.22f, r1, B.levels, r1);
+      } else {
+        float share = 1.0f / std::sqrt((float)std::max(1, nf));
+        for (int k = 0; k < nf; k++) {
+          float ang = (lvl == 0 ? B.leaderAng : B.forkAng) * R.r(0.75f, 1.2f);
+          if (nf == 2 && k == 0) ang *= 0.45f;  // one fork carries on almost straight, the other splits away
+          Vec3 cd = childDir(d, ang, az0 + k * TAU / nf + R.r(-0.4f, 0.4f));
+          float cl = (lvl == 0 ? H0 * 0.42f : len * B.lenRatio) * R.r(0.85f, 1.12f);
+          grow(pp, cd, cl, r1 * share * 1.05f, lvl + 1, r1);
+        }
+      }
+      // laterals along the branch: alternate around it (2.4 rad golden turn), angled out, shorter
+      int nl = (lvl == 0 && B.monopodial) ? 8 : (lvl >= 2 && B.monopodial) ? 0 : B.laterals;
+      if (lvl == 0 && !B.monopodial) nl = 0;  // clear trunk below the crown
+      for (int k = 0; k < nl; k++) {
+        float tt = B.monopodial && lvl == 0 ? 0.28f + 0.68f * (k + 0.5f) / nl : R.r(0.35f, 0.85f);
+        int si = std::min((int)pts.size() - 1, (int)(tt * pts.size()));
+        Vec3 sa = pts[si].first + pts[si].second * (len / segs) * (tt * segs - si);
+        if (sa.y < CLEAR_Y + 0.5f) continue;   // nothing sprouts below head height
+        float ra = r0 + (r1 - r0) * tt;
+        Vec3 cd = childDir(pts[si].second, B.latAng * R.r(0.8f, 1.15f), az0 + k * 2.39996f);
+        float cl = len * B.latLen * R.r(0.75f, 1.15f) * (B.monopodial && lvl == 0 ? (1.25f - 0.75f * tt) * 0.55f : 1.0f);
+        float lr = ra * (B.monopodial && lvl == 0 ? 0.32f : 0.5f);
+        grow(sa, cd, cl, lr, lvl + 1 + (B.monopodial && lvl == 0 ? 0 : 1), std::min(ra * 0.8f, lr * 1.7f));
+      }
+    };
+    if (sp == T_RHODO) {
+      for (int k = 0; k < B.leaders; k++) {
+        float az = k * TAU / B.leaders + R.r(-0.3f, 0.3f);
+        Vec3 sd = Vec3(std::cos(az) * 0.5f, 1, std::sin(az) * 0.5f).normalized();
+        grow(Vec3(R.r(-0.1f, 0.1f), -0.3f, R.r(-0.1f, 0.1f)), sd, std::max(H0 * 0.74f, (CLEAR_Y + 0.9f) / 0.8f), S.trunkR * 0.7f, 1, S.trunkR * 0.95f);  // stems clear head height before they fork
+      }
+    } else {
+      Vec3 td = Vec3(R.r(-0.06f, 0.06f), 1, R.r(-0.06f, 0.06f)).normalized();
+      grow(Vec3(0, -0.3f, 0), td, H0 * B.trunkFrac * (tallK > 1 && !B.monopodial ? tallK : 1.0f), S.trunkR, 0, 0);  // tall broadleaf: a longer clear stem
+    }
+    if (!tips.empty()) {
+      Vec3 m(0, 0, 0);
+      for (auto& t : tips) m = m + t.first;
+      crownC = m * (1.0f / tips.size());
+      crownC.y -= 0.4f;
     }
   }
   // leaf cards: oriented by branch direction, normals from the crown centre (soft rounded shading)
@@ -1107,7 +1284,7 @@ Built growTree(TreeSp sp, uint32_t seed, bool indiv, bool fillIn = true) {
       for (int w = 0; w < twigsPer; w++) {
         Vec3 td = rotAxis(t.second, anyPerp(t.second), R.r(0.4f, 1.1f));
         td = rotAxis(td, t.second, R.r(0, TAU));
-        td = (td + Vec3(0, sp == T_BIRCH ? -0.5f : 0.15f, 0)).normalized();
+        td = (td + Vec3(0, 0.15f, 0)).normalized();
         float tl = R.r(0.7f, 1.2f) * (sp == T_BIRCH ? 1.3f : 1.0f);
         Vec3 a = t.first;
         size_t v0 = bark.v.size();
@@ -1139,6 +1316,7 @@ Built growTree(TreeSp sp, uint32_t seed, bool indiv, bool fillIn = true) {
         }
       }
     }
+    clipLowLeaves(leaf, CLEAR_Y);
     return {bark.data(), leaf.data()};
   }
   bool broad = sp != T_CEDAR;
@@ -1151,7 +1329,7 @@ Built growTree(TreeSp sp, uint32_t seed, bool indiv, bool fillIn = true) {
       Vec3 up = (t.second + Vec3(R.r(-0.5f, 0.5f), R.r(-0.2f, 0.6f), R.r(-0.5f, 0.5f))).normalized();
       if (sp == T_CEDAR) up = (Vec3(t.second.x, R.r(-0.35f, 0.15f), t.second.z) + Vec3(R.r(-0.4f, 0.4f), 0, R.r(-0.4f, 0.4f))).normalized();
       float sz = S.cardSize * R.r(0.8f, 1.2f) * (broad ? 0.68f : 1.0f);
-      float spread = sp == T_CEDAR ? 0.3f : S.cardSize * 0.75f;
+      float spread = sp == T_CEDAR ? 0.3f : S.cardSize * 0.5f;  // stay on the twig
       Vec3 off(R.r(-spread, spread), R.r(-spread * 0.7f, spread * 0.7f), R.r(-spread, spread));
       Vec3 side = anyPerp(up);
       side = rotAxis(side, up, R.r(0, TAU));
@@ -1186,10 +1364,12 @@ Built growTree(TreeSp sp, uint32_t seed, bool indiv, bool fillIn = true) {
       for (auto& t : tips) { mn = Vec3(std::min(mn.x, t.first.x), std::min(mn.y, t.first.y), std::min(mn.z, t.first.z)); mx = Vec3(std::max(mx.x, t.first.x), std::max(mx.y, t.first.y), std::max(mx.z, t.first.z)); }
       Vec3 cc = (mn + mx) * 0.5f, ext = (mx - mn) * 0.5f;
       int fill = (int)tips.size();
+      (void)cc; (void)ext;
       for (int c = 0; c < fill; c++) {
-        Vec3 u(R.r(-1, 1), R.r(-1, 1), R.r(-1, 1));
-        if (u.length() > 1) u = u.normalized() * R.f();
-        Vec3 base = cc + Vec3(u.x * ext.x, u.y * ext.y, u.z * ext.z) * 0.85f;
+        // fill clusters hang on the branches: a short way in from a real tip toward the crown centre, never in
+        // open air between limbs (the old box-scatter left clusters floating once crowns became irregular)
+        const auto& tp = tips[(size_t)(R.f() * tips.size()) % tips.size()];
+        Vec3 base = tp.first + (crownC - tp.first) * R.r(0.08f, 0.3f) + Vec3(R.r(-0.35f, 0.35f), R.r(-0.25f, 0.25f), R.r(-0.35f, 0.35f));
         Vec3 radial = base - crownC; radial.y *= 0.4f;
         radial = radial.length() > 0.01f ? radial.normalized() : Vec3(1, 0, 0);
         Vec3 up = (radial * 0.6f + Vec3(0, 0.8f, 0) + Vec3(R.r(-0.3f, 0.3f), 0, R.r(-0.3f, 0.3f))).normalized();
@@ -1218,7 +1398,7 @@ Built growTree(TreeSp sp, uint32_t seed, bool indiv, bool fillIn = true) {
         Vec3 side = up.cross(Vec3(0, 1, 0)).normalized();
         side = rotAxis(side, up, R.r(-0.35f, 0.35f));
         float sz = S.cardSize * R.r(0.7f, 1.0f) * 0.75f;
-        Vec3 base = t.first + Vec3(R.r(-0.4f, 0.4f), -R.r(0.25f, 0.7f) * S.cardSize, R.r(-0.4f, 0.4f)) - up * (sz * 0.45f);
+        Vec3 base = t.first + Vec3(R.r(-0.25f, 0.25f), -R.r(0.15f, 0.4f) * S.cardSize, R.r(-0.25f, 0.25f)) - up * (sz * 0.45f);
         Vec3 nn = ((base - crownC).normalized() + Vec3(0, 0.6f, 0)).normalized();
         float ao = 0.55f + 0.3f * std::min(1.0f, (base - crownC).length() / crownR);  // underside sits in shade
         uint32_t k = (uint32_t)leaf.v.size();
@@ -1231,6 +1411,7 @@ Built growTree(TreeSp sp, uint32_t seed, bool indiv, bool fillIn = true) {
       }
     }
   }
+  clipLowLeaves(leaf, CLEAR_Y);
   if (!indiv) sortOuterFirst(leaf, crownC);
   return {bark.data(), leaf.data()};
 }
@@ -1511,6 +1692,44 @@ MeshData buildFlowerPlant(uint32_t seed, int stems, float H, int petals, float p
   return P.g.data();
 }
 
+// Lupins: a clump of stems, each a tall spike of small violet florets over a skirt of fingered leaves
+MeshData buildLupin(uint32_t seed, int stems, float H) {
+  PRng R(seed);
+  PartsGeo P;
+  Color stemc = Color::hex("4f7d2b");
+  for (int s = 0; s < stems; s++) {
+    float az = R.r(0, TAU), lean = R.r(0.02f, 0.16f);
+    Vec3 base{R.r(-0.12f, 0.12f) * H, 0, R.r(-0.12f, 0.12f) * H};
+    float h = H * R.r(0.6f, 1.0f);
+    Vec3 top = base + Vec3(std::cos(az) * lean * h, h, std::sin(az) * lean * h);
+    P.solidTube(base, top, H * 0.013f, H * 0.006f, stemc);
+    for (int l = 0; l < 5; l++) {     // palmate leaves low on the stem
+      float la = az + l * TAU / 5 + R.r(-0.3f, 0.3f);
+      Vec3 at = base + (top - base) * R.r(0.12f, 0.3f);
+      P.leaf(at, Vec3(std::cos(la), 0.15f, std::sin(la)).normalized(), H * R.r(0.2f, 0.28f), H * R.r(0.07f, 0.1f), 0.45f, R, 0.95f);
+    }
+    // the spike: whorls of florets from 45% of the stem to its tip, deep violet below, paler and smaller toward the top
+    Color deep = Color::hex(s % 3 == 2 ? "6a4fd0" : "5b3fc4"), pale = Color::hex(s % 3 == 1 ? "c9a8f0" : "9f86ea");
+    const int rings = 9;
+    for (int k = 0; k < rings; k++) {
+      float t = (float)k / (rings - 1);
+      Vec3 c = base + (top - base) * (0.45f + 0.55f * t);
+      float rad = H * 0.05f * (1 - 0.7f * t), fl = H * 0.07f * (1 - 0.55f * t);
+      Color col = deep.lerp(pale, t * t);
+      for (int i = 0; i < 4; i++) {
+        float a = k * 0.9f + i * TAU / 4 + R.r(-0.15f, 0.15f);
+        Vec3 out{std::cos(a), 0, std::sin(a)};
+        Vec3 up = (out * 0.75f + Vec3(0, 0.66f, 0)).normalized();
+        Vec3 side{-out.z, 0, out.x};
+        Vec3 n = (out + Vec3(0, 0.8f, 0)).normalized();
+        float kk = R.r(0.85f, 1.08f);
+        P.quad(c + out * rad * 0.25f, up, side, fl, fl * 0.75f, n, 0.0f, 0.5f, 0.0f, 0.5f, packCol(col, 0.7f * kk), packCol(col, 1.05f * kk));
+      }
+    }
+  }
+  return P.g.data();
+}
+
 MeshData buildLeafRosette(uint32_t seed, int leaves, float len, float wid, float droop, float bright) {
   PRng R(seed);
   PartsGeo P;
@@ -1737,8 +1956,14 @@ std::vector<uint8_t> loadImageRGBA(const std::string& rel, int& w, int& h) {
   return out;
 }
 
-std::vector<std::string> procOverrides() { return {"Bush.glb", "Bush with Flowers.glb", "Rock Medium.glb", "Rock Slab.glb", "Rock Jagged.glb", "Rock Boulder.glb", "Stump.glb", "Stump Broken.glb", "Log Fallen.glb", "Mushroom Laetiporus.glb", "Fern.glb", "Plant.glb", "Plant Big.glb", "Plant-xH5gNlQxAZ.glb", "Flower Group.glb", "Flower Group-LqTljN6Wg2.glb", "Flower Single.glb", "Mushroom.glb", "Flower Petal.glb", "Flower Petal-LqvxG9OBOU.glb", "Flower Petal-eVE0j49ux9.glb", "Flower Petal-niuBUEJdvM.glb", "Flower Petal-tzG4JcqYWs.glb"}; }
-std::vector<std::string> procTreeFiles() { return {"ptree:oak", "ptree:maple", "ptree:birch", "ptree:Pine-cedar", "ptree:rhodo"}; }
+std::vector<std::string> procOverrides() { return {"Bush with Flowers.glb", "Rock Medium.glb", "Rock Slab.glb", "Rock Jagged.glb", "Rock Boulder.glb", "Stump.glb", "Stump Broken.glb", "Log Fallen.glb", "Fern.glb", "Flower Group.glb", "Flower Group-LqTljN6Wg2.glb", "Lupin.glb", "Flower Single.glb", "Flower Petal.glb", "Flower Petal-LqvxG9OBOU.glb", "Flower Petal-eVE0j49ux9.glb", "Flower Petal-niuBUEJdvM.glb", "Flower Petal-tzG4JcqYWs.glb"}; }
+std::vector<std::string> procTreeFiles() { return {"ptree:oak", "ptree:maple", "ptree:birch", "ptree:Pine-cedar", "ptree:rhodo", "ptree:oak-tall", "ptree:Pine-cedar-tall", "ptree:maple-tall"}; }
+// species index and height factor of each procedural tree file (tall variants share the species' textures)
+static void procTreeVariant(int i, int& sp, float& tall) {
+  static const int SP[8] = {0, 1, 2, 3, 4, 0, 3, 1};
+  static const float TK[8] = {1, 1, 1, 1, 1, 1.55f, 1.45f, 1.4f};
+  sp = SP[i]; tall = TK[i];
+}
 
 // Leaf-cluster card texture built from the single-leaf photo: a fan of twigs carrying many copies of the
 // photo leaf, back leaves darker. One card then reads as dozens of real leaves (the GTA-style illusion).
@@ -1848,7 +2073,12 @@ void buildProcTrees() {
     if (brk.empty()) { brk = makeBark(sp, 256); bw = bh = 256; }
     g_procTex.push_back(std::make_unique<Texture>(uploadTextureRGBA(brk.data(), bw, bh, true, true, false, true)));
     const Texture* barkTex = g_procTex.back().get();
-    Built B = growTree(sp, 7771 + s * 131, false);
+    for (int vi = 0; vi < (int)files.size(); vi++) {
+    int vsp; float tallK;
+    procTreeVariant(vi, vsp, tallK);
+    if (vsp != s) continue;
+    uint32_t seed = 7771 + s * 131 + (tallK > 1 ? 977 : 0);
+    Built B = growTree(sp, seed, false, true, tallK);
     // trim leaf cards to the visible leaf area (8-sided hulls) using a 256px alpha map
     std::vector<uint8_t> alpha(256 * 256);
     for (int y = 0; y < 256; y++)
@@ -1858,7 +2088,7 @@ void buildProcTrees() {
         alpha[(size_t)y * 256 + x] = (uint8_t)m;
       }
     // mid-distance version skips the interior fill clusters: you can't see inside a far crown
-    MeshData lodSrc = sp != T_CEDAR ? growTree(sp, 7771 + s * 131, false, false).leaves : B.leaves;
+    MeshData lodSrc = sp != T_CEDAR ? growTree(sp, seed, false, false, tallK).leaves : B.leaves;
     int dropped = 0;
     trimCards(B.leaves, alpha, 256, 256, dropped);
     if (texW) {
@@ -1884,12 +2114,13 @@ void buildProcTrees() {
       if (!lodSrc.idx.empty()) g.applyGLB(lodSrc, 0.7f, true);
     }
     auto a = std::make_unique<Asset>();
-    a->file = files[s];
+    a->file = files[vi];
     for (int part = 0; part < 2; part++) {
       // broadleaf: near = individual leaves on twigs, mid = full leaf-cluster cards
       MeshData& md = part == 0 ? B.bark : B.leaves;
       if (md.idx.empty()) continue;
       AssetPart ap;
+      if (part == 1) { buildCardStream(md); ap.cardLod = !md.card.empty(); }
       ap.mesh = uploadMesh(md);
       // bark: a fine simplification grid, or thin branches collapse to nothing and vanish at mid distance
       MeshData ld = part == 0 ? makeLod(md, false, false, 48.0f) : makeLod(lodSrc, true, false);
@@ -1907,8 +2138,9 @@ void buildProcTrees() {
       a->parts.push_back(std::move(ap));
     }
     totalTris += a->tris;
-    if (std::getenv("HW_TRIS")) std::fprintf(stderr, "proctree %s: %d tris, h %.1f\n", files[s].c_str(), a->tris, a->bmax.y);
-    g_assets[files[s]] = std::move(a);
+    if (std::getenv("HW_TRIS")) std::fprintf(stderr, "proctree %s: %d tris, h %.1f\n", files[vi].c_str(), a->tris, a->bmax.y);
+    g_assets[files[vi]] = std::move(a);
+    }
   }
   // ---- procedural undergrowth & rocks (replace heavy GLBs) ----
   auto addAsset = [&](const std::string& name, std::vector<std::pair<MeshData, AssetMaterial>> parts, bool under, const std::vector<uint8_t>* alpha) {
@@ -1941,7 +2173,7 @@ void buildProcTrees() {
     if (std::getenv("HW_TRIS")) std::fprintf(stderr, "procasset %s: %d tris\n", name.c_str(), a->tris);
     g_assets[name] = std::move(a);
   };
-  for (int fl = 0; fl < 2; fl++) {
+  for (int fl = 1; fl < 2; fl++) {   // plain Bush.glb is now the cliff shrub model
     g_leafOverride = Color::hex(fl ? "4f7d33" : "56823a");
     g_flowers = fl ? 9 : 0;
     LeafImg L = makeLeafCluster(T_BIRCH, 512);
@@ -1993,7 +2225,7 @@ void buildProcTrees() {
     AssetMaterial ms, mf;
     ms.name = "bark_stump"; ms.kind = SeasonKind::Bark;
     mf.name = "mushroom_shelf"; mf.kind = SeasonKind::Mush;
-    addAsset("Mushroom Laetiporus.glb", {{st, ms}, {sh, mf}}, true, nullptr);
+    (void)st; (void)sh; (void)ms; (void)mf;   // mushrooms removed
   }
   // ---- small plants, flowers, mushrooms, garden petals ----
   auto plantMat = [&](const char* name, SeasonKind k, const Texture* t) { AssetMaterial m; m.name = name; m.cutout = t != nullptr; m.tex = t; m.kind = k; return m; };
@@ -2017,15 +2249,13 @@ void buildProcTrees() {
     addAsset("Fern.glb", {{buildRosette(3, 9, 2.4f, 1.0f, 0.5f, 0.55f), plantMat("fern", SeasonKind::Plant, fern.tex)}}, true, &fern.alpha);
     PlantTex parts = uploadPlant(makePartsAtlas(Color::hex("5f9a3c"), 21), g_procTex);
     auto pm = [&](const char* nm, SeasonKind k) { return plantMat(nm, k, parts.tex); };
-    addAsset("Plant.glb", {{buildLeafRosette(5, 9, 0.75f, 0.32f, 0.9f, 1.0f), pm("plant_broad", SeasonKind::Plant)}}, true, nullptr);
-    addAsset("Plant Big.glb", {{buildLeafRosette(7, 8, 0.3f, 0.13f, 1.4f, 0.9f), pm("plant_low", SeasonKind::Plant)}}, true, nullptr);
-    addAsset("Plant-xH5gNlQxAZ.glb", {{buildLeafRosette(9, 7, 0.28f, 0.12f, 1.5f, 0.85f), pm("plant_low2", SeasonKind::Plant)}}, true, nullptr);
     addAsset("Flower Group.glb", {{buildFlowerPlant(41, 6, 0.9f, 13, 0.115f, 0.038f, 0.12f, Color::hex("f6f3f2"), Color::hex("f2bd25"), 0.036f, 2), pm("flower_daisy", SeasonKind::Flower)}}, true, nullptr);
     addAsset("Flower Group-LqTljN6Wg2.glb", {{buildFlowerPlant(43, 7, 1.0f, 5, 0.105f, 0.08f, 0.45f, Color::hex("8a58d4"), Color::hex("f0d050"), 0.024f, 2), pm("flower_violet", SeasonKind::Flower)}}, true, nullptr);
+    addAsset("Lupin.glb", {{buildLupin(53, 6, 0.95f), pm("flower_lupin", SeasonKind::Flower)}}, true, nullptr);
     addAsset("Flower Single.glb", {{buildFlowerPlant(47, 3, 0.9f, 5, 0.13f, 0.105f, 0.55f, Color::hex("e03a2c"), Color::hex("2a1a10"), 0.03f, 3), pm("flower_poppy", SeasonKind::Flower)}}, true, nullptr);
     MeshData stem;
     MeshData cap = buildToadstool(17, 0.4f, Color::hex("b8422c"), stem);
-    addAsset("Mushroom.glb", {{stem, plantMat("mushroom_stem", SeasonKind::Mush, nullptr)}, {cap, plantMat("mushroom_cap", SeasonKind::Mush, nullptr)}}, true, nullptr);
+    (void)stem; (void)cap;   // mushrooms removed
     const char* petalFiles[5] = {"Flower Petal.glb", "Flower Petal-LqvxG9OBOU.glb", "Flower Petal-eVE0j49ux9.glb", "Flower Petal-niuBUEJdvM.glb", "Flower Petal-tzG4JcqYWs.glb"};
     const char* petalCol[5] = {"f4c542", "e85d8a", "f2f0ea", "e8763a", "b46ad8"};
     for (int i = 0; i < 5; i++) {
@@ -2045,6 +2275,48 @@ void buildProcTrees() {
   }
   if (std::getenv("HW_TRIS"))
     for (auto& kv : g_assets) std::fprintf(stderr, "asset %s: %d tris h %.1f\n", kv.first.c_str(), kv.second->tris, kv.second->bmax.y);
+}
+
+void dumpAll(const char* dir) {
+  // HW_DUMPASSETS: every built asset part as raw geometry (+ its texture as RGBA) for offline previews
+  for (auto& kv : g_assets) {
+    int pi = 0;
+    for (auto& part : kv.second->parts) {
+      const Mesh& m = part.mesh;
+      if (!m.valid() || !m.count) { pi++; continue; }
+      GLsizei stride = vertexStride(m.fmt);
+      std::vector<uint8_t> vb((size_t)m.vertexCount * stride);
+      glBindBuffer(GL_ARRAY_BUFFER, m.vbo);
+      glGetBufferSubData(GL_ARRAY_BUFFER, 0, vb.size(), vb.data());
+      glBindVertexArray(m.vao);
+      std::vector<uint32_t> ix(m.count);
+      int isz = m.indexType == GL_UNSIGNED_INT ? 4 : 2;
+      std::vector<uint8_t> ib((size_t)m.count * isz);
+      glGetBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, ib.size(), ib.data());
+      glBindVertexArray(0);
+      for (GLsizei k = 0; k < m.count; k++) ix[k] = isz == 4 ? ((uint32_t*)ib.data())[k] : ((uint16_t*)ib.data())[k];
+      std::string base = std::string(dir) + "/" + kv.first + "__" + std::to_string(pi);
+      FILE* f = std::fopen((base + ".bin").c_str(), "wb");
+      if (f) {
+        int hdr[4] = {(int)m.fmt, stride, m.vertexCount, (int)m.count};
+        std::fwrite(hdr, 4, 4, f);
+        float bc[3] = {part.mat.base.r, part.mat.base.g, part.mat.base.b};
+        std::fwrite(bc, 4, 3, f);
+        std::fwrite(vb.data(), 1, vb.size(), f);
+        std::fwrite(ix.data(), 4, ix.size(), f);
+        std::fclose(f);
+      }
+      if (part.mat.tex && part.mat.tex->id) {
+        const Texture* t = part.mat.tex;
+        std::vector<uint8_t> px((size_t)t->w * t->h * 4);
+        glBindTexture(GL_TEXTURE_2D, t->id);
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+        FILE* g = std::fopen((base + ".rgba").c_str(), "wb");
+        if (g) { int wh[2] = {t->w, t->h}; std::fwrite(wh, 4, 2, g); std::fwrite(px.data(), 1, px.size(), g); std::fclose(g); }
+      }
+      pi++;
+    }
+  }
 }
 
 }  // namespace assets

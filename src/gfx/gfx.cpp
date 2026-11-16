@@ -154,6 +154,14 @@ Mesh uploadMesh(const MeshData& d) {
   glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)d.verts.size(), d.verts.data(), GL_STATIC_DRAW);
   gfx::addBufferBytes((long long)d.verts.size());
   setupAttribs(d.fmt);
+  glVertexAttrib4f(5, 0, 0, 0, -1);   // meshes without a card stream read rank -1: "not a leaf card, leave alone"
+  if ((int)d.card.size() == d.vertexCount * 4 && d.vertexCount > 0) {
+    glGenBuffers(1, &m.vbo2);
+    glBindBuffer(GL_ARRAY_BUFFER, m.vbo2);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(d.card.size() * 4), d.card.data(), GL_STATIC_DRAW);
+    gfx::addBufferBytes((long long)d.card.size() * 4);
+    glEnableVertexAttribArray(5); glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, 16, (void*)0);
+  }
   if (!d.idx.empty()) {
     glGenBuffers(1, &m.ibo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.ibo);
@@ -183,6 +191,8 @@ Mesh uploadMesh(const MeshData& d) {
 
 void Mesh::destroy() {
   if (vbo) glDeleteBuffers(1, &vbo);
+  if (vbo2) glDeleteBuffers(1, &vbo2);
+  vbo2 = 0;
   if (ibo) glDeleteBuffers(1, &ibo);
   if (vao) glDeleteVertexArrays(1, &vao);
   vao = vbo = ibo = 0;
@@ -213,6 +223,10 @@ void InstBatch::create(const Mesh* m, InstKind k, GLuint shared) {
   glBindVertexArray(vao);
   glBindBuffer(GL_ARRAY_BUFFER, m->vbo);
   setupAttribs(m->fmt);
+  if (m->vbo2) {
+    glBindBuffer(GL_ARRAY_BUFFER, m->vbo2);
+    glEnableVertexAttribArray(5); glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, 16, (void*)0);
+  }
   if (m->ibo) glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m->ibo);
   owns = shared == 0;
   if (owns) glGenBuffers(1, &ivbo);

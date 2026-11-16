@@ -44,6 +44,7 @@ out vec4 v_fog;  // fog colour, amount (applied after the texture)
 uniform float u_texOn;
 uniform float u_tuft;  // far ring: untextured 3-blade tufts (9 vertices, starting at vertex 21)
 uniform sampler2D u_waterLv;  // envmap water surface map (unit 21): r = surface height, g = lake/river mask
+uniform sampler2D u_rockMask; // stony ground around rocks (unit 30): grass thins to tufts in the cracks there
 void kill(){ gl_Position = vec4(2.0, 2.0, 2.0, 1.0); v_col = vec3(0.0); v_uv = vec3(0.0); v_fog = vec4(0.0); }
 void main(){
   vec4 h = a_b1;
@@ -65,6 +66,9 @@ void main(){
   // bare-earth patches (same pattern as the baked ground): grass thins out so real soil shows through
   float e1 = textureLod(u_detailMap, envUV(p), 0.0).a;  // precomputed bare-earth noise (envmap detail map), 1 under buildings
   grow *= 1.0 - 0.95 * smoothstep(0.58, 0.7, e1);
+  float rkm = textureLod(u_rockMask, envUV(p), 0.0).r;
+  if (rkm > 0.2 && fract(h.x * 41.3 + h.w * 7.1) < smoothstep(0.2, 0.6, rkm) * 0.85) { kill(); return; }
+  grow *= 1.0 - 0.4 * smoothstep(0.2, 0.7, rkm);
   if (grow < 0.02) { kill(); return; }
   float base = a_b0.y;
   vec4 cc = u_viewProj * vec4(p.x, base + 0.3, p.y, 1.0);
@@ -104,6 +108,8 @@ void main(){
   // gust waves rolling across the meadow along the wind
   float wave = sin(dot(p, u_windDir) * 0.085 - u_windT * 1.8 + vnoise(p * 0.02) * 3.0);
   wave = max(wave, 0.0); wave *= wave;
+  float swell = sin(dot(p, u_windDir) * 0.022 - u_windT * 0.7 + vnoise(p * 0.006) * 4.0) * 0.5 + 0.5;   // long slow swells across the whole meadow
+  wave = max(wave, swell * swell * 0.7);
   gust *= 0.55 + 1.1 * wave;
   float sway = (0.35 + 0.65 * sin(u_windT * 2.3 + p.x * 0.35 + p.y * 0.27 + h.w * 6.0)) * gust;
   vec2 lean = face * (0.15 + 0.25 * fract(h.y * 9.1)) + u_windDir * sway * 0.55;
@@ -130,11 +136,16 @@ void main(){
   tip = mix(tip, vec3(0.85, 0.88, 0.92), u_snow * 0.7);
   // per-clump hue and dry tips
   float clump = vnoise(p * 0.18);
+  float patchN = vnoise(p * 0.045 + 3.7);   // broad drifts: sun-dried straw here, lush dark growth there
+  tip = mix(tip, vec3(0.6, 0.5, 0.24) * (gc.g * 3.0 + 0.45), smoothstep(0.58, 0.78, patchN) * 0.55 * (1.0 - u_snow));
+  tip *= mix(vec3(1.0), vec3(0.78, 0.9, 0.72), smoothstep(0.42, 0.2, patchN));
+  float drift = vnoise(p * 0.011 + 9.1);   // valley-scale drifts: golden and deep green fields, read from a hill
+  tip *= mix(vec3(0.86, 0.97, 0.82), vec3(1.12, 1.05, 0.8), smoothstep(0.3, 0.7, drift)) ;
   tip = mix(tip, tip * vec3(1.12, 0.96, 0.78), smoothstep(0.55, 0.8, clump));
   float dryTip = step(0.82, fract(h.x * 13.1 + h.y * 5.3)) * smoothstep(0.7, 1.0, t);
   tip = mix(tip, vec3(0.6, 0.52, 0.28) * (gc.g * 4.0 + 0.3), dryTip * 0.6);
   vec3 alb = mix(gc * 0.62, tip, smoothstep(0.0, 1.0, t)) * (0.85 + 0.3 * h.z) * mix(0.9, 1.08, clump);
-  alb *= 1.0 + 0.16 * wave * t * u_windS;  // silvery sheen on the bent crest of each wave
+  alb *= 1.0 + 0.3 * wave * t * u_windS;  // silvery sheen on the bent crest of each wave
   alb = mix(gc * 0.9, alb, smoothstep(0.0, 0.6, ringK) * (0.4 + 0.6 * emerge));
   // far clumps: a few pixels each, so their dark bases and texture streaks read as black speckles on the hills.
   // Past ~30 m they take on the lit ground colour and lose texture contrast, leaving just a soft grassy texture
@@ -179,6 +190,7 @@ const char* LEAF_VS = R"(
 layout(location=0) in vec2 a_pos;
 uniform sampler2D u_height;
 uniform sampler2D u_density;
+uniform sampler2D u_litterMask;
 uniform vec4 u_grid;
 uniform vec4 u_leaf;
 uniform int u_n;
@@ -212,9 +224,10 @@ void main(){
   vec2 g = (p - u_grid.xx) / u_grid.y;
   float dens = texture(u_density, (g + 0.5) / u_grid.z).r;
   if (h.z > dens * u_leaf.z + 0.15 * u_leaf.z) { kill(); return; }
+  if (texture(u_litterMask, (g + 0.5) / u_grid.z).r < 0.6) { kill(); return; }   // no litter on paths, banks or mountainsides
   float fadeK = 1.0 - smoothstep(u_leaf.y * 0.7, u_leaf.y, d);
   if (fract(h.w * 13.7) > fadeK) { kill(); return; }
-  vec2 wv = textureLod(u_waterLv, (p + 620.0) * (1.0 / 1240.0), 0.0).rg;
+  vec2 wv = textureLod(u_waterLv, (p + 852.5) * (1.0 / 1705.0), 0.0).rg;
   if (wv.g > 0.25) { kill(); return; }  // no leaves on lakes or rivers (mask alone: the coarse height grid misses the carved river bed)
   {  // only on fairly level ground: on steep slopes and cliffs a flat leaf reads as a floating flake from below
     float h0 = heightAt(g), hx = heightAt(g + vec2(0.5, 0.0)), hz = heightAt(g + vec2(0.0, 0.5));
@@ -286,12 +299,12 @@ void main(){
   float want = dens * (u_fl.z * (0.4 + 1.2 * vnoise(p * 0.15)) + u_fl.w * field);
   if (h.z > want) { kill(); return; }
   if (fract(h.w * 13.7) > 1.0 - smoothstep(u_fl.y * 0.6, u_fl.y, d)) { kill(); return; }
-  vec2 wv = textureLod(u_waterLv, (p + 620.0) * (1.0 / 1240.0), 0.0).rg;
+  vec2 wv = textureLod(u_waterLv, (p + 852.5) * (1.0 / 1705.0), 0.0).rg;
   float y0 = heightAt(g);
   if (wv.g > 0.25) { kill(); return; }  // no flowers standing in lakes or rivers
   vec4 cc = u_viewProj * vec4(p.x, y0 + 0.2, p.y, 1.0);
   if (cc.w < -0.5 || abs(cc.x) > cc.w * 1.1 + 0.5) { kill(); return; }
-  float W = mix(0.07, 0.12, fract(h.x * 9.1)), H = mix(0.18, 0.42, fract(h.y * 5.3));
+  float W = mix(0.13, 0.22, fract(h.x * 9.1)), H = mix(0.28, 0.6, fract(h.y * 5.3));   // heads ~2x the old size: readable from a few metres
   vec2 vd = normalize(p - u_camPos.xz + vec2(1e-4));
   vec2 side = vec2(-vd.y, vd.x);
   float t = a_pos.y * 0.5 + 0.5;
@@ -402,6 +415,8 @@ GLuint g_vao = 0, g_vbo = 0, g_leafVao = 0, g_leafVbo = 0;
 GLuint g_grassTex = 0;
 const bool g_farBlades = std::getenv("HW_FARGRASS") != nullptr;  // HW_FARGRASS=1: old far blade rings back  // assets/textures/grass_atlas.png: 8 real blades + 4 composed clumps (built offline from Foliage001)
 Texture g_density;
+// where fallen leaves may lie: not on roads, trails, river banks, lake shores or mountainsides (1 = allowed)
+Texture g_litterMask;
 int g_lastBlades = 0;
 
 struct Ring { float spacing, rIn, rOut, fade, width, height, density; };
@@ -600,6 +615,21 @@ void init() {
     }
   g_density = uploadTextureR8(d.data(), GRID_N, GRID_N, true);
   g_densCpu = d;
+  {
+    std::vector<uint8_t> m((size_t)GRID_N * GRID_N);
+    for (int j = 0; j < GRID_N; j++)
+      for (int i = 0; i < GRID_N; i++) {
+        float x = GRID_MIN + i * GRID_STEP, z = GRID_MIN + j * GRID_STEP;
+        bool ok = std::fabs(x) < MAP_HALF && std::fabs(z) < MAP_HALF;
+        if (ok) {
+          RiverHit rq = world::riverQuery(x, z);
+          ok = rq.d > rq.hw + 7 && world::lakeAt(x, z, 7) < 0 && world::pathDistance(x, z) > 4.5f && world::nearRoute(x, z) > 6.0f &&
+               world::mountainFactor(x, z) < 0.15f && world::localSlope(x, z) < 0.45f;
+        }
+        m[(size_t)j * GRID_N + i] = ok ? 255 : 0;
+      }
+    g_litterMask = uploadTextureR8(m.data(), GRID_N, GRID_N, true);
+  }
   glGenVertexArrays(1, &g_bladeVao);
   glBindVertexArray(g_bladeVao);
   glBindBuffer(GL_ARRAY_BUFFER, g_vbo);
@@ -640,16 +670,16 @@ void draw() {
   const float cs = g_grassTex ? 1.6f : 1.0f;  // clump cards carry 15-30 blades each: fewer far instances for the same density
   // 3D blades only within ~48 m: beyond that the photo grass on the ground carries the look (Far Cry-style)
   Ring rings[4] = {
-      {g_grassTex ? 0.26f : 0.17f, 0, clampf(Rn * 0.25f, 22.0f, 26.0f), 6, 0.055f, 1.0f, 1.0f},  // dense grass always reaches 22-26 m  // whole-plant cards: ~2.3x fewer near instances
+      {g_grassTex ? 0.26f : 0.17f, 0, clampf(Rn * 0.25f, 22.0f, 26.0f), 6, 0.055f, 0.85f, 1.0f},   // 0.9.73: grass 15% shorter  // dense grass always reaches 22-26 m  // whole-plant cards: ~2.3x fewer near instances
       // outer edge: a long 22 m thinning band ending under the haze, so the edge of the 3D grass never reads as a line
       // of blades appearing in front of the player
       // bigger clumps: 4.9x fewer per m2 than the near ring, so each covers ~2x the area and the ground doesn't
       // suddenly look sparse past the hand-over
-      {0.36f * cs, clampf(Rn * 0.25f, 22.0f, 26.0f), g_farBlades ? Rn * 0.55f : clampf(Rn * 0.6f, 50.0f, 58.0f), 22, 0.1f, 1.4f, 1.0f},
+      {0.36f * cs, clampf(Rn * 0.25f, 22.0f, 26.0f), g_farBlades ? Rn * 0.55f : clampf(Rn * 0.6f, 50.0f, 58.0f), 22, 0.1f, 1.2f, 1.0f},
       // far tufts: 3 crossed untextured triangles per instance (~3 tris), from inside the 3D grass's thinning band out
       // to ~150 m, so distant meadows keep a broken grassy surface instead of a flat ground texture
       g_farBlades ? Ring{1.15f * cs, Rn * 0.55f, R, 14, 0.34f, 1.1f, 0.9f}
-                  : Ring{1.25f, clampf(Rn * 0.6f, 50.0f, 58.0f) - 8.0f, std::max(90.0f, std::min(RF, 150.0f)), 45, 0.55f, 1.3f, 0.9f},
+                  : Ring{1.25f, clampf(Rn * 0.6f, 50.0f, 58.0f) - 8.0f, std::max(90.0f, std::min(RF, 150.0f)), 45, 0.55f, 1.1f, 0.9f},
       {3.0f * cs, R, RF, 40, 0.75f, 1.25f, 0.85f},  // narrower so far blades read as grass, not triangles  // sparse wide blades out to the horizon
   };
   static const std::string vs = std::string(terrain_render::groundCommon()) + GRASS_VS;
@@ -657,6 +687,10 @@ void draw() {
   s.set1i("u_bake", 4);
   s.set1i("u_grassTex", 5);
   s.set1i("u_waterLv", 21);
+  s.set1i("u_rockMask", 30);
+  glActiveTexture(GL_TEXTURE30);
+  glBindTexture(GL_TEXTURE_2D, forest::rockMaskTexture());
+  glActiveTexture(GL_TEXTURE0);
   s.set1f("u_texOn", g_grassTex ? 1.0f : 0.0f);
   s.set3f("u_texAvg", 0.303f, 0.333f, 0.168f);  // mean colour of the atlas (from the offline build)
   glActiveTexture(GL_TEXTURE5);
@@ -756,7 +790,7 @@ void draw() {
   float autK = clampf(season.autumn * 1.1f + season.fall * 0.5f - season.spring * 0.6f - season.dry * 0.4f, 0, 1);
   float amt = std::max(autK, 0.3f * (1 - season.snow));  // a thin brown carpet under trees all year, thick orange in autumn
   float bl = bloom();
-  if (bl > 0.03f) {
+  if (bl > 0.03f && false) {   // painted flower cards retired: the 3D flower plants carry spring now
     Shader& f = render::program("flowers", FLOWER_VS, FLOWER_FS);
     f.set1i("u_height", 1);
     f.set1i("u_density", 3);
@@ -772,11 +806,15 @@ void draw() {
     gfx::drawCalls++;
     glBindVertexArray(0);
   }
-  if (amt > 0.03f) {
+  if (amt > 0.03f && !std::getenv("HW_NOLITTER")) {
     Shader& l = render::program("leaflitter", LEAF_VS, LEAF_FS);
     l.set1i("u_height", 1);
     l.set1i("u_density", 3);
     l.set1i("u_waterLv", 21);
+    glActiveTexture(GL_TEXTURE22);
+    glBindTexture(GL_TEXTURE_2D, g_litterMask.id);
+    glActiveTexture(GL_TEXTURE0);
+    l.set1i("u_litterMask", 22);
     l.set4f("u_grid", GRID_MIN, GRID_STEP, (float)GRID_N, 0);
     const float sp = 0.24f, RL = 26;
     int n = (int)std::ceil(2 * RL / sp) + 2;
@@ -791,6 +829,7 @@ void draw() {
 }
 
 int bladeCount() { return g_lastBlades; }
+unsigned litterMaskTexture() { return g_litterMask.id; }
 
 float bloom() {
   float summer = clampf(1 - season.spring - season.autumn - season.snow, 0, 1);
@@ -816,7 +855,7 @@ const float* flowerFields() {
       for (int k = 0; k < 9 && ok; k++) {
         float sx = x + (k % 3 - 1) * 14.0f, sz = z + (k / 3 - 1) * 14.0f;
         float sl = world::slopeAt(sx, sz), fd = world::forestDensity(sx, sz);
-        if (sl > 0.35f || world::riverMask(sx, sz) > 0.02f || world::lakeAt(sx, sz, 8) >= 0 || world::nearRoute(sx, sz) < 6) ok = false;
+        if (sl > 0.35f || world::riverMask(sx, sz) > 0.02f || world::lakeAt(sx, sz, 8) >= 0 || world::nearRoute(sx, sz) < 6 || world::pathDistance(sx, sz) < 8) ok = false;
         score += (1 - fd) * 1.0f + (0.35f - sl);
       }
       if (ok) cand.push_back({x, z, score});
@@ -839,6 +878,7 @@ void shutdown() {
   if (g_vbo) glDeleteBuffers(1, &g_vbo);
   if (g_vao) glDeleteVertexArrays(1, &g_vao);
   g_density.destroy();
+  g_litterMask.destroy();
   if (g_leafVbo) glDeleteBuffers(1, &g_leafVbo);
   if (g_leafVao) glDeleteVertexArrays(1, &g_leafVao);
 }

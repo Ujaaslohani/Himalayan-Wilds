@@ -17,6 +17,7 @@ StageInfo computeStage();
 namespace village {
 void syncResidents();
 void resetResidents();
+const char* nextResidentName();  // name of the villager who arrives next (matches the body they get)
 float traitMult(int job);                               // average work trait of the villagers on a job
 std::string residentInfo(float x, float z, bool full);  // nearby villager: name, or name + job + mood + trait
 void assignJobs();

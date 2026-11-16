@@ -107,6 +107,7 @@ extern bool velocityPass;
 // hizCapture: call after the opaque world (before the view model); hizVisible: false only when the box is
 // certainly behind what covered that part of the screen last frame
 void hizCapture(unsigned depthTex, int w, int h);
+void hizKeepAlive();   // the view has not moved: the last snapshot stays valid
 bool hizVisible(const Vec3& mn, const Vec3& mx);
 // the Hi-Z texture itself (max linear depth of an earlier frame) for GPU-side culling, with the camera it was made from
 bool hizTexture(unsigned& tex, Mat4& vp, Vec3& camPos, int& w, int& h);

@@ -4,6 +4,8 @@
 namespace player {
 void reset();
 void update(float dt);
+Vec3 velocity();
+float stridePhase();   // walk cycle (one step per pi)   // horizontal, m/s
 void onKeyPressed(int key);
 void onMouseDown(int button);
 void onMouseUp(int button);

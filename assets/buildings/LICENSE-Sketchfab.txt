@@ -1,0 +1,8 @@
+The village buildings (*.hwb) are converted from two models by Uğur Yakışık:
+
+"Medieval Houses Asset" (https://skfb.ly/oHnzY) by Uğur Yakışık is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+"Medieval Market Stall Asset 4/4" (https://skfb.ly/oHnC8) by Uğur Yakışık is licensed under Creative Commons Attribution (http://creativecommons.org/licenses/by/4.0/).
+
+Changes: textures baked to one colour per triangle, ground planes and forge props removed, small props decimated,
+rescaled to the game's building footprints, walls/roof/wood recoloured by the player's style choices,
+houses combined into the family house and community hall; the stall frame is reused for the animal shelter.

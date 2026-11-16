@@ -1,3 +1,4 @@
+#include <map>
 #include "props.h"
 #include "engine.h"
 #include "npcs.h"
@@ -16,6 +17,10 @@
 namespace {
 
 Mesh g_stairs;
+// trail stairs and stepping pillars, cut into 96 m tiles: only tiles near and in view are drawn (one mesh for the
+// whole map was ~89K triangles every frame from anywhere)
+struct StairTile { Mesh mesh; Vec3 mn, mx; };
+std::vector<StairTile> g_stairTiles;
 CulledBatch g_posts, g_rails, g_marks, g_temples, g_templeGlow, g_clueCairns;
 Mesh g_post, g_rail, g_signMesh;
 Texture g_signTex;
@@ -24,11 +29,11 @@ std::set<std::string> g_reached;
 
 float snoise(float x, float y, float z) { return std::sin(x * 2.1f + std::sin(z * 1.7f + y * 0.9f) * 1.6f) * std::sin(z * 2.3f + std::sin(x * 1.3f - y * 1.1f) * 1.4f); }
 
-MeshData buildStairs() {
+MeshData buildStairs(const std::vector<size_t>& which) {
   std::vector<VtxP3C4N4> verts;
   std::vector<uint32_t> idx;
   Color side = Color::hex("8f7048"), side2 = Color::hex("7b5f3d"), deep = Color::hex("5e5850");
-  for (size_t i = 0; i < world::STEPS.size(); i++) {
+  for (size_t i : which) {
     const Step& S = world::STEPS[i];
     float bottom = std::min(S.bottom, world::getTerrainHeight(S.x, S.z) - 0.5f);
     float hgt = S.top - bottom;
@@ -68,6 +73,10 @@ MeshData buildStairs() {
   d.verts.resize(verts.size() * sizeof(VtxP3C4N4));
   if (!verts.empty()) std::memcpy(d.verts.data(), verts.data(), d.verts.size());
   d.idx = idx;
+  for (auto& v : verts) {
+    d.bmin = {std::min(d.bmin.x, v.p[0]), std::min(d.bmin.y, v.p[1]), std::min(d.bmin.z, v.p[2])};
+    d.bmax = {std::max(d.bmax.x, v.p[0]), std::max(d.bmax.y, v.p[1]), std::max(d.bmax.z, v.p[2])};
+  }
   return d;
 }
 
@@ -139,7 +148,18 @@ void buildSigns(const std::vector<SignSpec>& list) {
 namespace props {
 
 void init() {
-  g_stairs = uploadMesh(buildStairs());
+  {
+    std::map<std::pair<int, int>, std::vector<size_t>> tiles;
+    for (size_t i = 0; i < world::STEPS.size(); i++) tiles[{(int)std::floor(world::STEPS[i].x / 96.0f), (int)std::floor(world::STEPS[i].z / 96.0f)}].push_back(i);
+    for (auto& kv : tiles) {
+      MeshData md = buildStairs(kv.second);
+      if (md.idx.empty()) continue;
+      StairTile t;
+      t.mesh = uploadMesh(md);
+      t.mn = t.mesh.bmin; t.mx = t.mesh.bmax;
+      g_stairTiles.push_back(std::move(t));
+    }
+  }
   temple::model();
   g_temples.init(&temple::model(), &temple::modelLod());
   g_temples.mid = 60; g_temples.band = 12;
@@ -222,7 +242,12 @@ void rebuildCasters() {
 static void drawWorld(bool shadow) {
   if (!shadow) {
     glDisable(GL_CULL_FACE);
-    terrain_render::drawGroundMesh(g_stairs, true);  // stairs and stepping pillars wear the trail texture
+    const Vec3& cp = render::cam.pos;
+    for (auto& t : g_stairTiles) {   // stairs and stepping pillars wear the trail texture
+      float dx = std::max(0.0f, std::max(t.mn.x - cp.x, cp.x - t.mx.x)), dz = std::max(0.0f, std::max(t.mn.z - cp.z, cp.z - t.mx.z));
+      if (dx * dx + dz * dz > 260.0f * 260.0f || !render::cam.box(t.mn, t.mx)) continue;
+      terrain_render::drawGroundMesh(t.mesh, true);
+    }
     for (CulledBatch* b : {&g_temples, &g_templeGlow, &g_posts, &g_rails, &g_marks, &g_clueCairns}) b->cull();
   }
   glEnable(GL_CULL_FACE);
@@ -296,6 +321,8 @@ void resetSummits() { g_reached.clear(); }
 
 void shutdown() {
   g_stairs.destroy();
+  for (auto& t : g_stairTiles) t.mesh.destroy();
+  g_stairTiles.clear();
   g_post.destroy();
   g_rail.destroy();
   g_signMesh.destroy();

@@ -45,6 +45,7 @@ in vec3 v_nrm;
 in vec3 v_col;
 in vec3 v_bpos;
 in float v_depth;
+uniform float u_white;
 uniform float u_spots;  // >0: leopard rosettes, cells per model unit
 out vec4 fragColor;
 vec3 hash3(vec3 p) {
@@ -83,6 +84,7 @@ void main(){
     float r = rosette(v_bpos * u_spots);
     alb = mix(alb, alb * vec3(0.10, 0.08, 0.06), clamp(r, 0.0, 1.0) * m);
   }
+  alb = mix(alb, vec3(0.80, 0.78, 0.72) * (0.75 + 0.25 * alb.r / max(max(alb.r, alb.g), 0.02)), u_white);
   float sh = shadowAt(v_wpos, n);
   vec3 lit = lambert(alb, n, sh);
   // soft fur rim, like the hand-built animals
@@ -254,6 +256,8 @@ const Model* load(const std::string& path) {
 }
 
 static Shader* g_cur = nullptr;
+static float g_white = 0;
+void setWhite(float w) { g_white = w; }
 void beginDraw(bool shadow) {
   g_cur = shadow ? &render::program("skin_shadow", SKIN_VS, SKIN_FS, "#define SHADOW_PASS\n") : &render::program("skin", SKIN_VS, SKIN_FS);
   g_cur->use();
@@ -266,6 +270,7 @@ void draw(const Model& m, const Pose& p, const Mat4& xf, bool) {
   for (int j = 0; j < n; j++) bones[j] = xf * p.skin[j];
   glUniformMatrix4fv(g_cur->loc("u_bones"), n, GL_FALSE, bones[0].m);
   glUniform1f(g_cur->loc("u_spots"), m.spots);
+  glUniform1f(g_cur->loc("u_white"), g_white);
   glBindVertexArray(m.vao);
   glDrawElements(GL_TRIANGLES, m.nIdx, GL_UNSIGNED_INT, nullptr);
   gfx::drawCalls++;

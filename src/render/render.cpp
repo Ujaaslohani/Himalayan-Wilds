@@ -751,7 +751,7 @@ void hizCapture(unsigned depthTex, int w, int h) {
       glDeleteSync(g_hzFence[r]); g_hzFence[r] = nullptr;
     }
   }
-  if (frameNo - g_hzFrame > 4) g_hzReady = false;  // stale: never cull from old data
+  if (frameNo - g_hzFrame > 6) g_hzReady = false;  // stale: never cull from old data (captures run every 2nd-4th frame)
   if (g_hzFence[g_hzW]) return;  // that slot is still in flight
   GLint vp[4], prev = 0;
   glGetIntegerv(GL_VIEWPORT, vp);
@@ -780,8 +780,12 @@ void hizCapture(unsigned depthTex, int w, int h) {
   if (dt) glEnable(GL_DEPTH_TEST);
   if (bl) glEnable(GL_BLEND);
 }
+void hizKeepAlive() {
+  if (g_hzReady) g_hzFrame = frameNo;
+  if (g_hzTex && frameNo - g_hzTexFrame <= 5) g_hzTexFrame = frameNo - 1;
+}
 bool hizTexture(unsigned& tex, Mat4& vp, Vec3& camPos, int& w, int& h) {
-  if (!g_hzTex || std::getenv("HW_NOHIZ") || frameNo - g_hzTexFrame > 3 || frameNo == g_hzTexFrame) return false;
+  if (!g_hzTex || std::getenv("HW_NOHIZ") || frameNo - g_hzTexFrame > 5 || frameNo == g_hzTexFrame) return false;
   tex = g_hzTex; vp = g_hzTexVP; camPos = g_hzTexCam; w = HZ_W; h = HZ_H;
   return true;
 }

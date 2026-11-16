@@ -16,6 +16,7 @@ struct AssetMaterial {
 struct AssetPart {
   Mesh mesh;
   Mesh lod;
+  bool cardLod = false;   // leaf cards carry a centre + rank: one mesh serves every distance (the crown thins continuously)
   AssetMaterial mat;
   Mat4 local;
   bool identity = true;
@@ -36,6 +37,7 @@ struct AssetRequest {
 };
 
 namespace assets {
+void dumpAll(const char* dir);   // HW_DUMPASSETS
 void loadAll(const std::vector<AssetRequest>& reqs);
 const Asset* get(const std::string& file);
 std::vector<std::string> missing();

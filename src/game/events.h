@@ -12,7 +12,10 @@ int active();
 int festival();                                // 0 none, 1 Losar, 2 harvest festival                                  // current event id, -1 none
 const char* activeName();
 bool traderPos(float& x, float& y, float& z, float& yaw);  // the caravan, while it is in the village
-void drawCaravan();
+void drawCaravan(bool shadow = false);
+bool caravanBig();            // the seasonal caravan (bridge built), not just a lone trader
+bool caravanSold(int i);      // bridge-caravan offers are once per visit
+void caravanMarkSold(int i);
 int daysSince();
 void restore(int active, int daysSince);
 }

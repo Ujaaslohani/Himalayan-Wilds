@@ -49,6 +49,7 @@ layout(std140) uniform Frame {
 #define u_shadowHalf u_wind.w
 #define u_wet u_fogParam.w
 #define u_rain u_shadowMix.y
+#define u_volFog u_shadowMix.z
 #define PI 3.141592653589793
 #define FADE_NOISE_STATIC() fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(0.06711056, 0.00583715))))
 #define FADE_NOISE() fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy) + 5.588238 * mod(floor(u_clock * 60.0), 64.0), vec2(0.06711056, 0.00583715))))
@@ -119,7 +120,7 @@ vec3 aces(vec3 color){
 uniform sampler2D u_envMap;   // r haze density, g ground mist, b sky visibility, a ground height
 uniform sampler2D u_horA;     // terrain horizon angle, directions 0-3 (x = east, 45 degree steps)
 uniform sampler2D u_horB;     // directions 4-7
-vec2 envUV(vec2 xz){ return (xz + 620.0) * (1.0 / 1240.0); }
+vec2 envUV(vec2 xz){ return (xz + 852.5) * (1.0 / 1705.0); }
 vec4 envAt(vec2 xz){ return texture(u_envMap, envUV(xz)); }
 float envGround(vec4 e){ return e.a * 1000.0 - 100.0; }
 float g_envVis = 1.0;  // sky visibility at the shaded point, set by envLight()/shadowAt()
@@ -160,7 +161,11 @@ float envLight(vec3 wp){
   return horizonShadow(wp) * mix(1.0, dm.r, farK);
 }
 vec3 lambert(vec3 albedo, vec3 n, float shadow){
-  vec3 irr = mix(u_hemiGround.rgb, u_hemiSky.rgb, 0.5 * n.y + 0.5) * mix(0.45, 1.0, g_envVis);
+  // sky light: darker under the canopy (forest interiors read dark against bright clearings), and slightly cool
+  // where the sun does not reach, so sunlit patches look warm against blue-ish shade
+  vec3 irr = mix(u_hemiGround.rgb, u_hemiSky.rgb, 0.5 * n.y + 0.5) * mix(0.36, 1.0, g_envVis);
+  irr *= mix(vec3(0.8, 0.95, 0.68), vec3(1.0), g_envVis);   // under the canopy the light that reaches you came through leaves: green-tinted
+  irr *= mix(vec3(0.9, 0.97, 1.1), vec3(1.0), shadow);
   irr += g_fireLight;
   irr += g_lanternC * (0.3 + 0.7 * max(dot(n, g_lanternL), 0.0));
   irr += u_sunCol.rgb * max(dot(n, u_sunDir.xyz), 0.0) * shadow;
@@ -188,7 +193,10 @@ float hazeAmt(vec3 wp, float depth){
   // thin over open high ground so mountain views stay clear. Points well above the player keep a faint silhouette.
   vec4 em = envAt(mix(u_camPos.xz, wp.xz, 0.35));
   float dy = wp.y - u_camPos.y;
-  float dens = 0.0165 * em.r * mix(1.0, 0.55, smoothstep(10.0, 160.0, dy)) * mix(1.6, 1.0, u_daylight);
+  // open ground keeps at least half the forest haze while you stand at valley / hillside level; from real heights
+  // (summit temples, high trails above ~110 m) the clear-air views stay as they were
+  em.r = max(em.r, 0.5 * (1.0 - smoothstep(70.0, 110.0, u_camPos.y)));
+  float dens = 0.0135 * em.r * mix(1.0, 0.55, smoothstep(10.0, 160.0, dy)) * mix(1.6, 1.0, u_daylight);
   // looking down from high ground (summits, the temple): most of the sight line runs through the clear air above the
   // valley haze, so the haze thins with how far the eye is above the point
   dens /= 1.0 + max(-dy - 15.0, 0.0) / 45.0;  // night keeps its haze (moonlit mist) like the evening
@@ -212,21 +220,25 @@ float fogObject(vec3 wp, float depth){
 float fogObjectBase(vec3 wp, float depth){
   float r = smoothstep(3.0, 45.0, abs(wp.y - u_camPos.y));
   float alt = clamp(u_camPos.y / 50.0, 0.0, 5.0);
-  float fn = mix(u_fogNear * (1.0 + alt), u_fogNear * 3.0 * (1.0 + alt), r);
-  float ff = mix(u_fogFar * (1.0 + alt * 1.5), 2200.0, r * r);
-  return smoothstep(fn, ff, depth);
+  // valley mist: starts close and thickens steadily (sqrt ramp: visible within a few tens of metres, not only at
+  // the far end); standing higher only thins it a little, so it still reads from hillsides and the village
+  float fn = mix(u_fogNear * (1.0 + alt * 0.3), u_fogNear * 3.0 * (1.0 + alt * 0.3), r);
+  float ff = mix(u_fogFar * (1.0 + alt * 0.4), 2200.0, r * r);
+  float x = clamp((depth - fn) / max(ff - fn, 1.0), 0.0, 1.0);
+  return sqrt(x) * (2.0 - sqrt(x)) * 0.92;
 }
 vec3 fogTint(vec3 wp){
   // aerial perspective: haze brightens and warms toward the sun
   vec3 v = normalize(wp - u_camPos);
   float s = max(dot(v, u_sunDir.xyz), 0.0);
-  float k = (pow(s, 5.0) * 0.85 + s * s * 0.18) * smoothstep(-0.04, 0.18, u_sunDir.y);
-  vec3 warm = min(u_fogCol.rgb * vec3(1.32, 1.18, 0.98) + vec3(0.07, 0.045, 0.0), vec3(1.0));
+  // forward (Mie) scattering: a bright, sun-coloured glow fills the haze looking toward the sun, broad and soft
+  float k = (pow(s, 6.0) * 0.9 + pow(s, 2.0) * 0.2) * smoothstep(-0.04, 0.18, u_sunDir.y);
+  vec3 warm = min(u_fogCol.rgb * vec3(1.36, 1.22, 0.96) + vec3(0.09, 0.06, 0.0) + u_sunCol.rgb * 0.04, vec3(1.0));
   // far layers go cooler and bluer: depth between mountain ridges
-  float far = smoothstep(220.0, 1600.0, distance(wp, u_camPos)) * smoothstep(0.08, 0.4, u_daylight);
-  vec3 base = mix(u_fogCol.rgb, u_fogCol.rgb * vec3(0.84, 0.94, 1.12) + vec3(0.0, 0.012, 0.035), far * 0.8);
+  float far = smoothstep(50.0, 650.0, distance(wp, u_camPos)) * smoothstep(0.08, 0.4, u_daylight);
+  vec3 base = mix(u_fogCol.rgb, u_fogCol.rgb * vec3(0.66, 0.86, 1.25) + vec3(0.0, 0.02, 0.07), far);
   base = mix(base, min(base * 1.12 + vec3(0.025), vec3(1.0)), u_daylight);  // daylight haze is luminous, not grey
-  base = mix(base, vec3(dot(base, vec3(0.3, 0.59, 0.11))) * vec3(1.06, 1.05, 1.02) + vec3(0.03), 0.4 * u_daylight * (1.0 - far));  // near haze is milky white, distant layers stay blue
+  base = mix(base, vec3(dot(base, vec3(0.3, 0.59, 0.11))) * vec3(1.07, 1.05, 0.98) + vec3(0.03), 0.16 * u_daylight * (1.0 - far));  // near haze is soft sunlit white, distant layers stay blue
   return mix(base, warm, k);
 }
 float valleyMist(vec3 wp, float depth){
@@ -241,8 +253,19 @@ float fogGround(vec3 wp, float depth){
   float r = smoothstep(3.0, 45.0, abs(wp.y - u_camPos.y));
   float alt = clamp(u_camPos.y / 50.0, 0.0, 5.0);
   float nf = smoothstep(u_fogNear * (1.0 + alt), u_fogFar * (1.0 + alt * 1.5), depth) * mix(0.55, 0.22, r);
-  float layer = smoothstep(140.0, 950.0, depth) * (1.0 - smoothstep(25.0, 170.0, wp.y)) * 0.42;  // haze pooled low between ridges
-  return max(max(max(max(nf, smoothstep(180.0, 2300.0, depth) * 0.84), valleyMist(wp, depth)), layer), hazeAmt(wp, depth));
+  float layer = smoothstep(140.0, 950.0, depth) * (1.0 - smoothstep(25.0, 170.0, wp.y)) * 0.36;  // haze pooled low between ridges
+  float vf = 0.0;
+  if (u_volFog > 0.5) {
+    // volumetric fog: drifting banks lying low over the ground around you, thicker at dawn, dusk and in rain.
+    // Lit by fogTint (sun glow toward the sun) and the fire / lantern halos, so light visibly fills it
+    float feet = u_camPos.y - 1.7;
+    float low = 1.0 - smoothstep(-6.0, 9.0, wp.y - feet);
+    vec2 dq = wp.xz * 0.035 + u_windDir * u_clock * 0.25;
+    float bank = smoothstep(0.3, 0.75, vnoise(dq) * 0.65 + vnoise(dq * 2.7 + 5.1) * 0.35);
+    float tod = mix(0.45, 1.0, 1.0 - smoothstep(0.35, 0.8, u_daylight)) + u_rain * 0.6;
+    vf = low * bank * tod * smoothstep(3.0, 70.0, depth) * 0.42;
+  }
+  return max(max(max(max(max(nf, smoothstep(180.0, 2300.0, depth) * 0.84), valleyMist(wp, depth)), layer), hazeAmt(wp, depth)), vf);
 }
 uniform sampler2DShadow u_shadowMap;
 uniform sampler2DShadow u_shadowPrev;
@@ -305,6 +328,10 @@ in vec4 a_nrm;
 #endif
 #ifdef VF_GLB
 in vec2 a_uv;
+#if defined(K_LEAF) && defined(VF_GLB)
+in vec4 a_extra;   // leaf card centre (xyz) and importance rank (w; -1 = none)
+uniform float u_cardBias;
+#endif
 out vec2 v_uv;
 #endif
 #if defined(INST_LITE)
@@ -322,6 +349,7 @@ uniform vec2 u_fade;
 uniform vec2 u_fadeIn;
 uniform float u_packed;
 out float v_fade;
+out float v_cardless;   // leaf mesh without per-card data (LOD / impostor capture meshes)
 out float v_fadeIn;
 out vec3 v_wpos;
 out vec4 v_col;
@@ -390,6 +418,34 @@ vec3 seasonShape(vec3 p){
 }
 void main(){
   vec3 p = a_pos;
+  v_cardless = 1.0;
+#if defined(K_LEAF) && defined(VF_GLB)
+  if (a_extra.w >= 0.0) {
+    v_cardless = 0.0;
+    // continuous crown detail (see buildCardStream): by on-screen size, the least important leaf cards shrink to
+    // nothing with distance and the rest grow to keep the crown as full. No model swap, leaves grow in as you approach
+#if defined(INST_LITE)
+    vec3 io = a_i0.xyz;
+#elif defined(INST_FULL)
+    vec3 io = vec3(a_i0.w, a_i1.w, a_i2.w);
+#else
+    vec3 io = u_model[3].xyz;
+#endif
+    // u_cardBias: in dense stands while moving, the thinning starts a little closer (outline cards are kept)
+    float dE = distance(io.xz, u_camPos.xz) * 1.732 / clamp(u_proj[1][1], 0.6, 6.0) * (1.0 + u_cardBias);
+    float keep = mix(1.0, 0.28, pow(clamp((dE - 6.0) / 44.0, 0.0, 1.0), 0.75));   // 0.9.59: thins a little sooner (fewer, larger cards at 30-50 m)
+    float cs = smoothstep(a_extra.w - 0.05, a_extra.w + 0.05, keep * 1.06);
+    p = a_extra.xyz + (p - a_extra.xyz) * (cs * min(1.7, inversesqrt(keep)));
+#if defined(K_LEAF)
+    // late autumn into winter: whole leaf clusters drop off one by one (hash of each card's centre), so a tree thins
+    // to a sparse crown and then to bare branches, with no holes punched through the leaves that remain
+    if (u_bare > 0.01) {
+      float h = fract(sin(dot(a_extra.xyz, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+      if (h < u_bare * 1.08) p = a_extra.xyz;
+    }
+#endif
+  }
+#endif
   vec3 n = vec3(0.0, 1.0, 0.0);
 v_ao = 1.0;
 #if defined(VF_SMOOTH) || defined(VF_GLB)
@@ -438,7 +494,7 @@ v_ao = 1.0;
   v_opos = a_pos;
 #endif
   v_nrm = normalize(mat3(M) * n);
-  v_seed = fract(sin(dot(sO.xz, vec2(12.9898, 78.233))) * 43758.5453);
+  v_seed = fract(floor(sO.x * 2.0) * 0.6180339 + floor(sO.z * 2.0) * 0.7548777);   // same per-tree key as the pictures and the far crowns (blossom trees match at every range)
   vec3 col = srgbToLinear(a_col.rgb) * u_tint.rgb;
 #ifdef INST_FULL
 #ifdef TINT_WHITE
@@ -473,6 +529,7 @@ const vec3 SNOWC = vec3(0.86, 0.9, 0.96);
 #else
 #define SNOWK 1.0
 #endif
+float g_outdoor = 1.0;   // 0 for indoor pieces (the cave): no snow settles on them
 vec3 seasonColor(vec3 sc, vec3 wp, float ny, float seed){
   // seasons travel: autumn colour starts high and creeps down the slopes, spring green rises from the valley floor
   float lAut = clamp(u_autumn * 1.5 - (1.0 - smoothstep(20.0, 200.0, wp.y)) * 0.5, 0.0, 1.0);
@@ -482,13 +539,21 @@ vec3 seasonColor(vec3 sc, vec3 wp, float ny, float seed){
   float hv = fract(seed * 7.31 + floor(wp.y * 0.7) * 0.13);
   sc *= mix(vec3(0.86, 0.96, 0.82), vec3(1.16, 1.14, 0.78), hv) * mix(1.0, 1.08, u_daylight);
   float sL = mix(0.85, clamp(dot(sc, vec3(0.3, 0.59, 0.11)) * 3.2, 0.35, 1.25), 0.75);
-  float sNear = 1.0 - smoothstep(10.0, 30.0, distance(wp, u_camPos));
+  float sNear = 1.0 - smoothstep(8.0, 20.0, distance(wp, u_camPos));   // per-tree season colours settle before the hand-over to pictures (22 m+)
+#ifdef CAPTURE
+  sNear = 0.0;   // pictures are seen 60 m+ away: use the far colouring (no blossom / red-leaf speckle baked into spring and summer pictures)
+#endif
   vec3 sAu = mix(vec3(0.95, 0.33, 0.03), vec3(0.62, 0.06, 0.03), mix(0.5, smoothstep(0.35, 0.75, seed), sNear));
   sAu = mix(sAu, vec3(0.98, 0.62, 0.05), step(0.8, seed) * sNear * 0.8);
   sAu = mix(sAu, vec3(0.9, 0.45, 0.04), sHash(floor(wp * 1.3)) * 0.5 * sNear);
   sc = mix(sc, sAu * sL, clamp(lAut, 0.0, 1.0));
   sc = mix(sc, sc * vec3(0.9, 1.18, 0.82), lSpr);
-  sc = mix(sc, vec3(0.98, 0.55, 0.7) * sL, lSpr * mix(0.12, step(0.72, seed) * 0.8, sNear));
+#ifdef CAPTURE
+  float bloom = 0.0;   // pictures are shared by every tree of a type: blossom is added per tree in the impostor shader
+#else
+  float bloom = step(0.72, seed) * 0.8;   // a blossoming tree stays pink at every distance (was faded out past 20 m)
+#endif
+  sc = mix(sc, vec3(0.98, 0.55, 0.7) * sL, lSpr * bloom);
   sc = mix(sc, sc * vec3(1.08, 1.0, 0.72), u_dry * 0.35);
   sc = mix(sc, vec3(sL * 0.5, sL * 0.4, sL * 0.33), u_snow * 0.55);
   sc = mix(sc, SNOWC, u_snow * SNOWK * (0.3 + 0.6 * smoothstep(0.1, 0.7, ny)));
@@ -515,15 +580,18 @@ vec3 seasonColor(vec3 sc, vec3 wp, float ny, float seed){
 #elif defined(K_BARK)
   sc = mix(sc, SNOWC, u_snow * smoothstep(0.45, 0.9, ny) * 0.9);
 #elif defined(K_ROCK)
-  sc = mix(sc, SNOWC, u_snow * smoothstep(0.35, 0.8, ny));
+  sc = mix(sc, SNOWC, u_snow * smoothstep(0.35, 0.8, ny) * g_outdoor);
 #elif defined(K_BUILD)
-  sc = mix(sc, SNOWC, u_snow * smoothstep(0.55, 0.85, ny));
+  sc = mix(sc, SNOWC, u_snow * smoothstep(0.55, 0.85, ny) * g_outdoor);
 #endif
   return sc;
 }
 )";
 
 static const char* OBJECT_FS = R"(
+#if defined(K_ROCK)
+uniform sampler2DArray u_ground;   // photo ground layers (unit 20): rocks blend into the soil at their foot
+#endif
 in vec3 v_wpos;
 in vec4 v_col;
 in vec3 v_nrm;
@@ -547,6 +615,7 @@ uniform int u_tier;
 in vec3 v_opos;
 #endif
 in float v_fade;
+in float v_cardless;
 in float v_fadeIn;
 #ifdef CAPTURE
 layout(location = 0) out vec4 fragColor;
@@ -575,7 +644,9 @@ void main(){
     if (dh >= v_fade || dh < 1.0 - v_fadeIn) discard;
   }
 #ifdef K_LEAF
-  if (u_bare > 0.01 && sHash(floor(v_wpos * 2.6)) < u_bare * (0.8 + 0.2 * v_seed)) discard;
+  // meshes without card data (far LOD crowns, impostor captures): thin in coarse 1.6 m clumps, which reads as a
+  // sparse crown from a distance (the near trees drop whole clusters in the vertex shader instead)
+  if (u_bare > 0.01 && v_cardless > 0.5 && sHash(floor(v_wpos * 0.62)) < u_bare * 1.05) discard;
 #endif
   vec4 base = vec4(v_col.rgb, 1.0);
 #ifdef VF_GLB
@@ -652,6 +723,25 @@ void main(){
     }
   }
 #endif
+#if defined(K_BARK) && !defined(CAPTURE) && !defined(SHADOW_PASS)
+  {
+    // bark up close: vertical furrows and ridges from the baked grain texture (1-2 reads, trunks within 20 m only),
+    // and moss creeping up one side
+    float bd = 1.0 - smoothstep(11.0, 20.0, v_depth);
+    if (bd > 0.001) {
+      vec3 nk = n;
+      vec3 aw = ptexWood(v_wpos * vec3(1.0, 0.4, 1.0), nk, 1.7, 1.5);
+      float furrow = smoothstep(0.75, 1.15, dot(aw, vec3(0.3333)));
+      base.rgb *= mix(vec3(1.0), aw * mix(0.68, 1.2, furrow), bd);
+      // lichen: small, soft flecks that tint the bark itself (so they dim with the light), not fixed-colour blobs
+      float lich = smoothstep(0.58, 0.78, vnoise(vec2(v_wpos.x + v_wpos.z, v_wpos.y) * 9.0)) * bd * (1.0 - u_snow);
+      base.rgb *= mix(vec3(1.0), vec3(1.12, 1.16, 1.0), lich * 0.5);
+      n = normalize(mix(n, nk, bd));
+      float moss = smoothstep(0.5, 0.75, vnoise(v_wpos.xz * 1.3 + v_wpos.y * 0.5)) * smoothstep(-0.1, 0.7, -n.x) * bd * (1.0 - u_snow);
+      base.rgb = mix(base.rgb, dot(base.rgb, vec3(0.5)) * vec3(0.55, 1.0, 0.3) + vec3(0.006, 0.016, 0.0), moss * 0.6);
+    }
+  }
+#endif
 #if defined(K_ROCK) && !defined(CAPTURE)
   {
     // pre-baked procedural rock material, triplanar
@@ -663,8 +753,35 @@ void main(){
     g_rockVar = 0.0;
     base.rgb *= mix(vec3(1.0), alb, rd);
     n = normalize(mix(n, nr, rd));
-    float moss = smoothstep(0.62, 0.92, n.y) * smoothstep(0.45, 0.7, vnoise(v_wpos.xz * 0.9)) * rd;
-    base.rgb = mix(base.rgb, base.rgb * vec3(0.72, 0.92, 0.55), moss * 0.45);
+    base.rgb *= 1.0 - 0.25 * smoothstep(0.7, 0.85, vnoise(v_wpos.xz * 7.0 + v_wpos.y * 5.0)) * rd;   // pits and dark flecks
+    float moss = smoothstep(0.45, 0.85, n.y) * smoothstep(0.3, 0.6, vnoise(v_wpos.xz * 0.9) * 0.7 + vnoise(v_wpos.xz * 3.1) * 0.3 * rd) * mix(0.75, 1.0, rd);  // far rocks keep their moss: no pale dots on the hills
+    {  // sedimentary layering: warm and cool bands with dark seams between them, tilted a little per rock
+      float sy = v_wpos.y * 1.4 + dot(v_wpos.xz, vec2(0.21, -0.17)) * (fract(v_seed * 3.7) - 0.5) + vnoise(v_wpos.xz * 0.6) * 0.7;
+      float band = fract(sy);
+      base.rgb *= mix(vec3(1.05, 1.0, 0.93), vec3(0.93, 0.97, 1.03), step(0.5, fract(sy * 0.5)));
+      base.rgb *= 1.0 - 0.32 * (1.0 - smoothstep(0.0, 0.07, band)) * (1.0 - smoothstep(0.45, 0.85, n.y));
+    }
+    base.rgb = mix(base.rgb, (base.rgb * 0.5 + 0.5 * dot(base.rgb, vec3(0.33))) * vec3(0.62, 1.05, 0.3) + vec3(0.012, 0.03, 0.0), moss * 0.85 * (1.0 - u_snow));
+#ifndef SHADOW_PASS
+    // ground blend: the lowest ~0.4-1.1 m of a rock takes on the soil it sits in (ragged, noise-driven edge),
+    // its normal tips up so it is lit like the ground, and a dark crease marks where stone meets earth.
+    // Works the same for one boulder or a pile: each stone's foot blends into the ground, not into its neighbour.
+    float gb = 1.0 - smoothstep(30.0, 45.0, v_depth);
+    if (gb > 0.001) {
+      float above = v_wpos.y - envGround(envAt(v_wpos.xz));
+      float edge = 0.4 + 0.7 * vnoise(v_wpos.xz * 1.9 + v_wpos.y * 0.7);
+      float k = (1.0 - smoothstep(0.0, edge, above)) * gb * step(-1.5, above);  // not deep under the ground (cave walls)
+      if (k > 0.001) {
+        vec2 guv = v_wpos.xz * 0.45;
+        vec3 soil = mix(texture(u_ground, vec3(guv, 3.0)).rgb, texture(u_ground, vec3(guv, 1.0)).rgb, vnoise(v_wpos.xz * 0.8));
+        vec3 green = (base.rgb * 0.4 + 0.6 * dot(base.rgb, vec3(0.33))) * vec3(0.6, 1.0, 0.32) + vec3(0.01, 0.025, 0.0);
+        soil = mix(soil, green, smoothstep(0.45, 0.75, vnoise(v_wpos.xz * 2.3)) * 0.6 * (1.0 - u_snow));
+        float crease = 1.0 - 0.35 * (1.0 - smoothstep(0.0, 0.18, abs(above - edge * 0.55))) * gb;
+        base.rgb = mix(base.rgb, soil, k * 0.9) * crease;
+        n = normalize(mix(n, vec3(0.0, 1.0, 0.0), k * 0.55));
+      }
+    }
+#endif
   }
 #endif
 #if defined(CUTOUT) && !defined(CAPTURE)
@@ -672,10 +789,12 @@ void main(){
   float edgeOn = 1.0 - smoothstep(0.05, 0.45, abs(dot(n, normalize(u_camPos - v_wpos))));
   n = normalize(mix(n, vec3(0.0, 1.0, 0.0), max(0.75 * leafFar, 0.85 * edgeOn)));
 #endif
+  g_outdoor = u_emissive.a < -0.5 ? 0.0 : 1.0;
   vec3 sc = seasonColor(base.rgb, v_wpos, n.y, v_seed);
 #if !defined(CUTOUT) && !defined(CAPTURE) && !defined(SHADOW_PASS)
-  float wetK = u_wet * (1.0 - u_snow) * smoothstep(-0.2, 0.6, n.y + 0.5);
-  sc *= 1.0 - 0.32 * wetK;  // rain-soaked surfaces darken
+  float wetK = u_wet * (1.0 - u_snow) * mix(0.55 + 0.45 * smoothstep(0.3, 0.7, vnoise(vec2(v_wpos.x + v_wpos.z, v_wpos.y * 0.15) * 2.0)), 1.0, smoothstep(0.2, 0.8, n.y));  // runs streak down vertical faces
+  sc *= 1.0 - 0.38 * wetK;  // rain-soaked surfaces darken
+  sc = mix(sc, sc * sc * 3.0, 0.15 * wetK);   // and their colour deepens
 #endif
 #ifdef DEFERRED
   {
@@ -717,12 +836,12 @@ void main(){
   sh = mix(sh, 0.62, 0.85 * max(leafFar, edgeOn));
 #endif
 #endif
-  vec3 lit = lambert(sc, n, sh) + u_emissive.rgb * sc + u_emissive.a * vec3(1.0, 0.78, 0.42);
+  vec3 lit = lambert(sc, n, sh) + u_emissive.rgb * sc + max(u_emissive.a, 0.0) * vec3(1.0, 0.78, 0.42);
 #if !defined(CUTOUT) && !defined(CAPTURE) && !defined(SHADOW_PASS)
   if (wetK > 0.01) {
     vec3 Vw = normalize(u_camPos - v_wpos);
     float gl = pow(max(dot(reflect(-u_sunDir.xyz, n), Vw), 0.0), 48.0);
-    lit += (u_sunCol.rgb * gl * 0.5 * sh + u_hemiSky.rgb * 0.06 * pow(1.0 - max(dot(n, Vw), 0.0), 4.0)) * wetK;  // wet gloss
+    lit += (u_sunCol.rgb * gl * 0.5 * sh + u_hemiSky.rgb * (0.05 + 0.3 * pow(1.0 - max(dot(n, Vw), 0.0), 3.0))) * wetK;  // wet gloss: the grey sky mirrored at grazing angles
   }
 #endif
 #if defined(CUTOUT) && !defined(CAPTURE)
@@ -735,7 +854,7 @@ void main(){
   {
     vec3 V = normalize(u_camPos - v_wpos);
     float wrap = clamp((dot(n, u_sunDir.xyz) + 0.4) / 1.4, 0.0, 1.0);
-    vec3 irr = mix(u_hemiGround.rgb, u_hemiSky.rgb, 0.5 * n.y + 0.5) * 1.2 + u_sunCol.rgb * wrap * mix(0.55, 1.0, sh);
+    vec3 irr = mix(u_hemiGround.rgb, u_hemiSky.rgb, 0.5 * n.y + 0.5) * 1.2 + u_sunCol.rgb * wrap * mix(0.38, 1.0, sh);
     float rim = pow(1.0 - max(dot(n, V), 0.0), 3.0);
     lit = sc * irr * (1.0 / PI) + rim * 0.22 * sc * (u_hemiSky.rgb + u_sunCol.rgb * 0.25);
   }

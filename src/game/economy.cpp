@@ -22,11 +22,16 @@ const Trade TRADES[9] = {
 };
 
 // the travelling caravan's rare goods: trophies and gear materials you'd otherwise have to hunt dangerous animals for
-const Trade CARAVAN[4] = {
+const Trade CARAVAN[CARAVAN_N] = {
     {"c1", {{"wood", 30}, {"stone", 10}}, {{"wolf_fur", 1}}},
     {"c2", {{"food", 30}, {"fiber", 10}}, {{"bear_hide", 1}}},
     {"c3", {{"deer_pelt", 2}, {"herb", 6}}, {{"goral_horn", 2}}},
     {"c4", {{"stone", 20}, {"bone", 4}}, {{"sinew", 4}, {"arrow", 40}}},
+    // the seasonal caravan that crosses your bridge: bulk goods, a standing order and a teaching, once each per visit
+    {"x1", {{"wolf_fur", 2}, {"bone", 6}}, {{"leopard_pelt", 1}}},
+    {"x2", {{"deer_pelt", 4}, {"goral_horn", 2}}, {{"wood", 60}, {"stone", 40}}},
+    {"x3", {{"deer_pelt", 6}, {"boar_hide", 3}}, {{"renown", 1200}}},
+    {"x4", {{"bear_hide", 1}, {"leopard_pelt", 1}, {"herb", 10}}, {{"skill_point", 1}}},
 };
 
 const GearDef GEAR[] = {

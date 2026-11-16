@@ -1,3 +1,4 @@
+#include "skills.h"
 #include "../render/envmap.h"
 #include "../render/sky.h"
 #include "resources.h"
@@ -35,16 +36,17 @@ const float R_MID = 24, R_BAND = 8, R_MARGIN = 2, R_SHADOW = 46;
 unsigned g_gen = 1;
 std::vector<Layer> g_layers;
 
-bool okSpot(ResType t, float x, float z) {
+bool okSpot(ResType t, float x, float z, bool core = true) {
   if (std::fabs(x) > MAP_HALF - 25 || std::fabs(z) > MAP_HALF - 25) return false;
   if (hypot2(x, z) < SETTLEMENT_RADIUS + 5) return false;
   for (auto& c : npcs::CAMPS)
     if (hypot2(x - c.campX, z - c.campZ) < 9) return false;
-  if (world::riverMask(x, z) > 0.02f || world::pathDistance(x, z) < 3.5f || world::nearRoute(x, z) < 5.5f) return false;
+  // the first map's nodes are judged against the first map's roads only, so their numbering (which saves refer to) never shifts
+  if (world::riverMask(x, z) > 0.02f || (core ? world::corePathDistance(x, z) : world::pathDistance(x, z)) < 3.5f || world::nearRoute(x, z) < 5.5f) return false;
   for (const Shrine& sh : world::SHRINES) if (hypot2(x - sh.x, z - sh.z) < 13.0f + 10) return false;
   if (world::lakeAt(x, z, 4) >= 0) return false;
   float h = world::getTerrainHeight(x, z);
-  if (h < -0.4f || h > 42) return false;
+  if (h < -0.4f || h > (core ? 42 : 78)) return false;
   float s = std::fabs(world::getTerrainHeight(x + 1.5f, z) - world::getTerrainHeight(x - 1.5f, z)) + std::fabs(world::getTerrainHeight(x, z + 1.5f) - world::getTerrainHeight(x, z - 1.5f));
   if (s > 1.6f) return false;
   float f = world::forestDensity(x, z);
@@ -69,18 +71,19 @@ void spawn(uint32_t seed) {
     int clusters = pl.second;
     for (int c = 0; c < clusters; c++) {
       float ring = (float)c / clusters;
-      float rMin = ring < 0.4f ? 26 : ring < 0.85f ? 70 : 140;
-      float rMax = ring < 0.4f ? 70 : ring < 0.85f ? 140 : 205;
+      // spread out over the valley, not bunched at the village edge: a quarter 60-120 m out, the rest 120-300 m
+      float rMin = ring < 0.25f ? 60 : ring < 0.65f ? 120 : 200;
+      float rMax = ring < 0.25f ? 120 : ring < 0.65f ? 200 : 300;
       float cx = 0, cz = 0;
       bool found = false;
-      for (int k = 0; k < 80 && !found; k++) {
-        float a = r() * TAU, rr = rMin + r() * (rMax - rMin);
+      for (int k = 0; k < 160 && !found; k++) {
+        float a = r() * TAU, rr = std::sqrt(rMin * rMin + r() * (rMax * rMax - rMin * rMin));   // uniform over the ring's area
         cx = std::cos(a) * rr;
         cz = std::sin(a) * rr;
         found = okSpot(type, cx, cz);
         if (found)
           for (auto& n : g_nodes)
-            if (hypot2(n.x - cx, n.z - cz) < 12) { found = false; break; }
+            if (hypot2(n.x - cx, n.z - cz) < 38) { found = false; break; }   // clusters well apart: even coverage
       }
       if (!found) continue;
       int count = 2 + (int)std::floor(r() * 3);
@@ -107,6 +110,54 @@ void spawn(uint32_t seed) {
         n.left = info.harvests;
         n.regrowAt = 0;
         g_nodes.push_back(n);
+      }
+    }
+  }
+  // outer lands: clusters scattered through the new country, numbered after the first map's so saved nodes keep their ids
+  {
+    Rng ro(seed * 7919u + 5);
+    auto q = [&] { return ro.next(); };
+    std::pair<ResType, int> plan2[4] = {{RES_WOOD, 12}, {RES_STONE, 11}, {RES_FIBER, 11}, {RES_HERB, 10}};   // a little more than the first valley: the new land is as big again
+    for (auto& pl : plan2) {
+      ResType type = pl.first;
+      for (int c = 0; c < pl.second; c++) {
+        float cx = 0, cz = 0;
+        bool found = false;
+        for (int k = 0; k < 120 && !found; k++) {
+          P2 g = world::outerPoint(q() * TAU, 30 + q() * 200);
+          cx = g[0];
+          cz = g[1];
+          found = okSpot(type, cx, cz, false);   // within sight of a road
+          if (found)
+            for (auto& n : g_nodes)
+              if (hypot2(n.x - cx, n.z - cz) < 30) { found = false; break; }
+        }
+        if (!found) continue;
+        int count = 2 + (int)std::floor(q() * 3);
+        for (int i = 0; i < count; i++) {
+          float x = cx, z = cz;
+          bool ok = false;
+          for (int k = 0; k < 12 && !ok; k++) {
+            x = cx + (q() - 0.5f) * 9;
+            z = cz + (q() - 0.5f) * 9;
+            ok = okSpot(type, x, z, false);
+            if (ok)
+              for (auto& n : g_nodes)
+                if (hypot2(n.x - x, n.z - z) < 2.6f) { ok = false; break; }
+          }
+          if (!ok) continue;
+          ResNode n;
+          n.id = id++;
+          n.type = type;
+          n.x = x;
+          n.z = z;
+          n.y = world::getTerrainHeight(x, z);
+          n.rot = q() * TAU;
+          n.scale = type == RES_STONE ? 0.55f + q() * 0.3f : type == RES_WOOD ? 0.85f + q() * 0.3f : 0.7f + q() * 0.3f;
+          n.left = RES_INFO[type].harvests;
+          n.regrowAt = 0;
+          g_nodes.push_back(n);
+        }
       }
     }
   }
@@ -142,7 +193,7 @@ ResNode* byId(int id) { for (auto& n : g_nodes) if (n.id == id) return &n; retur
 HarvestResult harvest(ResNode& n) {
   const ResInfo& info = RES_INFO[n.type];
   auto& b = E.world.bonus;
-  int extra = n.type == RES_WOOD ? b.woodExtra : n.type == RES_STONE ? b.stoneExtra : n.type == RES_HERB ? b.herbExtra : 0;
+  int extra = (n.type == RES_WOOD ? b.woodExtra : n.type == RES_STONE ? b.stoneExtra : n.type == RES_HERB ? b.herbExtra : 0) + (n.type == RES_WOOD || n.type == RES_STONE || n.type == RES_HERB ? skills::gatherExtra() : 0);
   n.left -= 1;
   if (n.left <= 0) n.regrowAt = E.clock + info.respawn * (extra > 0 ? 0.6f : 1.0f);
   g_dirty = true;

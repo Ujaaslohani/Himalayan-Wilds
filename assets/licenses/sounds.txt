@@ -1,0 +1,5 @@
+Animal recordings (freesound.org, supplied by the player):
+  117250 rvinyard "boar"; 98337 CGEffex "roar"; 763026 Celldroid "bear angry growl";
+  252678 Bridoom "wolf howl"; 500646 betchkal "Cooper Creek ... solitary wolf howl, very clear"
+  (check each page on freesound.org for its licence and any attribution it asks for)
+Nature Sounds Pack (ambience, streams, footsteps, foliage): supplied by the player; see the pack's own licence.

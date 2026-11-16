@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cctype>
 #include <fstream>
 #include <sstream>
 #include <filesystem>
@@ -15,6 +16,7 @@ namespace fs = std::filesystem;
 Settings g_settings;
 
 namespace {
+using platform::BINDS; using platform::BIND_COUNT; using platform::boundKey; using platform::keyName;
 GLFWwindow* g_win = nullptr;
 Input g_in;
 std::vector<std::string> g_args;
@@ -25,24 +27,24 @@ int g_winX = 100, g_winY = 100, g_winW = 1600, g_winH = 900;
 double g_lastX = 0, g_lastY = 0;
 bool g_haveLast = false;
 
+int g_lastRaw = -1;
 int mapKey(int k) {
+  // rebindable actions first (Options > Controls), then the fixed keys (menus, arrows, function keys)
+  for (int i = 0; i < BIND_COUNT; i++) if (boundKey(BINDS[i].key) == k) return BINDS[i].key;
   switch (k) {
-    case GLFW_KEY_W: return K_W; case GLFW_KEY_A: return K_A; case GLFW_KEY_S: return K_S; case GLFW_KEY_D: return K_D;
-    case GLFW_KEY_Q: return K_Q; case GLFW_KEY_E: return K_E; case GLFW_KEY_R: return K_R; case GLFW_KEY_F: return K_F;
-    case GLFW_KEY_C: return K_C; case GLFW_KEY_J: return K_J; case GLFW_KEY_B: return K_B; case GLFW_KEY_M: return K_M;
-    case GLFW_KEY_I: return K_I; case GLFW_KEY_TAB: return K_TAB; case GLFW_KEY_SPACE: return K_SPACE;
-    case GLFW_KEY_LEFT_SHIFT: case GLFW_KEY_RIGHT_SHIFT: return K_SHIFT;
-    case GLFW_KEY_LEFT_CONTROL: return K_CTRL;
+    case GLFW_KEY_RIGHT_SHIFT: return boundKey(K_SHIFT) == GLFW_KEY_LEFT_SHIFT ? K_SHIFT : -1;
     case GLFW_KEY_ESCAPE: return K_ESC; case GLFW_KEY_ENTER: case GLFW_KEY_KP_ENTER: return K_ENTER;
     case GLFW_KEY_UP: return K_UP; case GLFW_KEY_DOWN: return K_DOWN; case GLFW_KEY_LEFT: return K_LEFT; case GLFW_KEY_RIGHT: return K_RIGHT;
     case GLFW_KEY_1: return K_1; case GLFW_KEY_2: return K_2; case GLFW_KEY_3: return K_3;
     case GLFW_KEY_4: return K_4; case GLFW_KEY_5: return K_5; case GLFW_KEY_6: return K_6;
-    case GLFW_KEY_F2: return K_F2; case GLFW_KEY_F3: return K_F3; case GLFW_KEY_F4: return K_F4; case GLFW_KEY_F11: return K_F11; case GLFW_KEY_P: return K_P; case GLFW_KEY_L: return K_L;
+    case GLFW_KEY_F2: return K_F2; case GLFW_KEY_F3: return K_F3; case GLFW_KEY_F4: return K_F4; case GLFW_KEY_F11: return K_F11;
+    case GLFW_KEY_LEFT_CONTROL: return K_CTRL;
     default: return -1;
   }
 }
 
 void onKey(GLFWwindow*, int key, int, int action, int) {
+  if (action == GLFW_PRESS) g_lastRaw = key;
   int k = mapKey(key);
   if (k < 0) return;
   if (action == GLFW_PRESS) { g_in.down[k] = true; g_in.pressed[k] = true; }
@@ -71,6 +73,66 @@ void onFocus(GLFWwindow*, int focused) {
 std::string trim(const std::string& s) {
   size_t a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n");
   return a == std::string::npos ? "" : s.substr(a, b - a + 1);
+}
+}  // namespace
+
+
+// ---- GL state shadow -------------------------------------------------------------------------------------------
+// The renderer saves and restores state with glGetIntegerv / glIsEnabled dozens of times a frame. With a threaded
+// driver each of those waits for every queued command to finish (1-2 ms a time on the P600: it showed up as
+// "sunfx.occlusion" and "hizCapture" on the CPU list). The few values ever asked for are tracked here as they are
+// set, and the queries answer from the copy without touching the driver.
+namespace {
+using platform::BINDS; using platform::BIND_COUNT; using platform::boundKey; using platform::keyName;
+PFNGLVIEWPORTPROC r_viewport; PFNGLBINDFRAMEBUFFERPROC r_bindFb; PFNGLENABLEPROC r_enable; PFNGLDISABLEPROC r_disable;
+PFNGLGETINTEGERVPROC r_getInt; PFNGLISENABLEDPROC r_isEnabled; PFNGLACTIVETEXTUREPROC r_activeTex; PFNGLDEPTHFUNCPROC r_depthFunc;
+PFNGLDELETEFRAMEBUFFERSPROC r_delFb;
+GLint s_vp[4], s_drawFb = 0, s_readFb = 0, s_active = GL_TEXTURE0, s_depthFunc = GL_LESS;
+const GLenum S_CAPS[4] = {GL_DEPTH_TEST, GL_BLEND, GL_SCISSOR_TEST, GL_CULL_FACE};
+GLboolean s_cap[4];
+int capIx(GLenum c) { for (int i = 0; i < 4; i++) if (S_CAPS[i] == c) return i; return -1; }
+void GLAD_API_PTR h_viewport(GLint x, GLint y, GLsizei w, GLsizei h) { s_vp[0] = x; s_vp[1] = y; s_vp[2] = w; s_vp[3] = h; r_viewport(x, y, w, h); }
+void GLAD_API_PTR h_bindFb(GLenum t, GLuint f) {
+  if (t == GL_FRAMEBUFFER || t == GL_DRAW_FRAMEBUFFER) s_drawFb = (GLint)f;
+  if (t == GL_FRAMEBUFFER || t == GL_READ_FRAMEBUFFER) s_readFb = (GLint)f;
+  r_bindFb(t, f);
+}
+void GLAD_API_PTR h_delFb(GLsizei n, const GLuint* f) {   // deleting a bound framebuffer rebinds 0
+  for (GLsizei i = 0; i < n; i++) { if ((GLint)f[i] == s_drawFb) s_drawFb = 0; if ((GLint)f[i] == s_readFb) s_readFb = 0; }
+  r_delFb(n, f);
+}
+void GLAD_API_PTR h_enable(GLenum c) { int i = capIx(c); if (i >= 0) s_cap[i] = GL_TRUE; r_enable(c); }
+void GLAD_API_PTR h_disable(GLenum c) { int i = capIx(c); if (i >= 0) s_cap[i] = GL_FALSE; r_disable(c); }
+GLboolean GLAD_API_PTR h_isEnabled(GLenum c) { int i = capIx(c); return i >= 0 ? s_cap[i] : r_isEnabled(c); }
+void GLAD_API_PTR h_activeTex(GLenum t) { s_active = (GLint)t; r_activeTex(t); }
+void GLAD_API_PTR h_depthFunc(GLenum f) { s_depthFunc = (GLint)f; r_depthFunc(f); }
+void GLAD_API_PTR h_getInt(GLenum p, GLint* d) {
+  switch (p) {
+    case GL_VIEWPORT: d[0] = s_vp[0]; d[1] = s_vp[1]; d[2] = s_vp[2]; d[3] = s_vp[3]; return;
+    case GL_DRAW_FRAMEBUFFER_BINDING: *d = s_drawFb; return;   // same value as GL_FRAMEBUFFER_BINDING
+    case GL_READ_FRAMEBUFFER_BINDING: *d = s_readFb; return;
+    case GL_ACTIVE_TEXTURE: *d = s_active; return;
+    case GL_DEPTH_FUNC: *d = s_depthFunc; return;
+    default: r_getInt(p, d);
+  }
+}
+void installStateShadow() {
+  if (std::getenv("HW_NOSHADOWSTATE")) return;
+  glGetIntegerv(GL_VIEWPORT, s_vp);
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &s_drawFb);
+  glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &s_readFb);
+  glGetIntegerv(GL_ACTIVE_TEXTURE, &s_active);
+  glGetIntegerv(GL_DEPTH_FUNC, &s_depthFunc);
+  for (int i = 0; i < 4; i++) s_cap[i] = glIsEnabled(S_CAPS[i]);
+  r_viewport = glad_glViewport; glad_glViewport = h_viewport;
+  r_bindFb = glad_glBindFramebuffer; glad_glBindFramebuffer = h_bindFb;
+  r_delFb = glad_glDeleteFramebuffers; glad_glDeleteFramebuffers = h_delFb;
+  r_enable = glad_glEnable; glad_glEnable = h_enable;
+  r_disable = glad_glDisable; glad_glDisable = h_disable;
+  r_isEnabled = glad_glIsEnabled; glad_glIsEnabled = h_isEnabled;
+  r_activeTex = glad_glActiveTexture; glad_glActiveTexture = h_activeTex;
+  r_depthFunc = glad_glDepthFunc; glad_glDepthFunc = h_depthFunc;
+  r_getInt = glad_glGetIntegerv; glad_glGetIntegerv = h_getInt;
 }
 }  // namespace
 
@@ -180,7 +242,20 @@ void loadSettings() {
       else if (k == "vsync") s.vsync = bv;
       else if (k == "msaa") s.msaa = iv;
       else if (k == "fxaa") s.fxaa = bv;
+      else if (k == "edge_upscale") s.edgeUpscale = bv;
+      else if (k == "hud") s.hudOn = bv;
+      else if (k == "hud_hide") s.hudHide = (uint32_t)std::strtoul(v.c_str(), nullptr, 10);
+      else if (k.rfind("key_", 0) == 0) {
+        for (int i = 0; i < BIND_COUNT; i++) {
+          std::string nm = BINDS[i].name, id;
+          for (char c : nm) id += std::isalnum((unsigned char)c) ? (char)std::tolower((unsigned char)c) : '_';
+          if (k == "key_" + id) s.binds[BINDS[i].key] = iv;
+        }
+      }
       else if (k == "ssao") s.ssao = bv;
+      else if (k == "volumetric_light") s.volumetric = bv;
+      else if (k == "volumetric_fog") s.volFog = bv;
+      else if (k == "water_reflections") s.waterRefl = bv;
       else if (k == "shadow_size") s.shadowSize = iv;
       else if (k == "mouse_sensitivity") s.mouseSensitivity = fv;
       else if (k == "player_speed") s.playerSpeed = fv;
@@ -189,7 +264,7 @@ void loadSettings() {
       else if (k == "gravity") s.gravity = fv;
       else if (k == "music_volume") s.musicVolume = fv;
       else if (k == "sfx_volume") s.sfxVolume = fv;
-      else if (k == "grass_radius") s.grassRadius = std::max(26.0f, fv);  // older builds' auto quality saved shrunken values
+      else if (k == "grass_radius") s.grassRadius = fv;
       else if (k == "undergrowth_radius") s.undergrowthRadius = fv;
       else if (k == "tree_radius") s.treeRadius = fv;
       else if (k == "rock_radius") s.rockRadius = fv;
@@ -262,6 +337,7 @@ bool init(int argc, char** argv) {
   if (!g_win) { std::fprintf(stderr, "Failed to create an OpenGL 3.3 window\n"); glfwTerminate(); return false; }
   glfwMakeContextCurrent(g_win);
   if (!gladLoadGL((GLADloadfunc)glfwGetProcAddress)) { std::fprintf(stderr, "Failed to load OpenGL\n"); return false; }
+  installStateShadow();
   gfx::loadExtras([](const char* n) { return (void*)glfwGetProcAddress(n); });
   glfwSwapInterval(g_settings.vsync ? 1 : 0);
   glfwSetKeyCallback(g_win, onKey);
@@ -325,16 +401,71 @@ void setCapture(bool on) {
 }
 
 bool isFullscreen() { return g_fullscreen; }
-void setVsync(bool on) { g_settings.vsync = on; glfwSwapInterval(on ? 1 : 0); }
+static int g_swapCur = -1;
+const BindDef BINDS[] = {
+    {K_W, "Move forward", GLFW_KEY_W}, {K_S, "Move back", GLFW_KEY_S}, {K_A, "Move left", GLFW_KEY_A}, {K_D, "Move right", GLFW_KEY_D},
+    {K_SPACE, "Jump", GLFW_KEY_SPACE}, {K_SHIFT, "Sprint", GLFW_KEY_LEFT_SHIFT}, {K_C, "Crouch", GLFW_KEY_C},
+    {K_E, "Interact / rotate right", GLFW_KEY_E}, {K_Q, "Rotate left", GLFW_KEY_Q}, {K_F, "Quick shot", GLFW_KEY_F},
+    {K_R, "Craft 10 arrows", GLFW_KEY_R}, {K_L, "Lantern", GLFW_KEY_L}, {K_TAB, "Pouch", GLFW_KEY_TAB},
+    {K_J, "Journal", GLFW_KEY_J}, {K_B, "Build", GLFW_KEY_B}, {K_M, "Map", GLFW_KEY_M}, {K_K, "Skills", GLFW_KEY_K},
+    {K_I, "Inventory", GLFW_KEY_I}, {K_P, "Photo mode", GLFW_KEY_P}, {K_H, "Hide / show HUD", GLFW_KEY_H},
+};
+const int BIND_COUNT = (int)(sizeof(BINDS) / sizeof(BINDS[0]));
+int boundKey(int action) {
+  int b = g_settings.binds[action];
+  if (b) return b;
+  for (int i = 0; i < BIND_COUNT; i++) if (BINDS[i].key == action) return BINDS[i].def;
+  return 0;
+}
+std::string keyName(int k) {
+  switch (k) {
+    case GLFW_KEY_SPACE: return "Space"; case GLFW_KEY_LEFT_SHIFT: return "L Shift"; case GLFW_KEY_RIGHT_SHIFT: return "R Shift";
+    case GLFW_KEY_LEFT_CONTROL: return "L Ctrl"; case GLFW_KEY_RIGHT_CONTROL: return "R Ctrl"; case GLFW_KEY_LEFT_ALT: return "L Alt";
+    case GLFW_KEY_RIGHT_ALT: return "R Alt"; case GLFW_KEY_TAB: return "Tab"; case GLFW_KEY_CAPS_LOCK: return "Caps";
+    case GLFW_KEY_BACKSPACE: return "Backspace"; case GLFW_KEY_ENTER: return "Enter"; case GLFW_KEY_ESCAPE: return "Esc";
+    case GLFW_KEY_UP: return "Up"; case GLFW_KEY_DOWN: return "Down"; case GLFW_KEY_LEFT: return "Left"; case GLFW_KEY_RIGHT: return "Right";
+    case GLFW_KEY_INSERT: return "Ins"; case GLFW_KEY_DELETE: return "Del"; case GLFW_KEY_HOME: return "Home"; case GLFW_KEY_END: return "End";
+    case GLFW_KEY_PAGE_UP: return "PgUp"; case GLFW_KEY_PAGE_DOWN: return "PgDn";
+    default: break;
+  }
+  if (k >= GLFW_KEY_F1 && k <= GLFW_KEY_F25) return "F" + std::to_string(k - GLFW_KEY_F1 + 1);
+  if (k >= GLFW_KEY_KP_0 && k <= GLFW_KEY_KP_9) return "Num " + std::to_string(k - GLFW_KEY_KP_0);
+  if ((k >= GLFW_KEY_A && k <= GLFW_KEY_Z) || (k >= GLFW_KEY_0 && k <= GLFW_KEY_9)) return std::string(1, (char)k);
+  if (const char* n = glfwGetKeyName(k, 0)) { std::string s = n; for (auto& c : s) c = (char)std::toupper((unsigned char)c); return s; }
+  return "#" + std::to_string(k);
+}
+std::string actionKeyName(int action) { return keyName(boundKey(action)); }
+void setBind(int action, int physical) {
+  int old = boundKey(action);
+  for (int i = 0; i < BIND_COUNT; i++)
+    if (BINDS[i].key != action && boundKey(BINDS[i].key) == physical) g_settings.binds[BINDS[i].key] = old;   // swap
+  g_settings.binds[action] = physical;
+}
+void resetBinds() { for (int& b : g_settings.binds) b = 0; }
+int takeLastRawKey() { int k = g_lastRaw; g_lastRaw = -1; return k; }
+
+void setVsync(bool on) { g_settings.vsync = on; g_swapCur = on ? 1 : 0; glfwSwapInterval(g_swapCur); }
+void setSwapInterval(int n) { if (n != g_swapCur) { g_swapCur = n; glfwSwapInterval(n); } }
 
 bool saveSettings() {
   const Settings& s = g_settings;
   char b[2048];
   std::snprintf(b, sizeof b,
-                "; Himalayan Wilds settings (also editable from Options in game)\n[video]\nwidth = %d\nheight = %d\nfullscreen = %s\nvsync = %s\nmsaa = %d\nfxaa = %s\n; SSAO: soft screen-space contact shadows (costs ~0.3-0.6 ms; baked AO already covers most of it)\nssao = %s\nshadow_size = %d\ntexture_size = %d\nadaptive_quality = %s\nadaptive_detail = %s\ntri_budget = %d\nui_scale = %.2f\nrender_scale = %.2f\ndraw_distance = %.2f\nfull_map = %s\nfps_limit = %d\nmenu_fps = %d\n; leaf depth pre-pass: auto (timed on your GPU), on or off. Turn off if leaves show speckles\nleaf_prepass = %s\n; temporal upscaling: renders fewer pixels and rebuilds detail from previous frames\ntemporal_upscale_v2 = %s\n; eco: automatic quality only raises detail while the GPU stays under ~50%% busy (cooler, quieter)\neco_mode = %s\n\n[world]\n; weather: auto (showers come and go), rain (always raining, except in snow), clear (never rains)\nweather = %s\ngrass_radius = %.0f\nundergrowth_radius = %.0f\ntree_radius = %.0f\nrock_radius = %.0f\n\n[player]\nfov = %.0f\nmouse_sensitivity = %.4f\nplayer_speed = %.2f\nsprint_multiplier = %.2f\ngravity = %.1f\n\n[audio]\nmusic_volume = %.2f\nsfx_volume = %.2f\n",
-                s.width, s.height, g_fullscreen ? "true" : "false", s.vsync ? "true" : "false", s.msaa, s.fxaa ? "true" : "false", s.ssao ? "true" : "false", s.shadowSize, s.textureSize, s.adaptiveQuality ? "true" : "false", s.adaptiveDetail ? "true" : "false", s.triBudget, s.uiScale, s.renderScale, s.drawDistance, s.fullMap ? "true" : "false", s.fpsLimit, s.menuFps, s.leafPrepass == 2 ? "auto" : s.leafPrepass ? "on" : "off", s.temporalUpscale ? "true" : "false", s.eco ? "true" : "false",
+                "; Himalayan Wilds settings (also editable from Options in game)\n[video]\nwidth = %d\nheight = %d\nfullscreen = %s\nvsync = %s\nmsaa = %d\nfxaa = %s\n; SSAO: soft screen-space contact shadows (costs ~0.3-0.6 ms; baked AO already covers most of it)\nssao = %s\n; volumetric light: sun shafts through trees, fog and over ridges (~0.8-1.2 ms)\nvolumetric_light = %s\n; volumetric fog: drifting ground fog lit by the sun, lanterns and fires (~0.3-0.5 ms)\nvolumetric_fog = %s\n; water reflections: lakes and rivers mirror the trees, banks and sky (~1 ms with water on screen)\nwater_reflections = %s\nshadow_size = %d\ntexture_size = %d\nadaptive_quality = %s\nadaptive_detail = %s\ntri_budget = %d\nui_scale = %.2f\n; edge_upscale: sharper edge-aware upscaling when render_scale is below 100%%\nedge_upscale = %s\nrender_scale = %.2f\ndraw_distance = %.2f\nfull_map = %s\nfps_limit = %d\nmenu_fps = %d\n; leaf depth pre-pass: auto (timed on your GPU), on or off. Turn off if leaves show speckles\nleaf_prepass = %s\n; temporal upscaling: renders fewer pixels and rebuilds detail from previous frames\ntemporal_upscale_v2 = %s\n; eco: automatic quality only raises detail while the GPU stays under ~50%% busy (cooler, quieter)\neco_mode = %s\n\n[world]\n; weather: auto (showers come and go), rain (always raining, except in snow), clear (never rains)\nweather = %s\ngrass_radius = %.0f\nundergrowth_radius = %.0f\ntree_radius = %.0f\nrock_radius = %.0f\n\n[player]\nfov = %.0f\nmouse_sensitivity = %.4f\nplayer_speed = %.2f\nsprint_multiplier = %.2f\ngravity = %.1f\n\n[audio]\nmusic_volume = %.2f\nsfx_volume = %.2f\n",
+                s.width, s.height, g_fullscreen ? "true" : "false", s.vsync ? "true" : "false", s.msaa, s.fxaa ? "true" : "false", s.ssao ? "true" : "false", s.volumetric ? "true" : "false", s.volFog ? "true" : "false", s.waterRefl ? "true" : "false", s.shadowSize, s.textureSize, s.adaptiveQuality ? "true" : "false", s.adaptiveDetail ? "true" : "false", s.triBudget, s.uiScale, s.edgeUpscale ? "true" : "false", s.renderScale, s.drawDistance, s.fullMap ? "true" : "false", s.fpsLimit, s.menuFps, s.leafPrepass == 2 ? "auto" : s.leafPrepass ? "on" : "off", s.temporalUpscale ? "true" : "false", s.eco ? "true" : "false",
                 s.weather == 1 ? "rain" : s.weather == 2 ? "clear" : "auto", s.grassRadius, s.undergrowthRadius, s.treeRadius, s.rockRadius, s.fov, s.mouseSensitivity, s.playerSpeed, s.sprintMultiplier, s.gravity, s.musicVolume, s.sfxVolume);
-  return writeFile(g_exeDir + "/config.ini", b);
+  std::string out = b;
+  char hb[128];
+  std::snprintf(hb, sizeof hb, "\n[hud]\nhud = %s\n; hidden HUD pieces (bit mask, set from Options > HUD)\nhud_hide = %u\n", s.hudOn ? "true" : "false", s.hudHide);
+  out += hb;
+  out += "\n[controls]\n; physical key codes (GLFW); set from Options > Controls, removed lines fall back to the default\n";
+  for (int i = 0; i < BIND_COUNT; i++) {
+    if (!s.binds[BINDS[i].key]) continue;
+    std::string nm = BINDS[i].name, id;
+    for (char c : nm) id += std::isalnum((unsigned char)c) ? (char)std::tolower((unsigned char)c) : '_';
+    out += "key_" + id + " = " + std::to_string(s.binds[BINDS[i].key]) + "   ; " + keyName(s.binds[BINDS[i].key]) + "\n";
+  }
+  return writeFile(g_exeDir + "/config.ini", out);
 }
 
 void toggleFullscreen() {

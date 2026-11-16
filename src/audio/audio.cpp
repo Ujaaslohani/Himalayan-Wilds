@@ -10,6 +10,9 @@
 #include "../game/season.h"
 #include "../world/terrain.h"
 #include <mutex>
+#include <map>
+#include <atomic>
+#include <cctype>
 #include <vector>
 #include <random>
 #include <cmath>
@@ -44,7 +47,8 @@ struct Biquad {
   }
 };
 
-enum VKind { V_OSC, V_NOISE };
+enum VKind { V_OSC, V_NOISE, V_SAMPLE };
+struct Clip { std::vector<float> pcm; };   // stereo f32 at SR
 enum Env { E_BLIP, E_TONE };
 
 struct Voice {
@@ -58,6 +62,9 @@ struct Voice {
   Biquad bq;
   bool bqSet = false;
   bool bus = false;
+  const Clip* clip = nullptr;   // V_SAMPLE: recorded sound
+  float rate = 1;               // V_SAMPLE playback rate (doppler)
+  float lpFar = 0;              // V_SAMPLE positional: head-shadow low-pass state of the far ear
 };
 
 struct Bed {
@@ -83,6 +90,35 @@ std::vector<float> g_musicPcm;
 size_t g_musicPos = 0;
 bool g_musicOk = false;
 std::mt19937 g_rng(99);
+// ---- always-on insect chorus, synthesised in the mixer: a field of crickets (pulsed sine carriers at 3.6-5.2 kHz,
+// each with its own chirp rhythm, pitch and place in the stereo field) plus a daytime grasshopper / cicada shimmer.
+// Levels are set from the game thread (time of day, season, forest, weather), the mixer only follows them smoothly.
+// each cricket rubs its wings in pulses: a sharp onset, a quick decay, the pitch sliding down a touch within the
+// pulse, a little rasp of noise, no two pulses or chirps identical, and pauses that come and go. Far ones are
+// duller (high harmonics rolled off). This is what made the old pure-sine version sound like a machine.
+struct Cricket {
+  float f, pan, pulseHz, basePulses, baseGap, gain, dist;
+  double ph = 0;
+  float t = 0, chirpDur = 0, gap = 0, amp = 1, pulseAmp = 1, rest = 0, lp = 0, drift = 1;
+  int pulses = 3, lastPulse = -1;
+  bool trill = false;
+  uint32_t rng = 1;
+  float rnd() { rng = rng * 1664525u + 1013904223u; return (rng >> 8) / 16777216.0f; }
+};
+std::vector<Cricket> g_crick;
+// day insects: a few grasshoppers, each rasping in short bursts ("zzzt ... zzzt-zzzt") from its own spot in the grass
+struct Hopper {
+  float t = 0, dur = 0, gap = 1, amHz = 70, pan = 0, gain = 1;
+  Biquad bq;
+  size_t pos = 0;
+  uint32_t rng = 1;
+  float rnd() { rng = rng * 1664525u + 1013904223u; return (rng >> 8) / 16777216.0f; }
+};
+Hopper g_hop[4];
+std::atomic<float> g_crickTarget{0}, g_dayBugTarget{0};
+float g_crickGain = 0, g_dayBugGain = 0;
+Biquad g_bugBq, g_bugBq2;
+size_t g_bugPos = 0;
 
 float rnd() { return std::uniform_real_distribution<float>(0, 1)(g_rng); }
 
@@ -102,6 +138,14 @@ float expRamp(float a, float b, float t) {
   b = std::max(b, 1e-4f);
   return a * std::pow(b / a, clampf(t, 0, 1));
 }
+
+// ---- recorded ambience loops (assets/sounds/ambient), mixed in the callback; gains set from the game thread ----
+struct LoopPlayer { std::vector<const Clip*> clips; int cur = 0; size_t pos = 0; float gain = 0; std::atomic<float> target{0}; float tau = 1.5f; };
+enum { L_DAY, L_BIRDSWATER, L_STREAM, L_RAINNIGHT, L_STORM, L_COUNT };
+LoopPlayer g_loops[L_COUNT];
+std::map<std::string, std::vector<Clip>> g_bank;   // foley/ambient one-shots by name prefix
+const std::vector<Clip>* bank(const char* name) { auto it = g_bank.find(name); return it == g_bank.end() || it->second.empty() ? nullptr : &it->second; }
+bool hasLoops() { for (auto& l : g_loops) if (!l.clips.empty()) return true; return false; }
 
 void callback(ma_device*, void* out, const void*, ma_uint32 frames) {
   float* o = (float*)out;
@@ -133,6 +177,34 @@ void callback(ma_device*, void* out, const void*, ma_uint32 frames) {
         }
       }
       float s;
+      if (v.kind == V_SAMPLE) {
+        double fpos = (double)lt * SR * v.rate;
+        size_t k = (size_t)fpos;
+        if ((k + 1) * 2 + 1 >= v.clip->pcm.size()) continue;
+        float fr = (float)(fpos - k);
+        const float* c = &v.clip->pcm[k * 2];
+        float fade = std::min(1.0f, (v.dur - lt) / 0.05f);
+        float sv2 = v.gain * fade * sv;
+        if (std::fabs(v.pan) < 0.02f) {   // centred / non-positional: the recording's own stereo
+          o[i * 2] += (c[0] + (c[2] - c[0]) * fr) * sv2 * pl * 1.41f;
+          o[i * 2 + 1] += (c[1] + (c[3] - c[1]) * fr) * sv2 * pr * 1.41f;
+          continue;
+        }
+        // positional (binaural-style): the near ear gets the sound first and full; the farS ear hears it up to
+        // 0.65 ms later, quieter and muffled by the head. Hard left / right is (almost) only in that ear.
+        float ap = std::min(1.0f, std::fabs(v.pan));
+        float mono = 0.5f * ((c[0] + (c[2] - c[0]) * fr) + (c[1] + (c[3] - c[1]) * fr));
+        double fp2 = fpos - 0.00065 * ap * SR * v.rate;
+        float farS = 0;
+        if (fp2 >= 0) { size_t k2 = (size_t)fp2; float f2 = (float)(fp2 - k2); const float* c2 = &v.clip->pcm[k2 * 2]; farS = 0.5f * ((c2[0] + (c2[2] - c2[0]) * f2) + (c2[1] + (c2[3] - c2[1]) * f2)); }
+        float lpK = 1.0f - 0.85f * ap;          // one-pole low-pass: ~full band in front, ~1 kHz at the side
+        v.lpFar += (farS - v.lpFar) * lpK;
+        float nearG = 1.0f, farG = (1.0f - ap) * (1.0f - ap) * 0.9f + 0.04f;
+        float L = v.pan < 0 ? mono * nearG : v.lpFar * farG, R = v.pan < 0 ? v.lpFar * farG : mono * nearG;
+        o[i * 2] += L * sv2 * 1.1f;
+        o[i * 2 + 1] += R * sv2 * 1.1f;
+        continue;
+      }
       if (v.kind == V_OSC) {
         float f = v.f1 > 0 ? expRamp(v.f0, v.f1, u) : v.f0;
         if (v.vib > 0) {
@@ -150,6 +222,102 @@ void callback(ma_device*, void* out, const void*, ma_uint32 frames) {
       s *= g * sv;
       o[i * 2] += s * pl;
       o[i * 2 + 1] += s * pr;
+    }
+  }
+  // ambience loops: each runs on, switching to another take of the same kind at the end of a take (0.4 s crossfade)
+  {
+    float sv0 = g_sfxMuted ? 0.0f : g_sfxVol.load();
+    const float k = 1 - std::exp(-1.0f / (SR * 1.0f));
+    for (auto& L : g_loops) {
+      if (L.clips.empty()) continue;
+      float tgt = L.target.load();
+      if (tgt < 1e-4f && L.gain < 1e-4f) continue;
+      const size_t XF = (size_t)(0.4f * SR);
+      for (ma_uint32 i = 0; i < frames; i++) {
+        L.gain += (tgt - L.gain) * k / L.tau;
+        const Clip* c = L.clips[L.cur];
+        size_t n = c->pcm.size() / 2;
+        if (L.pos >= n) { L.pos = std::min(XF, n / 4); L.cur = (int)((L.cur + 1) % L.clips.size()); c = L.clips[L.cur]; n = c->pcm.size() / 2; }
+        float a = c->pcm[L.pos * 2], b = c->pcm[L.pos * 2 + 1];
+        if (L.pos + XF > n) {   // overlap the start of the next pass under the tail
+          float u = (float)(L.pos + XF - n) / XF;
+          size_t q = (L.pos + XF - n);
+          a = a * (1 - u) + c->pcm[q * 2] * u; b = b * (1 - u) + c->pcm[q * 2 + 1] * u;
+        }
+        o[i * 2] += a * L.gain * sv0; o[i * 2 + 1] += b * L.gain * sv0;
+        L.pos++;
+      }
+    }
+  }
+  // insect chorus
+  {
+    float ct = g_crickTarget.load() * (g_sfxMuted ? 0 : 1), dtg = g_dayBugTarget.load() * (g_sfxMuted ? 0 : 1);
+    float kk = 1 - std::exp(-dt / 2.0f);
+    if (ct > 1e-5f || g_crickGain > 1e-5f) {
+      for (ma_uint32 i = 0; i < frames; i++) {
+        g_crickGain += (ct - g_crickGain) * kk;
+        float l = 0, rr = 0;
+        for (auto& c : g_crick) {
+          c.t += dt;
+          if (c.rest > 0) { c.rest -= dt; continue; }
+          if (c.t >= c.chirpDur + c.gap) {  // next chirp: fresh pulse count, loudness, spacing; now and then a pause
+            c.t = 0;
+            c.pulses = c.trill ? 40 + (int)(c.rnd() * 80) : std::max(2, (int)std::lround(c.basePulses + (c.rnd() - 0.5f) * 2.2f));
+            c.chirpDur = c.pulses / c.pulseHz;
+            c.gap = c.trill ? 0.15f + c.rnd() * 1.2f : c.baseGap * (0.75f + c.rnd() * 0.55f);
+            c.amp = 0.65f + 0.35f * c.rnd();
+            c.drift = 1.0f + (c.rnd() - 0.5f) * 0.012f;
+            c.lastPulse = -1;
+            if (c.rnd() < (c.trill ? 0.08f : 0.035f)) c.rest = 1.5f + c.rnd() * 6.0f;
+          }
+          float e = 0, glide = 1;
+          if (c.t < c.chirpDur) {
+            float pu = c.t * c.pulseHz;
+            int pi = (int)pu;
+            if (pi != c.lastPulse) { c.lastPulse = pi; c.pulseAmp = 0.7f + 0.3f * c.rnd(); }
+            float pf = pu - pi;
+            // fast attack, exponential decay, silent tail of each wing stroke
+            { float w = pf < 0.68f ? (float)std::sin(pf / 0.68f * 3.14159265f) : 0.0f; e = w * w; }  // one smooth wing stroke, then the gap
+            e *= c.pulseAmp * c.amp;
+            float cp = c.t / std::max(1e-3f, c.chirpDur);
+            e *= std::min(1.0f, cp * 6.0f + 0.4f) * std::min(1.0f, (1.0f - cp) * 6.0f + 0.5f);  // chirp swells in and out
+            glide = 1.0f - 0.03f * pf;   // each stroke falls slightly in pitch, as the wing slows
+          }
+          if (e <= 0) continue;
+          c.ph += c.f * c.drift * glide * dt;
+          double ph = c.ph - std::floor(c.ph);
+          float carrier = (float)std::sin(ph * TWO_PI) + 0.22f * (float)std::sin(ph * 2 * TWO_PI) * (1 - c.dist) + 0.08f * (float)std::sin(ph * 3 * TWO_PI) * (1 - c.dist);
+          float raw = carrier * e;
+          c.lp += (raw - c.lp) * (0.35f + 0.6f * (1 - c.dist));  // distance dulls the tone
+          float sm = c.lp * c.gain;
+          l += sm * std::sqrt(0.5f * (1 - c.pan)); rr += sm * std::sqrt(0.5f * (1 + c.pan));
+        }
+        o[i * 2] += l * g_crickGain * sv; o[i * 2 + 1] += rr * g_crickGain * sv;
+      }
+    }
+    if (dtg > 1e-5f || g_dayBugGain > 1e-5f) {
+      for (ma_uint32 i = 0; i < frames; i++) {
+        g_dayBugGain += (dtg - g_dayBugGain) * kk;
+        float l = 0, rr = 0;
+        for (auto& h : g_hop) {
+          h.t += dt;
+          if (h.t > h.dur + h.gap) {
+            h.t = 0;
+            h.dur = 0.3f + h.rnd() * 1.2f;
+            h.gap = h.rnd() < 0.3f ? 0.25f + h.rnd() * 0.4f : 1.5f + h.rnd() * 6.0f;   // sometimes a quick repeat, mostly a long wait
+            h.amHz = 48 + h.rnd() * 40;
+            h.gain = 0.45f + 0.55f * h.rnd();
+          }
+          if (h.t >= h.dur) continue;
+          float u = h.t / h.dur;
+          float env = std::min(1.0f, u * 6.0f) * std::min(1.0f, (1.0f - u) * 9.0f);   // the rasp swells in and stops short
+          float ph = h.t * h.amHz; ph -= std::floor(ph);
+          float syl = ph < 0.6f ? (float)std::sin(ph / 0.6f * 3.14159265f) : 0.0f;    // leg strokes: separate little scrapes
+          float sm = h.bq.run(g_noise[h.pos++ % g_noise.size()]) * env * syl * syl * h.gain;
+          l += sm * std::sqrt(0.5f * (1 - h.pan)); rr += sm * std::sqrt(0.5f * (1 + h.pan));
+        }
+        o[i * 2] += l * g_dayBugGain * sv; o[i * 2 + 1] += rr * g_dayBugGain * sv;
+      }
     }
   }
   double tEnd = t0 + frames * (double)dt;
@@ -266,6 +434,50 @@ float vary(float a = 0.05f) { return 1 + (rnd() * 2 - 1) * a; }
 
 }  // namespace
 
+// recorded animal calls: assets/sounds/animals/<animal>_<warn|attack>*.wav|mp3|flac (any number of variants)
+const char* ANIMAL_NAMES[6] = {"deer", "boar", "goral", "wolf", "bear", "leopard"};
+std::vector<Clip> g_animalClips[6][2];
+void loadAnimalClips() {
+  std::string dir = platform::assetPath("sounds/animals");
+  ma_decoder_config dc = ma_decoder_config_init(ma_format_f32, 2, SR);
+  int n = 0;
+  for (const char* ext : {".wav", ".mp3", ".flac"})
+    for (auto& f : platform::listFiles(dir, ext)) {
+      std::string base = f.substr(f.find_last_of("/\\") + 1);
+      for (int sp = 0; sp < 6; sp++)
+        for (int c = 0; c < 2; c++) {
+          std::string pre = std::string(ANIMAL_NAMES[sp]) + (c ? "_attack" : "_warn");
+          if (base.rfind(pre, 0) != 0) continue;
+          ma_uint64 count = 0; void* data = nullptr;
+          if (ma_decode_file(f.c_str(), &dc, &count, &data) != MA_SUCCESS || !data) continue;
+          Clip cl; cl.pcm.assign((const float*)data, (const float*)data + count * 2);
+          ma_free(data, nullptr);
+          // normalise to a common peak so every recording sits at the same level in the mix
+          float pk = 0; for (float x : cl.pcm) pk = std::max(pk, std::fabs(x));
+          if (pk > 1e-4f) for (float& x : cl.pcm) x *= 0.9f / pk;
+          g_animalClips[sp][c].push_back(std::move(cl)); n++;
+        }
+    }
+  std::printf("audio: %d animal recordings\n", n);
+  // ambience and foley: every file in assets/sounds/ambient and /foley, keyed by its name without trailing digits
+  int m = 0;
+  for (const char* sub : {"sounds/ambient", "sounds/foley"})
+    for (const char* ext : {".wav", ".mp3", ".flac"})
+      for (auto& f : platform::listFiles(platform::assetPath(sub), ext)) {
+        std::string base = f.substr(f.find_last_of("/\\") + 1);
+        base = base.substr(0, base.find_last_of('.'));
+        while (!base.empty() && std::isdigit((unsigned char)base.back())) base.pop_back();
+        ma_uint64 count = 0; void* data = nullptr;
+        if (ma_decode_file(f.c_str(), &dc, &count, &data) != MA_SUCCESS || !data) continue;
+        Clip cl; cl.pcm.assign((const float*)data, (const float*)data + count * 2);
+        ma_free(data, nullptr);
+        g_bank[base].push_back(std::move(cl)); m++;
+      }
+  const char* LN[L_COUNT] = {"day_outside", "birds_water", "stream", "rain_night", "storm"};
+  for (int i = 0; i < L_COUNT; i++) if (auto* b = bank(LN[i])) for (auto& c : *b) g_loops[i].clips.push_back(&c);
+  std::printf("audio: %d ambience/foley recordings\n", m);
+}
+
 namespace audio {
 
 bool init() {
@@ -286,6 +498,31 @@ bool init() {
     g_beds[i].pos = (size_t)(rnd() * g_noise.size());
   }
   g_beds[3].tau = 0.05f;
+  // cricket field: each one a different pitch, rhythm and position; two tree crickets trill continuously
+  for (int i = 0; i < 9; i++) {
+    Cricket c;
+    c.trill = i < 2;
+    c.f = c.trill ? 2600 + rnd() * 600 : 3900 + rnd() * 1100;
+    c.pan = (i / 8.0f) * 1.6f - 0.8f + (rnd() - 0.5f) * 0.15f;
+    c.pulseHz = c.trill ? 42 + rnd() * 14 : 26 + rnd() * 18;
+    c.basePulses = 2.5f + rnd() * 2.5f;
+    c.baseGap = 0.35f + rnd() * 0.7f;
+    c.dist = rnd() * 0.85f;  // most of the chorus is some way off
+    c.gain = (c.trill ? 0.0035f : 0.007f) * (1.15f - c.dist * 0.75f);
+    c.rng = 1234567u + i * 7919u;
+    c.t = rnd() * 2.0f;
+    g_crick.push_back(c);
+  }
+  for (int i = 0; i < 4; i++) {
+    Hopper& h = g_hop[i];
+    h.bq.set(2, 6500 + rnd() * 3500, 2.2f);
+    h.pan = (i / 3.0f) * 1.5f - 0.75f;
+    h.rng = 99991u + i * 104729u;
+    h.gap = 1 + rnd() * 5;
+    h.pos = (size_t)(rnd() * g_noise.size());
+  }
+  g_bugBq.set(2, 6400, 1.3f);
+  g_bugBq2.set(2, 8600, 1.6f);
   ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
   cfg.playback.format = ma_format_f32;
   cfg.playback.channels = 2;
@@ -307,6 +544,7 @@ bool init() {
     }
     g_musicOk = g_musicPcm.size() >= 2;
   }
+  loadAnimalClips();
   g_musicVol = g_settings.musicVolume;
   g_sfxVol = g_settings.sfxVolume;
   g_ok = ma_device_start(&g_device) == MA_SUCCESS;
@@ -349,6 +587,7 @@ void footstepStone() {
 }
 // surface footsteps: soft swish on grass, crunch on snow, splash in shallow water
 void footstepGrass() {
+  if (playClip("step_grass", 0.32f * 0.8f * vary(0.12f), (rnd() * 2 - 1) * 0.1f)) return;
   float v = vary(0.12f);
   double t = now();
   aburst(t, 1, 3200 * v, 0.7f, 0.07f, 0.035f, (rnd() * 2 - 1) * 0.3f, 0.006f);
@@ -420,6 +659,63 @@ void victoryFanfare() {
     blip(t + i * 0.1, Wave::Sine, n[i] * v, -1, 0.4f, 0.04f);
   }
 }
+// ---- bows: built from filtered noise and low, short plucked tones (no bright oscillators: those read as "laser")
+namespace {
+void pluck(double at, Wave w, float f0, float f1, float dur, float gain, float pan) {  // instant attack, ringing decay
+  Voice v{};
+  v.kind = V_OSC; v.wave = w; v.env = E_BLIP; v.start = at; v.dur = dur; v.f0 = f0; v.f1 = f1; v.gain = gain; v.pan = pan;
+  push(v);
+}
+void sweep(double at, float f0, float f1, float q, float dur, float gain, float pan, float attack) {  // band-passed noise gliding f0->f1
+  Voice v{};
+  v.kind = V_NOISE; v.env = E_TONE; v.start = at; v.dur = dur; v.gain = gain * 2.0f; v.attack = attack;
+  v.ftype = 2; v.nf0 = f0; v.nf1 = f1; v.q = q; v.pan = pan; v.phase = rnd() * g_noise.size();
+  push(v);
+}
+}  // namespace
+void bowCreak(float g, float pan) {
+  if (g <= 0.002f) return;
+  double t = now();
+  // a real draw is nearly silent: a soft rustle as the arrow is nocked, then a faint low stretch of the limbs
+  sweep(t, 1800, 1200, 0.9f, 0.14f, 0.02f * g * std::sqrt(g), pan, 0.05f);
+  sweep(t + 0.2, 240, 330, 2.5f, 0.45f, 0.022f * g, pan, 0.3f);
+}
+void bowRelease(float g, float pan) {
+  if (g <= 0.002f) return;
+  double t = now();
+  float hi = std::sqrt(g);
+  // "thwip": one soft-edged slap of the string, a dull thump of the limbs, and the arrow's breath leaving
+  aburst(t, 2, 900 * vary(0.08f), 0.7f, 0.04f, 0.26f * g, pan, 0.002f);
+  aburst(t, 0, 160, 0.7f, 0.1f, 0.5f * g, pan, 0.003f);
+  sweep(t + 0.005, 1700, 600, 0.9f, 0.22f, 0.09f * g * hi, pan, 0.03f);
+}
+void arrowWhiz(float g, float pan) {
+  if (g <= 0.002f) return;
+  double t = now();
+  // one smooth breathy pass, pitch falling as it goes by
+  sweep(t, 2200, 700, 1.1f, 0.28f, 0.42f * g, pan, 0.11f);
+  sweep(t, 900, 350, 0.8f, 0.3f, 0.15f * g, pan, 0.12f);
+}
+void arrowHitBody() {
+  double t = now();
+  aburst(t, 0, 170, 0.9f, 0.11f, 0.45f, 0, 0.0008f);         // thud into the body
+  aburst(t, 2, 1300, 1.0f, 0.05f, 0.12f, 0, 0.0008f);        // cloth tearing
+  sweep(t + 0.06, 900, 520, 2.0f, 0.26f, 0.08f, 0, 0.03f);  // pained breath out
+  pluck(t + 0.06, Wave::Sine, 150, 118, 0.22f, 0.035f, 0);
+}
+void arrowThunk(float g, float pan, bool wood) {
+  if (g <= 0.002f) return;
+  double t = now();
+  float hi = std::sqrt(g);
+  if (wood) {
+    aburst(t, 2, 1500 * vary(0.1f), 1.0f, 0.012f, 0.2f * g * hi, pan, 0.0008f);  // point biting the bark
+    aburst(t, 2, 380 * vary(0.1f), 2.2f, 0.09f, 0.42f * g, pan, 0.001f);         // hollow knock of the trunk
+    aburst(t, 0, 140, 0.7f, 0.08f, 0.25f * g, pan, 0.002f);
+  } else {
+    aburst(t, 0, 200, 0.8f, 0.07f, 0.32f * g, pan, 0.002f);                      // dull thud into soil
+    aburst(t, 2, 2200, 0.8f, 0.04f, 0.06f * g * hi, pan, 0.003f);                // leaf litter
+  }
+}
 void arcadeLaser() { blip(now(), Wave::Sawtooth, 1800 * vary(), 80, 0.2f, 0.12f); }
 bool toggleSfxMute() { g_sfxMuted = !g_sfxMuted; return g_sfxMuted; }
 bool sfxMuted() { return g_sfxMuted; }
@@ -429,6 +725,96 @@ void setMusicVolume(float v) { g_musicVol = v; }
 void setSfxVolume(float v) { g_sfxVol = v; }
 void update(float) {}
 
+
+// ---- animal voices (synthesised): sp 1 boar, 3 wolf, 4 bear, 5 leopard; call 0 = warning, 1 = attack ----
+bool playClip(const char* name, float gain, float pan, double delay) { return playClipRate(name, gain, pan, delay, 1.0f); }
+bool playClipRate(const char* name, float gain, float pan, double delay, float rate) {
+  const std::vector<Clip>* b = bank(name);
+  if (!b || !g_ok || g_sfxMuted) return false;
+  const Clip& c = (*b)[(size_t)(rnd() * b->size()) % b->size()];
+  Voice vo{};
+  vo.kind = V_SAMPLE; vo.env = E_TONE; vo.start = now() + delay; vo.clip = &c;
+  vo.rate = rate;
+  vo.dur = (float)(c.pcm.size() / 2) / (SR * rate); vo.gain = gain; vo.pan = pan;
+  push(vo);
+  return true;
+}
+void foliageRustle(float gain) { playClip("foliage", gain * 0.8f * vary(0.1f), (rnd() * 2 - 1) * 0.3f); }
+
+float animalVoiceLen(int sp, int call) {
+  if (sp < 0 || sp >= 6) return 1.0f;
+  auto& v = g_animalClips[sp][call];
+  auto& use = !v.empty() ? v : g_animalClips[sp][1 - call];
+  if (use.empty()) return 1.5f;
+  float m = 0; for (auto& c : use) m = std::max(m, (float)(c.pcm.size() / 2) / SR);
+  return m;
+}
+void animalVoice(int sp, int call, float gain, float pan, float rate, float delay) {
+  if (!g_ok || g_sfxMuted) return;
+  gain *= 0.8f;
+  double t = now() + delay;
+  if (sp >= 0 && sp < 6) {
+    auto& v = g_animalClips[sp][call];
+    auto& alt = g_animalClips[sp][1 - call];
+    const std::vector<Clip>& use = !v.empty() ? v : alt;   // one kind recorded: use it for both
+    if (!use.empty()) {
+      const Clip& c = use[(size_t)(rnd() * use.size()) % use.size()];
+      Voice vo{};
+      vo.kind = V_SAMPLE; vo.env = E_TONE; vo.start = t; vo.clip = &c;
+      vo.rate = rate;   // t already includes the travel delay
+      vo.dur = (float)(c.pcm.size() / 2) / (SR * rate); vo.gain = gain * 0.6f; vo.pan = pan;
+      push(vo);
+      return;
+    }
+  }
+  float g = gain;
+  if (sp == 3) {            // wolf
+    if (call == 0) {        // snarl, then a short rising howl
+      aburst(t, 2, 900, 3.0f, 0.5f, g * 0.25f, pan, 0.05f);
+      atone(t, Wave::Sawtooth, 150, 120, 0.5f, g * 0.35f, pan, 18);
+      atone(t + 0.45, Wave::Sine, 380, 620, 0.9f, g * 0.5f, pan, 6);
+      atone(t + 1.3, Wave::Sine, 620, 450, 0.9f, g * 0.42f, pan, 6);
+    } else {                // bite: a sharp bark and snapping jaws
+      atone(t, Wave::Sawtooth, 520, 260, 0.13f, g * 0.6f, pan);
+      aburst(t, 2, 1800, 2.0f, 0.1f, g * 0.45f, pan, 0.003f);
+      atone(t + 0.16, Wave::Sawtooth, 180, 120, 0.35f, g * 0.4f, pan, 22);
+      aburst(t + 0.16, 2, 700, 2.5f, 0.35f, g * 0.25f, pan, 0.02f);
+    }
+  } else if (sp == 4) {     // bear: deep, rough, long
+    float L = call ? 1.1f : 0.9f, k = call ? 1.0f : 0.7f;
+    atone(t, Wave::Sawtooth, 95, 70, L, g * 0.55f * k, pan, 28);
+    atone(t, Wave::Square, 48, 40, L, g * 0.3f * k, pan, 14);
+    aburst(t, 0, 420, 1.2f, L, g * 0.4f * k, pan, 0.08f);
+    aburst(t + 0.05, 2, 260, 4.0f, L * 0.9f, g * 0.3f * k, pan, 0.1f);
+    if (call) atone(t + 0.1, Wave::Sawtooth, 160, 90, 0.6f, g * 0.35f, pan, 30);   // roar on the swipe
+  } else if (sp == 5) {     // leopard: the rasping "sawing" call, a snarl-hiss when it strikes
+    if (call == 0) {
+      for (int i = 0; i < 5; i++) {
+        double tt = t + i * 0.42;
+        atone(tt, Wave::Sawtooth, 135, 105, 0.22f, g * 0.45f, pan, 35);
+        aburst(tt, 2, 650, 2.0f, 0.22f, g * 0.35f, pan, 0.01f);
+        atone(tt + 0.24, Wave::Sawtooth, 115, 95, 0.14f, g * 0.28f, pan, 30);
+      }
+    } else {
+      aburst(t, 1, 2600, 0.8f, 0.4f, g * 0.45f, pan, 0.01f);   // hiss
+      atone(t + 0.05, Wave::Sawtooth, 260, 140, 0.45f, g * 0.55f, pan, 26);
+      aburst(t + 0.05, 2, 900, 2.0f, 0.45f, g * 0.35f, pan, 0.02f);
+    }
+  } else if (sp == 1) {     // boar: grunts when bothered, a squeal and a snort when it charges
+    if (call == 0) {
+      for (int i = 0; i < 3; i++) {
+        double tt = t + i * 0.28;
+        atone(tt, Wave::Square, 140, 95, 0.16f, g * 0.4f, pan, 20);
+        aburst(tt, 0, 500, 1.5f, 0.16f, g * 0.3f, pan, 0.01f);
+      }
+    } else {
+      atone(t, Wave::Sawtooth, 700, 1150, 0.35f, g * 0.45f, pan, 25);
+      atone(t, Wave::Square, 360, 520, 0.35f, g * 0.25f, pan, 25);
+      aburst(t + 0.38, 2, 1200, 1.2f, 0.2f, g * 0.4f, pan, 0.01f);   // snort
+      atone(t + 0.4, Wave::Square, 120, 90, 0.2f, g * 0.35f, pan, 20);
+    }
+  }
+}
 }  // namespace audio
 
 namespace ambience {
@@ -491,12 +877,36 @@ void birds() {
     t += 0.1 + rnd() * 0.12;
   }
 }
-void crickets() {
-  float pan = rnd() * 1.4f - 0.7f;
+// more song types so the forest never repeats one call: a rapid trill, a slurred whistle, a two-note
+// "tee-too" and a chattering descending run; each comes from somewhere in the stereo field at its own distance
+void songbird() {
+  float pan = pr(), g = 0.012f + rnd() * 0.022f;  // near or distant
   double t = now();
-  for (int k = 0; k < 3; k++) {
-    for (int i = 0; i < 3; i++) { atone(t, Wave::Square, 4400, -1, 0.025f, 0.006f, pan); t += 0.045; }
-    t += 0.25;
+  int kind = (int)(rnd() * 4);
+  if (kind == 0) {  // trill
+    float f = 3200 + rnd() * 1800; int n = 8 + (int)(rnd() * 12);
+    for (int i = 0; i < n; i++) { atone(t, Wave::Sine, f, f * 1.15f, 0.035f, g * 0.8f, pan); t += 0.045; }
+  } else if (kind == 1) {  // slurred whistle
+    float f = 1800 + rnd() * 1200;
+    atone(t, Wave::Sine, f, f * (1.4f + rnd() * 0.4f), 0.35f, g, pan, 25);
+    atone(t + 0.45, Wave::Sine, f * 1.5f, f * 0.9f, 0.4f, g * 0.8f, pan, 25);
+  } else if (kind == 2) {  // tee-too, repeated
+    float f = 2800 + rnd() * 900; int reps = 2 + (int)(rnd() * 3);
+    for (int i = 0; i < reps; i++) { atone(t, Wave::Sine, f, f, 0.12f, g, pan); atone(t + 0.16, Wave::Sine, f * 0.75f, f * 0.72f, 0.16f, g * 0.9f, pan); t += 0.5; }
+  } else {  // chatter running down
+    float f = 4800 + rnd() * 1200; int n = 6 + (int)(rnd() * 6);
+    for (int i = 0; i < n; i++) { atone(t, Wave::Sine, f, f * 0.85f, 0.05f, g * 0.7f, pan); f *= 0.94f; t += 0.07 + rnd() * 0.03; }
+  }
+}
+void crickets() {
+  // one close cricket over the chorus: soft sine pulses with varied spacing (the old square wave was harsh)
+  float pan = rnd() * 1.4f - 0.7f, f = 4100 + rnd() * 700;
+  double t = now();
+  int chirps = 2 + (int)(rnd() * 3);
+  for (int k = 0; k < chirps; k++) {
+    int n = 2 + (int)(rnd() * 3);
+    for (int i = 0; i < n; i++) { atone(t, Wave::Sine, f, f * 0.985f, 0.022f, 0.0035f * (0.75f + 0.25f * rnd()), pan); t += 0.032 + rnd() * 0.008; }
+    t += 0.28 + rnd() * 0.35;
   }
 }
 void owl() {
@@ -562,6 +972,7 @@ void thunder(float delay, float dist) {
 
 void howl(float dist) {
   if (!g_ok || g_sfxMuted) return;
+  if (audio::playClip("wolf_howl_night", std::max(0.04f, 0.5f * (1 - std::min(1.0f, dist / 260))), rnd() * 1.2f - 0.6f)) return;
   float g = std::max(0.01f, 0.07f * (1 - std::min(1.0f, dist / 220)));
   double t = now();
   float pan = rnd() * 1.4f - 0.7f;
@@ -623,6 +1034,19 @@ void update(float dt) {
   g_beds[6].target = rain * (0.1f + canopy * 0.08f) * (1 - 0.35f * in);
   g_beds[6].freqTarget = 700 - 350 * in;
   g_beds[0].target *= 1 - 0.7f * in;
+  if (hasLoops()) {
+    // recorded beds: day birdsong outdoors, birds by the water, the stream near the river, rain (night) and storm
+    float day = sstep(E.daylight, 0.2f, 0.5f), dry = 1 - std::min(1.0f, rain * 2.5f), cold = 1 - 0.7f * std::min(1.0f, season.snow);
+    float out = 1 - 0.8f * in;
+    g_loops[L_DAY].target = 0.22f * day * dry * cold * out * on;
+    g_loops[L_BIRDSWATER].target = (nearAmt + lakeAmt) * 0.4f * day * dry * cold * out;
+    g_loops[L_STREAM].target = std::min(0.6f, nearAmt * 0.55f) * out;
+    g_loops[L_RAINNIGHT].target = rain * (1 - day) * 0.45f * (1 - 0.5f * in);
+    g_loops[L_STORM].target = rain * day * 0.42f * (1 - 0.5f * in);
+    // the synthetic beds step back where a recording covers them
+    if (!g_loops[L_STREAM].clips.empty()) { g_beds[1].target *= 0.35f; g_beds[2].target *= 0.35f; g_beds[3].target *= 0.3f; }
+    if (!g_loops[L_STORM].clips.empty()) { g_beds[5].target *= 0.4f; g_beds[6].target *= 0.5f; }
+  }
   {
     // baked sound zones: open ridges and meadows catch the full wind, forest and gorges muffle it and cut its hiss
     float open = envmap::openAt(p.x, p.z), cov = envmap::canopyAt(p.x, p.z);
@@ -641,18 +1065,33 @@ void update(float dt) {
     }
   }
 
+  {
+    // constant insect layer: cricket chorus fills the night (and murmurs by day), grasshoppers hiss on sunny days;
+    // winter silences both, rain and being indoors damp them
+    float dayL = E.daylight;
+    float night = 1 - std::min(1.0f, std::max(0.0f, (dayL - 0.15f) / 0.45f));
+    float warm = std::max(0.0f, 1 - season.snow * 1.2f) * (1 - 0.45f * season.fall);
+    float wet = 1 - 0.7f * std::min(1.0f, sky::rainAmount() * 1.5f);
+    float grass = 0.6f + 0.4f * envmap::openAt(p.x, p.z);
+    float act = (E.playing && !E.uiOpen) ? 1.0f : 0.25f;
+    g_crickTarget = 0.55f * (0.3f + 0.8f * night) * warm * wet * grass * (1 - 0.6f * in) * act * (p.y > 70 ? 0.4f : 1.0f);
+    g_dayBugTarget = 0.0f;  // grasshoppers removed at the player's request (the synth stays, silent)
+  }
   if (!E.playing || E.uiOpen) return;
   float day = E.daylight;
   float forest = envmap::canopyAt(p.x, p.z);
   nextEvent -= dt;
   if (nextEvent <= 0) {
     float r2 = rnd();
-    if (day > 0.5f) {
-      float birdy = 0.35f + season.spring * 0.5f + season.dry * 0.3f - season.snow * 0.3f;
-      if (r2 < birdy) birds();
-      nextEvent = 2 + rnd() * 6;
+    if (day > 0.3f) {
+      // daytime: birds almost always somewhere; mornings busiest (dawn chorus), quieter in snow and rain
+      float birdy = 0.6f + season.spring * 0.35f + season.dry * 0.2f - season.snow * 0.35f - sky::rainAmount() * 0.4f;
+      float morning = std::max(0.0f, 1 - std::fabs(E.time - 7.0f) / 3.0f);
+      if (r2 < birdy) { if (rnd() < 0.55f) songbird(); else birds(); }
+      if (morning > 0.3f && rnd() < morning * 0.6f) songbird();
+      nextEvent = (0.9f + rnd() * 2.6f) * (1.4f - 0.6f * morning) * (1 + season.snow);
     } else if (day < 0.2f) {
-      if ((season.dry > 0.4f || season.spring > 0.5f) && r2 < 0.7f) crickets();
+      if (r2 < 0.5f && season.snow < 0.5f) crickets();  // a near cricket chirping over the chorus
       if (r2 > 0.8f) owl();
       else if (r2 < 0.06f + season.snow * 0.12f) howl(120 + rnd() * 80);
       nextEvent = 2.5f + rnd() * 5;

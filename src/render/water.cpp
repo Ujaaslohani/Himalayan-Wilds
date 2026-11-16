@@ -61,7 +61,10 @@ in float v_depth;
 uniform float u_lake;
 uniform vec4 u_rip[16];  // ripple sources: x, z, start time, strength
 uniform int u_ripN;
+uniform sampler2D u_refl;
+uniform float u_reflOn;
 out vec4 fragColor;
+float lightK0(){ return 1.0; }
 float ripples(vec2 p, float t){
   return vnoise(p * 1.7) * 0.55 + vnoise(p * 4.1 + vec2(4.3, -t * 0.7)) * 0.45;
 }
@@ -96,6 +99,30 @@ void main(){
     gw += (vec2(vnoise(cp), vnoise(cp + 17.3)) - 0.5) * 0.12;
     wn = normalize(wn + vec3(-gw.x, 0.0, -gw.y) * (1.0 - 0.6 * clamp(rapid * 2.0, 0.0, 1.0)));
   }
+  float rainDots = 0.0;
+  if (u_rain > 0.02 && u_ice < 0.5) {
+    // raindrops: every 0.55 m cell gets a drop at its own moment; its ring spreads and fades in ~0.6 s.
+    // Two offset layers so the rings overlap like real rain. Within 45 m (smaller than a pixel beyond)
+    float rk = smoothstep(0.02, 0.4, u_rain) * (1.0 - smoothstep(25.0, 45.0, v_depth));
+    if (rk > 0.0) {
+      vec2 rg = vec2(0.0);
+      for (int L = 0; L < 2; L++) {
+        vec2 q = v_wpos.xz / 0.55 + float(L) * vec2(0.37, 0.61);
+        vec2 cell = floor(q);
+        float h = fract(sin(dot(cell, vec2(127.1, 311.7)) + float(L) * 17.0) * 43758.5);
+        vec2 c = cell + 0.25 + 0.5 * vec2(fract(h * 13.1), fract(h * 7.7));
+        vec2 dv = q - c;
+        float r = length(dv);
+        float age = fract(u_clock * (1.3 + 0.6 * h) + h);
+        float R = age * 0.55;
+        float ring = exp(-pow((r - R) * 18.0, 2.0)) * (1.0 - age) * step(h, 0.35 + 0.6 * u_rain);
+        rg += dv / max(r, 1e-3) * ring * sin((r - R) * 40.0);
+        rainDots += ring * (1.0 - age);
+      }
+      wn = normalize(wn + vec3(rg.x, 0.0, rg.y) * 0.9 * rk);
+      rainDots *= rk;
+    }
+  }
   // disturbances: rings spreading out from footsteps, wading animals and arrows (2.4 s each)
   float ringLight = 0.0;
   for (int i = 0; i < u_ripN; i++) {
@@ -116,8 +143,23 @@ void main(){
   vec3 shallow = vec3(0.17, 0.24, 0.19), deepc = vec3(0.025, 0.07, 0.08);  // natural: peaty green shallows, near-black depths
   vec3 col = mix(shallow, deepc, smoothstep(0.05, 0.9, depth));
   col = mix(col, vec3(0.22, 0.36, 0.30), smoothstep(0.0, 0.25, depth) * (1.0 - smoothstep(0.25, 0.6, depth)) * 0.35);
+  if (u_lake > 0.5) {
+    // glacial tarns: clear turquoise over pale silt in the shallows, deep teal-blue in the middle, with a sunlit
+    // caustic shimmer on the shallow bed
+    vec3 lsh = vec3(0.22, 0.42, 0.40), lmid = vec3(0.06, 0.26, 0.30), ldeep = vec3(0.015, 0.09, 0.13);
+    vec3 lc = mix(lsh, lmid, smoothstep(0.05, 0.45, depth));
+    lc = mix(lc, ldeep, smoothstep(0.45, 1.2, depth));
+    float caus = pow(abs(sin(vnoise(v_wpos.xz * 1.3 + t * 0.15) * 9.0)), 6.0) * (1.0 - smoothstep(0.1, 0.5, depth));
+    lc += vec3(0.25, 0.3, 0.22) * caus * 0.35 * u_daylight * max(u_sunDir.y, 0.0);
+    col = lc;
+  }
   vec3 R = reflect(-V, wn);
   vec3 sky = mix(u_fogCol.rgb, u_misc.rgb, pow(clamp(R.y, 0.0, 1.0), 0.55));
+  {  // reflected clouds: soft drifting puffs in the sky the water mirrors
+    vec2 cp = R.xz / max(R.y, 0.08) * 2.2 + vec2(t * 0.02, t * 0.01);
+    float cl = smoothstep(0.45, 0.8, vnoise(cp) * 0.65 + vnoise(cp * 2.7) * 0.35) * smoothstep(0.02, 0.2, R.y);
+    sky = mix(sky, mix(u_fogCol.rgb, vec3(1.0), 0.6) * (0.4 + 0.6 * u_daylight), cl * 0.6);
+  }
   // reflected surroundings: low reflection angles mirror the dark banks, trees and ridges, not open sky
   vec3 land = mix(vec3(0.07, 0.1, 0.07), vec3(0.16, 0.18, 0.2), smoothstep(-0.1, 0.5, u_sunDir.y)) * (0.4 + 0.6 * u_daylight);
   float shore = 1.0 - smoothstep(0.02, 0.22 + 0.25 * vnoise(v_wpos.xz * 0.05), R.y);
@@ -130,7 +172,12 @@ void main(){
   float foamLines = smoothstep(0.55, 0.8, vnoise(vec2(fp.x * 1.3, fp.y * 6.0 + n1 * 2.0)));
   float foam = bank * max(smoothstep(0.35, 0.75, n3), foamLines * 0.8) * (0.25 + 0.75 * clamp(rapid * 2.0, 0.0, 1.0));  // no foam rim on calm water
   foam = max(foam, rapid * smoothstep(0.45 - rapid * 0.25, 0.85, n1 * 0.5 + n3 * 0.5));
+  if (u_lake > 0.5 && u_ice < 0.3) {   // lakes: a thin, broken wash line where small waves reach the shore
+    float wash = (1.0 - smoothstep(0.0, 0.05, depth)) * smoothstep(0.5, 0.75, vnoise(v_wpos.xz * 2.5 + vec2(t * 0.3, 0.0)));
+    foam = max(foam, wash * 0.5);
+  }
   col = mix(col, vec3(0.94, 0.97, 0.98), foam * 0.85);
+  col += vec3(0.5, 0.55, 0.6) * rainDots * 0.18 * (0.3 + 0.7 * u_daylight);   // each ring catches a little light
   vec3 H = normalize(u_sunDir.xyz + V);
   float spec = pow(max(dot(wn, H), 0.0), 220.0) * 3.0 + pow(max(n2, 0.0), 9.0) * 0.6;
   // sun glitter: sparkling points on the ripples toward the sun
@@ -161,9 +208,47 @@ void main(){
   float lightK = clamp(0.16 + 0.84 * u_daylight, 0.0, 1.0);
   col += vec3(0.7, 0.8, 0.85) * ringLight * 0.08 * (1.0 - u_ice);
   col *= lightK;
+  if (u_lake > 0.5 && u_ice < 0.5) {
+    // gentle lapping at the shore: a thin wet line that creeps in and out with the waves
+    float lap = sin(t * 1.3 + vnoise(v_wpos.xz * 0.3) * 6.0) * 0.5 + 0.5;
+    float edge = exp(-pow((depth - 0.025 - lap * 0.03) * 60.0, 2.0)) * (0.5 + 0.5 * vnoise(v_wpos.xz * 2.0 + t * 0.2));
+    col = mix(col, vec3(0.86, 0.9, 0.9) * lightK0(), edge * 0.55);
+    foam = max(foam, edge * 0.5);
+  }
   float alpha = mix(smoothstep(0.0, 0.05, depth) * 0.9, 0.97, max(ice, foam * 0.6));
+  if (u_lake > 0.5) alpha = mix(alpha * mix(0.55, 1.0, smoothstep(0.08, 0.5, depth)), alpha, ice);   // see the bed through the shallows
   alpha = max(alpha, padA);
   alpha = max(alpha, fres * 0.6 * smoothstep(0.0, 0.03, depth));
+  if (u_reflOn > 0.5 && v_depth < 220.0 && u_ice < 0.5) {
+    // screen-space reflection: march the reflected ray through the half-res copy of what is already drawn,
+    // so the banks, trees, houses and lantern really appear mirrored. Where the ray leaves the screen or finds
+    // nothing, the sky/bank estimate above stays
+    vec3 nr = normalize(mix(vec3(0.0, 1.0, 0.0), wn, 0.35 + 0.65 * clamp(rapid * 2.0, 0.0, 1.0)));
+    vec3 Rr = reflect(-V, nr);
+    if (Rr.y > 0.0) {
+      vec3 q = v_wpos + vec3(0.0, 0.03, 0.0);
+      float st = 0.35 + v_depth * 0.012;
+      vec3 hitC = vec3(0.0); float hk = 0.0;
+      for (int i = 0; i < 28; i++) {
+        q += Rr * st; st *= 1.13;
+        vec4 cp = u_proj * (u_view * vec4(q, 1.0));
+        if (cp.w <= 0.05) break;
+        vec2 uv = cp.xy / cp.w * 0.5 + 0.5;
+        if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) break;
+        vec4 sp = textureLod(u_refl, uv, 0.0);
+        float dz = cp.w - sp.a;
+        if (dz > 0.0 && dz < st * 2.5 + 0.6) {
+          vec2 e = min(uv, 1.0 - uv);
+          hitC = sp.rgb; hk = smoothstep(0.0, 0.1, min(e.x, e.y)) * (1.0 - float(i) / 40.0);
+          break;
+        }
+      }
+      float rk = hk * clamp(max(fres, 0.62 * calm), 0.0, 0.92) * (1.0 - 0.7 * clamp(rapid * 2.0, 0.0, 1.0));
+      col = mix(col, hitC * mix(0.85, 0.7, calm), rk);   // water darkens what it mirrors a little
+      if (u_reflOn > 1.5) { col = vec3(hk, rk, Rr.y); alpha = 1.0; }
+      alpha = max(alpha, rk * smoothstep(0.0, 0.03, depth));
+    }
+  }
   // dawn mist: a pale veil drifting low over the water in the early hours
   float dawn = smoothstep(0.02, 0.2, u_daylight) * (1.0 - smoothstep(0.35, 0.6, u_daylight)) * (u_sunDir.x > 0.0 ? 1.0 : 0.3);
   float veil = dawn * (0.35 + 0.4 * vnoise(v_wpos.xz * 0.08 + vec2(t * 0.05, 0.0))) * smoothstep(4.0, 25.0, v_depth);
@@ -176,12 +261,12 @@ void main(){
 
 const char* FALL_VS = R"(
 in vec3 a_pos;
-in vec4 a_col;
-out vec2 v_uv;
+in vec4 a_col;   // x: across 0..1, y: metres down the flow from the spring, z: part (0 stream, 1 cliff, 2 ledge, 3 free fall), w: 0..1 down the free fall
+out vec4 v_f;
 out vec3 v_wpos;
 out float v_depth;
 void main(){
-  v_uv = a_col.xy;
+  v_f = a_col;
   v_wpos = a_pos;
   vec4 vp = u_view * vec4(a_pos, 1.0);
   v_depth = -vp.z;
@@ -190,19 +275,36 @@ void main(){
 )";
 
 const char* FALL_FS = R"(
-in vec2 v_uv;
+in vec4 v_f;
 in vec3 v_wpos;
 in float v_depth;
 out vec4 fragColor;
 void main(){
-  float s = vnoise(vec2(v_uv.x * 18.0, v_uv.y * 3.0 + u_clock * 3.2));
-  float s2 = vnoise(vec2(v_uv.x * 41.0 + 3.0, v_uv.y * 6.0 + u_clock * 5.1));
-  vec3 col = mix(vec3(0.42, 0.74, 0.82), vec3(0.95, 0.98, 1.0), smoothstep(0.35, 0.8, s * 0.6 + s2 * 0.4));
-  col = mix(col, vec3(1.0), smoothstep(0.75, 1.0, 1.0 - v_uv.y) * 0.8);
-  float edge = smoothstep(0.0, 0.12, v_uv.x) * smoothstep(1.0, 0.88, v_uv.x);
-  col *= clamp(0.18 + 0.82 * u_daylight, 0.0, 1.0);
+  float u = v_f.x, m = v_f.y, part = v_f.z, drop = v_f.w;
+  float speed = part < 0.5 ? 1.2 : part < 2.5 ? 5.5 : 9.0;           // m/s: stream, cascade, free fall
+  float stretch = part < 0.5 ? 1.0 : 4.0;
+  float y = (m - u_clock * speed) / stretch;
+  // long vertical streaks (ropes of water), finer streaks over them, and slow lumps of aerated foam
+  float ropes = vnoise(vec2(u * 60.0, y * 0.9));
+  float fine = vnoise(vec2(u * 150.0 + 5.0, y * 2.6));
+  float lumps = vnoise(vec2(u * 20.0 + 11.0, (m - u_clock * speed * 0.8) * 0.35));
+  float aer = clamp(ropes * 0.55 + fine * 0.3 + lumps * 0.35 - 0.15, 0.0, 1.0);
+  if (part < 0.5) aer *= 0.35;                                        // the stream on top is mostly clear
+  vec3 deep = vec3(0.12, 0.22, 0.25), foam = vec3(0.78, 0.82, 0.85);
+  vec3 col = mix(deep, foam, smoothstep(0.3, 0.85, aer));
+  // white where it breaks over an edge, and churned white at the foot
+  col = mix(col, foam, clamp(drop * drop * 0.9, 0.0, 0.9));
+  // light: sun on the face plus sky; a little forward-scatter glow when the sun is behind the curtain
+  float sunK = clamp(0.2 + 0.8 * u_daylight, 0.0, 1.0);
+  vec3 vdir = normalize(v_wpos - u_camPos);
+  float back = pow(max(dot(vdir, u_sunDir.xyz), 0.0), 4.0) * u_daylight;
+  col = col * sunK * mix(vec3(0.85, 0.9, 0.95), u_sunCol.rgb * 1.1, 0.35) + foam * back * 0.18 * aer;
   col = mix(col, fogTint(v_wpos), fogObject(v_wpos, v_depth));
-  fragColor = vec4(col, (0.78 + 0.2 * s2) * edge * (1.0 - 0.4 * u_ice));
+  // ragged edges and gaps between the ropes; thin at the spring
+  float edge = smoothstep(0.0, 0.18 + 0.1 * vnoise(vec2(y * 1.7, 3.0)), u) * smoothstep(1.0, 0.82 - 0.1 * vnoise(vec2(y * 1.9, 9.0)), u);
+  float a = part < 0.5 ? 0.55 + 0.35 * aer : mix(0.6, 0.98, smoothstep(0.15, 0.6, aer));
+  a *= edge * smoothstep(0.0, 3.0, m) * (1.0 - 0.4 * u_ice);
+  fragColor = vec4(col, a);
 }
 )";
 
@@ -235,8 +337,9 @@ void main(){
   float t = fract(sd.x + u_clock * (0.18 + sd.y * 0.22));
   float big = step(0.7, sd.z);
   vec3 side = normalize(cross(vec3(0.0, 1.0, 0.0), u_dir));
-  vec3 p = u_origin + side * (sd.y - 0.5) * 11.0 * (0.4 + t) + vec3(0.0, t * mix(3.0, 8.0, big), 0.0) + u_dir * (2.0 + (sd.z - 0.5) * 6.0 + t * 2.0);
+  vec3 p = u_origin + side * (sd.y - 0.5) * 14.0 * (0.4 + t) + vec3(0.0, t * mix(3.0, 8.0, big), 0.0) + u_dir * (2.0 + (sd.z - 0.5) * 6.0 + t * 2.0);
   v_a = (1.0 - t) * mix(0.55, 0.28, big) * clamp(0.25 + u_daylight, 0.0, 1.0);
+  v_a *= smoothstep(2.0, 9.0, distance(p, u_camPos));   // mist fades out right in front of the eye
   vec4 vp = u_view * vec4(p, 1.0);
   // spray lights up when the sun is behind it (forward scattering)
   v_sun = pow(max(dot(normalize(p - u_camPos), u_sunDir.xyz), 0.0), 6.0) * u_daylight;
@@ -359,36 +462,70 @@ void buildLakes() {
   g_lakes = uploadW(v, idx);
 }
 
+CaveFrame g_cave;
+
 void buildFall() {
   const River& R = world::RIVER;
   float hx = R.head[0], hz = R.head[1];
-  float dirx = 0.08f, dirz = -1.0f;
+  float dirx = 0.08f, dirz = -1.0f;   // into the cliff
   float dl = hypot2(dirx, dirz);
   dirx /= dl; dirz /= dl;
   float sx = -dirz, sz = dirx;
   g_fallDir = {-dirx, 0, -dirz};
   float wy = R.wy[0];
+  auto H = [&](float b, float o) { return world::getTerrainHeight(hx + dirx * b + sx * o, hz + dirz * b + sz * o); };
+  auto P = [&](float b, float o, float y) { return Vec3{hx + dirx * b + sx * o, y, hz + dirz * b + sz * o}; };
+  // the cliff: its foot (ground clears the water by 1.2 m) and its lip (within 1 m of the top)
+  float bFoot = 0;
+  for (float b = -12; b < 40; b += 0.25f) if (H(b, 0) > wy + 1.2f) { bFoot = b; break; }
+  float top = -1e9f;
+  for (float b = bFoot; b < bFoot + 45; b += 0.5f) top = std::max(top, H(b, 0));
+  float bLip = bFoot;
+  for (float b = bFoot; b < bFoot + 45; b += 0.25f) if (H(b, 0) >= top - 1.0f) { bLip = b; break; }
+  // the cave: a hole in the cliff at its foot, hidden behind the curtain (game/secrets.cpp builds the tunnel)
+  float floorY = wy + 0.35f;
+  float bMouth = bFoot;
+  for (float b = bFoot - 4; b < bFoot + 6; b += 0.1f) if (H(b, 0) >= floorY + 0.15f) { bMouth = b; break; }
+  floorY = std::max(floorY, H(bMouth - 0.4f, 0) + 0.05f);
+  const float DEPTH = 9.0f, HALF = 1.7f, MOUTH_H = 3.4f;
+  g_cave = {P(bMouth, 0, floorY), P(bMouth, 0, floorY), std::atan2(-dirx, -dirz), DEPTH, HALF, floorY + MOUTH_H, floorY, 0};
+  // the water's path as (b, y, part): spring-fed stream on top, down the cliff face, then a free fall that stands
+  // ~2 m off the foot so there is a dry gap behind it (you walk between the curtain and the cave mouth)
+  struct PP { float b, y, part; };
+  std::vector<PP> path;
+  for (float b = bLip + 8; b > bLip; b -= 0.5f) path.push_back({b, H(b, 0) + 0.12f, 0});
+  float freeTop = floorY + MOUTH_H + 3.0f, bFree = bMouth;
+  for (float b = bLip; b > bFoot - 1; b -= 0.4f) {
+    float h = H(b, 0);
+    if (h < freeTop) { bFree = b; break; }
+    float hn = H(b - 0.6f, 0);
+    float push = clampf((h - hn) / 0.6f * 0.25f, 0.25f, 1.2f);   // stand a little off the steep face
+    path.push_back({b - push, h + 0.4f, 1});
+  }
+  float b0 = path.back().b, y0 = path.back().y, bOut = bMouth - 2.3f;
+  for (int i = 1; i <= 22; i++) {
+    float t = i / 22.0f;
+    float bb = b0 + (bOut - b0) * std::sqrt(t), yy = y0 + t * ((wy - 0.6f) - y0);
+    path.push_back({bb, yy, 3});
+  }
+  (void)bFree;
   std::vector<WVert> v;
   std::vector<uint32_t> idx;
-  const int ROWS = 28, COLS = 10;
-  const float W = 4.6f;
-  float topBehind = 14;
-  for (int r = 0; r <= ROWS; r++) {
-    float vv = (float)r / ROWS;
-    float behind = -1.5f + vv * (topBehind + 1.5f);
+  const int COLS = 28;
+  float m = 0;
+  for (size_t r = 0; r < path.size(); r++) {
+    const PP& q = path[r];
+    if (r > 0) m += hypot2(path[r].b - path[r - 1].b, path[r].y - path[r - 1].y);
+    // a real river's worth of water: ~9 m wide on the face, spreading to ~11 m where it hits the pool
+    float half = q.part < 0.5f ? 1.0f + 3.0f * (1 - (q.b - bLip) / 8) : q.part < 2.5f ? 4.5f : 4.6f + 1.0f * (r + 23 - path.size()) / 22.0f;
+    float drop = q.part > 2.5f ? (float)(r + 23 - path.size()) / 22.0f : 0;
     for (int c = 0; c <= COLS; c++) {
-      float u = (float)c / COLS;
-      float off = (u * 2 - 1) * W * (1 + (1 - vv) * 0.25f);
-      float x = hx + dirx * behind + sx * off, z = hz + dirz * behind + sz * off;
-      float h0 = world::getTerrainHeight(x, z);
-      float slope = world::getTerrainHeight(x + dirx * 0.6f, z + dirz * 0.6f) - world::getTerrainHeight(x - dirx * 0.6f, z - dirz * 0.6f);
-      float push = clampf((slope / 1.2f - 0.6f) * 0.9f, 0, 2.2f);
-      for (float k = 0.4f; k <= 3.2f; k += 0.4f)
-        if (world::getTerrainHeight(x - dirx * k, z - dirz * k) > h0 - 0.1f) push = std::max(push, k + 0.5f);
-      x -= dirx * push;
-      z -= dirz * push;
-      float y = std::max(h0 + 0.35f + std::sin(off * 1.3f) * 0.1f, wy + 0.05f);
-      v.push_back({{x, y, z}, {u, vv, 0, 0}, {0, 0}});
+      float u = (float)c / COLS, off = (u * 2 - 1) * half;
+      float y = q.y;
+      if (q.part < 1.5f) y = H(q.b, off) + (q.part < 0.5f ? 0.12f : 0.4f);
+      v.push_back({{0, 0, 0}, {u, m, q.part, drop}, {0, 0}});
+      Vec3 pp = P(q.b, off, y);
+      v.back().p[0] = pp.x; v.back().p[1] = pp.y; v.back().p[2] = pp.z;
     }
     if (r > 0) {
       uint32_t r0 = (uint32_t)((r - 1) * (COLS + 1)), r1 = (uint32_t)(r * (COLS + 1));
@@ -396,6 +533,8 @@ void buildFall() {
     }
   }
   g_fall = uploadW(v, idx);
+  float hxP = hx + dirx * (bOut - 2.0f), hzP = hz + dirz * (bOut - 2.0f);
+  hx = hxP + dirx * 2.6f; hz = hzP + dirz * 2.6f;   // keep the pool/spray code below centred just in front of the curtain
   g_poolCenter = {hx - dirx * 2.6f, wy + 0.03f, hz - dirz * 2.6f};
   std::vector<WVert> pv;
   std::vector<uint32_t> pi;
@@ -407,7 +546,7 @@ void buildFall() {
   }
   for (int s = 0; s < SEG; s++) pi.insert(pi.end(), {0u, 1u + (uint32_t)((s + 1) % SEG), 1u + (uint32_t)s});
   g_pool = uploadW(pv, pi);
-  std::vector<float> seeds(70 * 3);
+  std::vector<float> seeds(160 * 3);
   Rng rng(9123);
   for (auto& s : seeds) s = rng.next();
   glGenVertexArrays(1, &g_sprayVao);
@@ -424,18 +563,26 @@ void buildFall() {
 
 namespace water {
 
+CaveFrame caveFrame() { return g_cave; }
+
 void init() {
   buildRiver();
   buildLakes();
   buildFall();
 }
 
+GLuint g_reflTex = 0;
 void draw() {
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glDepthMask(GL_FALSE);
   glDisable(GL_CULL_FACE);
   Shader& s = render::program("water", WATER_VS, WATER_FS);
+  glActiveTexture(GL_TEXTURE5);   // unit 11 is the previous shadow map; 5 is a scratch unit the terrain rebinds each draw
+  glBindTexture(GL_TEXTURE_2D, g_reflTex);
+  glActiveTexture(GL_TEXTURE0);
+  s.set1i("u_refl", 5);
+  s.set1f("u_reflOn", g_reflTex ? (std::getenv("HW_SSRDBG") ? 2.0f : 1.0f) : 0.0f);
   glUniform4fv(s.loc("u_rip"), 16, &g_rip[0][0]);
   glUniform1i(s.loc("u_ripN"), 16);
   s.set1f("u_lake", 0);
@@ -455,6 +602,7 @@ void draw() {
   glDisable(GL_BLEND);
 }
 
+void setReflection(unsigned tex) { g_reflTex = tex; }
 void ripple(float x, float y, float z, float strength, float splash) {
   if (render::cam.pos.distanceTo({x, y, z}) > 90) return;
   float* r = g_rip[g_ripHead]; g_ripHead = (g_ripHead + 1) % 16;
@@ -503,7 +651,7 @@ void drawParticles() {
   s.set3("u_origin", g_poolCenter);
   s.set3("u_dir", g_fallDir);
   glBindVertexArray(g_sprayVao);
-  glDrawArrays(GL_POINTS, 0, 70);
+  glDrawArrays(GL_POINTS, 0, 160);
   gfx::drawCalls++;
   glDepthMask(GL_TRUE);
   glDisable(GL_BLEND);

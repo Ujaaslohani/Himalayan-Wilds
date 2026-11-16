@@ -36,7 +36,8 @@ int trophyAppeal();
 bool banditsActive();
 bool banditCamp(float& x, float& z);
 int banditLevel();
-int banditHeads(float* xyz, int maxN);  // living bandits: world position just above each head
+int banditHeads(float* xyz, int maxN);
+float banditAwareness(float& x, float& z);  // 0..1: how close the most watchful bandit is to spotting you, and where he is  // living bandits: world position just above each head
 void debugBandits(float x, float z, int level);
 void debugTrophies();  // selftest: one of every trophy mounted  // selftest: put a camp of the given level here  // 1..6 (difficulty of the current / last camp)
 bool arrowHit(const Vec3& a, const Vec3& b, float dmg);

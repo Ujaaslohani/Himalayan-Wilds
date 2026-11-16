@@ -10,6 +10,7 @@ struct Settings {
   bool vsync = true;
   int msaa = 0;
   bool fxaa = true;
+  bool edgeUpscale = true;  // edge-adaptive (FSR1-style) upscaling when the 3D view renders below screen resolution
   bool ssao = false;  // screen-space contact shadows: off by default (baked AO now covers trees, rocks, buildings and the forest floor)
   int shadowSize = 1536;  // medium
   float mouseSensitivity = 0.0024f;
@@ -39,14 +40,26 @@ struct Settings {
   int leafPrepass = 2;       // leaf depth pre-pass: 0 off, 1 on, 2 auto (timed on this GPU, the faster wins)
   bool eco = false;  // Eco: automatic quality keeps the GPU at most ~half busy (cooler, quieter laptop)
   bool temporalUpscale = false;  // off by default: sharper; the player found it soft  // render low-res with sub-pixel jitter and rebuild detail from previous frames
+  bool volumetric = false;
+  bool volFog = false;
+  bool waterRefl = true;     // screen-space reflections on lakes and rivers (~0.8-1.2 ms when water is on screen)       // volumetric fog: drifting ground fog that catches sun and firelight; off by default   // volumetric light: full god rays (quarter-res, 48 samples) also in open ground; off by default
+  bool hudOn = true;          // H: hide / show the whole HUD
+  uint32_t hudHide = 0;       // per-element hide bits (HudItem)
+  int binds[64] = {};         // physical key (GLFW code) for each rebindable action; 0 = default
   float drawDist() const { return fullMap ? 8.0f : drawDistance; }
 };
 
 extern Settings g_settings;
 
+// HUD pieces the player can hide one by one (Options > HUD)
+enum HudItem { HUD_CLOCK, HUD_RENOWN, HUD_ARROWS, HUD_RESOURCES, HUD_OBJECTIVE, HUD_BUTTONS, HUD_COMPASS, HUD_MINIMAP,
+               HUD_CROSSHAIR, HUD_HEALTH, HUD_PROMPTS, HUD_NOTES, HUD_MARKERS, HUD_POPUPS, HUD_ITEM_COUNT };
+extern const char* HUD_ITEM_NAMES[HUD_ITEM_COUNT];
+inline bool hudShows(int item) { return g_settings.hudOn && !(g_settings.hudHide & (1u << item)); }
+
 enum Key {
   K_W, K_A, K_S, K_D, K_Q, K_E, K_R, K_F, K_C, K_J, K_B, K_M, K_I, K_TAB, K_SPACE, K_SHIFT, K_CTRL,
-  K_ESC, K_ENTER, K_UP, K_DOWN, K_LEFT, K_RIGHT, K_1, K_2, K_3, K_4, K_5, K_6, K_F2, K_F3, K_F4, K_F11, K_P, K_L, K_COUNT
+  K_ESC, K_ENTER, K_UP, K_DOWN, K_LEFT, K_RIGHT, K_1, K_2, K_3, K_4, K_5, K_6, K_F2, K_F3, K_F4, K_F11, K_P, K_L, K_K, K_H, K_COUNT
 };
 
 struct Input {
@@ -63,6 +76,16 @@ struct Input {
 };
 
 namespace platform {
+// rebindable controls: action keys (enum Key) -> physical key
+struct BindDef { int key; const char* name; int def; };
+extern const BindDef BINDS[];
+extern const int BIND_COUNT;
+int boundKey(int action);                 // physical key for an action
+std::string keyName(int physical);        // "W", "Space", "Left Shift"...
+std::string actionKeyName(int action);    // name of the key bound to an action
+void setBind(int action, int physical);   // swaps with any action already on that key
+void resetBinds();
+int takeLastRawKey();                     // last physical key pressed (for 'press a key'), -1 none
 bool init(int argc, char** argv);
 void shutdown();
 bool shouldClose();
@@ -86,6 +109,7 @@ void clearFrameInput();
 void toggleFullscreen();
 bool isFullscreen();
 void setVsync(bool on);
+void setSwapInterval(int n);   // 1 = every refresh, 2 = every other (an exact 30 fps on a 60 Hz screen)
 bool saveSettings();
 std::string assetPath(const std::string& rel);
 std::string findAsset(const std::string& name);

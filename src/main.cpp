@@ -1,7 +1,9 @@
+#include "models/houses.h"
 #include "render/envmap.h"
 #include "game/extras.h"
 #include "game/events.h"
 #include "game/relics.h"
+#include "game/secrets.h"
 #include "core/crashlog.h"
 #include "core/version.h"
 #include <atomic>
@@ -84,7 +86,7 @@ struct SceneTarget {
     // motion vectors for temporal upscaling (fragment location 3 -> attachment 1, enabled per frame)
     glGenTextures(1, &vel);
     glBindTexture(GL_TEXTURE_2D, vel);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, w, h, 0, GL_RG, GL_HALF_FLOAT, nullptr);   // motion is 2D: half the memory of RGBA16F
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -227,6 +229,7 @@ std::string timestampName() {
 const char* g_loadMsg = "";
 float g_loadFrac = 0;
 void loadingFrame(const char* msg, float frac = -1) {
+  { static double t0 = platform::time(), tl = t0; static const bool lp = std::getenv("HW_LOADPROF") != nullptr; if (lp && msg) { double t = platform::time(); std::printf("LOAD %6.2fs (+%.2fs) %s\n", t - t0, t - tl, msg); std::fflush(stdout); tl = t; } }
   if (msg) g_loadMsg = msg;
   if (frac >= 0) g_loadFrac = frac;
   int W = platform::width(), H = platform::height();
@@ -358,7 +361,24 @@ struct PassProf {
     return out;
   }
   void publish() {
-    if (frames) screens::setPassText(top(gAcc, frames, "GPU ms:"), top(cAcc, frames, "CPU ms:"));
+    // the full-screen post passes do fixed work for a given resolution, so their time is a speedometer for the
+    // GPU itself: if they suddenly take 2x+ longer than their best, the card has clocked down (power or heat)
+    std::string tag = "GPU ms:";
+    if (frames) {
+      auto it = gAcc.find("render::drawFullscreen()");
+      if (it != gAcc.end()) {
+        double fs = it->second / frames;
+        static double best = 1e9; static float lastScale = -1;
+        if (g_settings.renderScale != lastScale) { best = 1e9; lastScale = g_settings.renderScale; }
+        best = std::min(best, fs);
+        if (fs > best * 2.2 && best > 0.2) {
+          static char w[96];
+          std::snprintf(w, sizeof w, "GPU CLOCKED DOWN x%.1f (power/heat) |  GPU ms:", fs / best);
+          tag = w;
+        }
+      }
+    }
+    if (frames) screens::setPassText(top(gAcc, frames, tag.c_str()), top(cAcc, frames, "CPU ms:"));
     gAcc.clear(); cAcc.clear(); frames = 0;
   }
 } g_pp;
@@ -414,6 +434,8 @@ void drawShadows() {
   PROF(village::drawShadow());
   PROF(npcs::drawShadow());
   PROF(wildlife::drawShadow());
+  PROF(events::drawCaravan(true));
+  PROF(secrets::drawShadow());
   render::endShadowPass();
 }
 
@@ -616,6 +638,49 @@ void main(){
 )";
 
 int g_sunW = 0, g_sunH = 0;
+// screen-space reflections: half-res copy of the opaque scene (rgb) with linear depth (a), taken just before the water
+struct { GLuint fbo = 0, tex = 0; int w = 0, h = 0; } g_refl;
+void reflCapture() {
+  water::setReflection(0);
+  if (!g_settings.waterRefl || !g_scene || !g_scene->fbo) return;
+  GLint cur = 0; glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &cur);
+  if ((GLuint)cur != g_scene->drawFbo()) return;
+  if (g_scene->samples) g_scene->resolve(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);   // MSAA: resolve what is drawn so far into the plain textures
+  int w = std::max(1, g_scene->w / 2), h = std::max(1, g_scene->h / 2);
+  if (w != g_refl.w || h != g_refl.h || !g_refl.fbo) {
+    if (g_refl.fbo) { glDeleteFramebuffers(1, &g_refl.fbo); glDeleteTextures(1, &g_refl.tex); }
+    g_refl.w = w; g_refl.h = h;
+    glGenTextures(1, &g_refl.tex);
+    glBindTexture(GL_TEXTURE_2D, g_refl.tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glGenFramebuffers(1, &g_refl.fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_refl.fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_refl.tex, 0);
+  }
+  static const char* RC_VS = "out vec2 v_uv;\nvoid main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); v_uv = p; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }\n";
+  static const char* RC_FS = "in vec2 v_uv;\nuniform sampler2D u_col;\nuniform sampler2D u_dep;\nout vec4 o;\nvoid main(){ float d = texture(u_dep, v_uv).r; float lin = d >= 0.99999 ? 60000.0 : u_proj[3][2] / ((d * 2.0 - 1.0) + u_proj[2][2]); o = vec4(texture(u_col, v_uv).rgb, lin); }\n";
+  GLint vp[4]; glGetIntegerv(GL_VIEWPORT, vp);
+  GLint b0 = 0, b1 = 0;
+  glActiveTexture(GL_TEXTURE1); glGetIntegerv(GL_TEXTURE_BINDING_2D, &b1); glBindTexture(GL_TEXTURE_2D, g_scene->depth);
+  glActiveTexture(GL_TEXTURE0); glGetIntegerv(GL_TEXTURE_BINDING_2D, &b0); glBindTexture(GL_TEXTURE_2D, g_scene->color);
+  glBindFramebuffer(GL_FRAMEBUFFER, g_refl.fbo);
+  glViewport(0, 0, w, h);
+  glDisable(GL_DEPTH_TEST); glDisable(GL_BLEND);
+  Shader& s = render::program("reflcap", RC_VS, RC_FS);
+  s.set1i("u_col", 0); s.set1i("u_dep", 1);
+  render::drawFullscreen();
+  glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)cur);
+  glViewport(vp[0], vp[1], vp[2], vp[3]);
+  glEnable(GL_DEPTH_TEST);
+  glBindTexture(GL_TEXTURE_2D, (GLuint)b0);
+  glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, (GLuint)b1); glActiveTexture(GL_TEXTURE0);
+  water::setReflection(g_refl.tex);
+}
+
 void drawWorld(float dt, bool viewModel) {
   fx::beginFrame();
   const Color hz = sky::horizon();
@@ -630,6 +695,7 @@ void drawWorld(float dt, bool viewModel) {
   PROF(forest::drawOpaque());
   PROF(props::draw());
   PROF(relics::draw());
+  PROF(secrets::draw());
   PROF(extras::draw());
   PROF(events::drawCaravan());
   PROF(buildings::draw());
@@ -640,7 +706,9 @@ void drawWorld(float dt, bool viewModel) {
   PROF(resources::draw());
   PROF(archery::draw());
   PROF(terrain_render::draw());
+  PROF(secrets::drawCave());
   PROF(sky::drawSky());
+  PROF(reflCapture());
   PROF(water::draw());
   PROF(forest::drawBlobs());
   PROF(props::drawCasters());
@@ -648,6 +716,7 @@ void drawWorld(float dt, bool viewModel) {
   PROF(village::addLights());
   PROF(buildings::drawPreview());
   PROF(fx::drawTransparent());
+  PROF(secrets::drawSmoke());
   PROF(props::drawGlow());
   PROF(fx::drawGlows());
   PROF(village::drawFestival());
@@ -659,7 +728,20 @@ void drawWorld(float dt, bool viewModel) {
   if (g_scene && g_scene->fbo && !g_scene->samples) {
     GLint cur = 0; glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &cur);
     // every 2nd frame: at 30 fps that is still 15 occlusion snapshots a second, at half the CPU / driver cost
-    if ((GLuint)cur == g_scene->fbo && (render::frameNo & 1) == 0) PROF(render::hizCapture(g_scene->depth, g_scene->w, g_scene->h));
+    // ...and none at all while the view is still (last snapshot is still exact, kept alive below). Turning fast: every
+    // 2nd frame; walking or turning slowly: every 4th
+    static Vec3 hzPos{1e9f, 0, 0}, hzFwd{0, 0, 0};
+    static int hzAge = 0;
+    const Vec3& cpos = render::cam.pos;
+    Vec3 cf = render::cam.forward();
+    float mv = (cpos - hzPos).length(), turn = 1 - cf.dot(hzFwd);
+    bool still = mv < 0.02f && turn < 1e-5f;
+    int every = turn > 0.002f || mv > 0.35f ? 2 : 4;
+    hzAge++;
+    if ((GLuint)cur == g_scene->fbo && ((!still && hzAge >= every) || hzAge >= 30)) {
+      PROF(render::hizCapture(g_scene->depth, g_scene->w, g_scene->h));
+      hzPos = cpos; hzFwd = cf; hzAge = 0;
+    } else if (still) render::hizKeepAlive();
   }
   if (viewModel) archery::drawViewModel(dt, player::cameraWorld());
 }
@@ -720,6 +802,8 @@ int main(int argc, char** argv) {
   loadingFrame("Planting the forest...", 0.55f);
   forest::precomputeItems();
   forest::init();
+  if (std::getenv("HW_STRUCTTRIS")) { for (int k = 0; k < SK_COUNT; k++) { const BuiltModel& m = structureModel((StructureKind)k, Look{}); std::fprintf(stderr, "STRUCT %d %d tris\n", k, m.data ? (int)m.data->idx.size() / 3 : -1); if (const char* dd = std::getenv("HW_STRUCTDUMP")) { char fn[512]; std::snprintf(fn, sizeof fn, "%s/s%d.bin", dd, k); if (FILE* f = std::fopen(fn, "wb")) { uint32_t nv = (uint32_t)m.data->vertexCount, ni = (uint32_t)m.data->idx.size(); std::fwrite(&nv, 4, 1, f); std::fwrite(&ni, 4, 1, f); std::fwrite(m.data->verts.data(), 16, nv, f); std::fwrite(m.data->idx.data(), 4, ni, f); std::fclose(f); } } } std::exit(0); }
+  if (const char* dd = std::getenv("HW_DUMPASSETS")) { assets::dumpAll(dd); std::fprintf(stderr, "DUMPED\n"); std::exit(0); }
   loadingFrame("Growing the grass...", 0.65f);
   grass::init();
   fx::init();
@@ -736,6 +820,78 @@ int main(int argc, char** argv) {
   wildlife::spawn(7);
   resources::spawn(11);
   npcs::reset();
+  if (std::getenv("HW_PATHCHECK")) {   // test hook: walk every road and trail centreline the way the player would
+    auto walk = [&](const std::string& name, const std::vector<P2>& pts, bool trail) {
+      std::vector<P2> q;
+      for (size_t i = 1; i < pts.size(); i++) {
+        float L = hypot2(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+        int n = std::max(1, (int)(L / 0.4f));
+        for (int k = 0; k < n; k++) q.push_back({lerpf(pts[i - 1][0], pts[i][0], (float)k / n), lerpf(pts[i - 1][1], pts[i][1], (float)k / n)});
+      }
+      int bad = 0; float worst = 0, wx = 0, wz = 0; float s = 0;
+      for (size_t i = 1; i < q.size(); i++) {
+        float x = q[i][0], z = q[i][1];
+        s += hypot2(x - q[i - 1][0], z - q[i - 1][1]);
+        float g0 = walkHeight(q[i - 1][0], q[i - 1][1]), g1 = walkHeight(x, z);
+        float step = g1 - g0, grade = step / 0.4f;
+        float sl = world::localSlope(x, z);
+        bool onP = world::nearRoute(x, z) < 7.0f || world::pathDistance(x, z) < 4.0f;
+        float lim = onP ? 1.35f : 0.95f;
+        bool blocked = step > 0.45f || (grade > (onP ? 1.3f : 0.9f) && std::fabs(g1 - world::getTerrainHeight(x, z)) < 0.05f) || (sl > lim && std::fabs(g1 - world::getTerrainHeight(x, z)) < 0.05f);
+        if (blocked) { bad++; if (std::max(grade, sl) > worst) { worst = std::max(grade, sl); wx = x; wz = z; } if (bad <= 4) std::printf("PATH %s blocked at %.1f %.1f (s=%.0f) step %.2f grade %.2f slope %.2f lim %.2f route %.1f\n", name.c_str(), x, z, s, step, grade, sl, lim, world::nearRoute(x, z)); }
+      }
+      std::printf("PATHSUM %s len %.0f blocked %d worst %.2f at %.0f %.0f\n", name.c_str(), s, bad, worst, wx, wz);
+    };
+    for (auto& r : world::ROUTES) if (r.name == "Bhairav Dhar") {
+      std::printf("ROUTE h0 %.1f h1 %.1f g %.3f top %.0f len %.0f feats %zu\n", r.h0, r.h1, r.g, r.top, r.len, r.feats.size());
+      for (size_t i = 0; i < r.pts.size() && r.cum[i] < 120; i += 3) { auto q = world::pathQuery(r.pts[i][0], r.pts[i][1]); std::printf("  s %.0f xz %.0f %.0f terr %.1f nat %.1f walk %.1f td %.1f th %.1f rd %.1f rh %.1f\n", r.cum[i], r.pts[i][0], r.pts[i][1], world::getTerrainHeight(r.pts[i][0], r.pts[i][1]), world::naturalHeightAt(r.pts[i][0], r.pts[i][1]), walkHeight(r.pts[i][0], r.pts[i][1]), q.td, q.th, q.rd, q.rh); }
+    }
+    if (const char* rq = std::getenv("HW_ROCKAT")) {
+      float qx = 0, qz = 0; std::sscanf(rq, "%f,%f", &qx, &qz);
+      for (int L = 2; L <= 3; L++) forest::forEachItem(L, [&](float x, float y, float z, float sc, const std::string& f) {
+        if (hypot2(x - qx, z - qz) < 45) std::printf("ITEM %d %s %.1f %.1f y %.2f terr %.2f nat %.2f sc %.2f route %.1f\n", L, f.c_str(), x, z, y, world::getTerrainHeight(x, z), world::naturalHeightAt(x, z), sc, world::nearRoute(x, z));
+      });
+    }
+    if (const char* rq = std::getenv("HW_ROCKAT")) {
+      float qx = 0, qz = 0; std::sscanf(rq, "%f,%f", &qx, &qz);
+      for (auto& S : world::STEPS) if (hypot2(S.x - qx, S.z - qz) < 60) std::printf("STEP %.1f %.1f top %.2f bottom %.2f terr %.2f hl %.1f hw %.1f\n", S.x, S.z, S.top, S.bottom, world::getTerrainHeight(S.x, S.z), S.hl, S.hw);
+      for (auto& G : world::GAPS) if (hypot2(G.x - qx, G.z - qz) < 60) std::printf("GAP %.1f %.1f base %.2f terr %.2f pillars %d\n", G.x, G.z, G.base, world::getTerrainHeight(G.x, G.z), (int)G.pillars);
+    }
+    if (const char* hq = std::getenv("HW_HAZEAT")) {
+      float qx = 0, qz = 0; std::sscanf(hq, "%f,%f", &qx, &qz);
+      envmap::setCameraHeight(world::getTerrainHeight(qx, qz) + 1.7f);
+      float cull = envmap::hazeCullDistance(qx, qz, 100.0f);
+      std::printf("HAZE at %.0f %.0f local %.2f cull %.0f", qx, qz, envmap::hazeAt(qx, qz), cull);
+      for (int k = 0; k < 8; k++) { float a = k * 0.785f; std::printf(" dir%d@150m %.2f", k, envmap::hazeAt(qx + std::cos(a) * 52, qz + std::sin(a) * 52)); }
+      std::printf("\n");
+    }
+    if (std::getenv("HW_TREEDUMP")) forest::forEachItem(3, [](float x, float, float z, float sc, const std::string& f) { std::printf("TREE %s %.3f %.0f %.0f\n", f.c_str(), sc, x, z); });
+    for (auto& r : world::ROUTES) walk("trail:" + r.name, r.pts, true);
+    for (size_t i = 0; i < world::ROADS.size(); i++) walk("road" + std::to_string(i), world::ROADS[i].pts, false);
+    std::fflush(stdout);
+    std::exit(0);
+  }
+  if (const char* wd = std::getenv("HW_WORLDDUMP")) {   // test hook: everything a save refers to, to prove a world change left it alone
+    FILE* f = std::fopen(wd, "w");
+    relics::reset();
+    for (int i = 0; i < relics::total(); i++) { float x, y, z; relics::position(i, x, y, z); std::fprintf(f, "relic %d %a %a %a\n", i, x, y, z); }
+    for (auto& n : resources::nodes()) std::fprintf(f, "res %d %d %a %a %a\n", n.id, (int)n.type, n.x, n.y, n.z);
+    for (auto& sm : world::SUMMITS) std::fprintf(f, "summit %a %a %a\n", sm.x, sm.z, sm.h);
+    for (auto& L : world::LAKES) std::fprintf(f, "lake %a %a %a\n", L.x, L.z, L.level);
+    for (auto& c : npcs::CAMPS) std::fprintf(f, "camp %a %a\n", c.campX, c.campZ);
+    std::fprintf(f, "herds %d animals %d\n", 0, wildlife::animalCount());
+    for (int j = -149; j <= 149; j++) for (int i = -149; i <= 149; i++) std::fprintf(f, "h %d %d %a %a\n", i, j, world::getTerrainHeight(i * 4.0f, j * 4.0f), world::forestDensity(i * 4.0f + 1, j * 4.0f + 1));
+    std::fclose(f);
+    if (const char* gd = std::getenv("HW_GRIDDUMP")) {
+      FILE* g = std::fopen(gd, "wb");
+      int n = GRID_N;
+      std::fwrite(&n, 4, 1, g);
+      std::fwrite(world::heightGrid().data(), 4, (size_t)n * n, g);
+      std::fwrite(world::colorGrid().data(), 4, (size_t)n * n, g);
+      std::fclose(g);
+    }
+    std::exit(0);
+  }
   ambience::start();
   mem("init");
 
@@ -855,6 +1011,7 @@ int main(int argc, char** argv) {
         {490, "build", [=] { A.tab = Tab::Buildings; A.buildSection = 1; }},
         {520, "map", [=] { A.tab = Tab::Map; }},
         {550, "journal", [=] { A.tab = Tab::Quests; }},
+        {565, "skills", [=] { A.tab = Tab::Skills; }},
         {600, "night", [=] { A.tab = Tab::None; E.time = 22.5f; look(10, 30, PI, -0.02f)(); }},
         // shadow-cache scroll check: walk in, shoot, then force a full rebuild and shoot again (should match)
         {600, "", [=] { A.tab = Tab::None; restoreSeason(1, 2, 12.0f); E.time = 13.0f; look(58.0f, -39.1f, 3.6f, -0.25f)(); }},
@@ -911,6 +1068,7 @@ int main(int argc, char** argv) {
         {1000, "", [=] { screens::openOptions(false); A.menuOpen = false; A.tab = Tab::None; A.status = Status::Playing; restoreSeason(2, 2, 11); E.time = 11.0f; look(4, 16, 0.3f, -0.05f)(); E.player.hp = 1e6f; E.player.maxHp = 1e6f; extras::debugBandits(4 - std::sin(0.3f) * 30, 16 - std::cos(0.3f) * 30, 6); }},
         {1090, "bandits", [=] { E.player.hp = 1e6f; }},
         {1094, "", [=] { E.player.hp = 1e6f; float bx, bz; extras::banditCamp(bx, bz); look(bx + 3, bz + 3, std::atan2(3.0f, 3.0f), -0.05f)(); }},
+        {1098, "", [=] { if (std::getenv("HW_BPOSE")) { float h[48]; int n = extras::banditHeads(h, 16); if (n) look(h[0] + 2.2f, h[2] + 3.2f, std::atan2(2.2f, 3.2f), 0.02f)(); } }},
         {1100, "bandits2", [=] {}},
         {1110, "", [=] { screens::openOptions(false); A.menuOpen = false; A.tab = Tab::None; restoreSeason(0, 3, 10); E.time = 10.0f; const float* F = grass::flowerFields(); float cx = F[0], cz = F[1], r = F[2]; float L = std::sqrt(cx * cx + cz * cz); float x = cx - cx / L * (r + 14), z = cz - cz / L * (r + 14); look(x, z, std::atan2(-(cx - x), -(cz - z)), -0.12f)(); }},
         {1170, "flowers", [=] {}},
@@ -950,6 +1108,10 @@ int main(int argc, char** argv) {
         {862, "", [=] { A.menuOpen = false; A.tab = Tab::None; screens::openOptions(false); restoreSeason(1, 1, 10.5f); E.time = 10.5f; std::vector<float> t; forest::nearTrees(10, 40, 160, t, 12); float tx = 10, tz = 40, ts = 1; for (size_t i = 0; i + 3 < t.size(); i += 4) if (std::fabs(world::getTerrainHeight(t[i], t[i + 2]) - world::getTerrainHeight(t[i] + 12, t[i + 2] + 4)) < 2.5f) { tx = t[i]; tz = t[i + 2]; ts = t[i + 3]; break; } float x = tx + 12, z = tz + 4; look(x, z, std::atan2(-(tx - x), -(tz - z)), 0.22f)(); }},
         {876, "ptree", [=] {}},
         {826, "options", [=] { screens::openOptions(true); }},
+        {827, "controls", [=] { screens::openOptions(true); screens::setOptCat(4); g_settings.binds[K_F] = 71; }},
+        {828, "hudopt", [=] { g_settings.binds[K_F] = 0; screens::setOptCat(5); g_settings.hudHide = (1u << HUD_RESOURCES) | (1u << HUD_MINIMAP) | (1u << HUD_BUTTONS) | (1u << HUD_RENOWN); }},
+        {829, "hudmin", [=] { screens::setOptCat(0); screens::openOptions(false); A.menuOpen = false; A.tab = Tab::None; A.status = Status::Playing; E.time = 10.0f; look(4, 16, 0.3f, -0.05f)(); }},
+        {831, "hudfull", [=] { g_settings.hudHide = 0; }},
         {830, "place", [=] { screens::openOptions(false); A.menuOpen = false; look(4, 16, 0.3f, -0.15f)(); for (auto& k : {"wood", "stone", "fiber"}) A.inv[k] = 99; app::startStructure(SK_COTTAGE); A.showStyle = true; }},
         {832, "dialogue", [=] { actions::cancelPlacement(); actions::openDialogue("carpenter"); }},
         {834, "people", [=] { A.dialogue = -1; A.population = 3; A.tab = Tab::Buildings; A.buildSection = 4; }},
@@ -1017,12 +1179,13 @@ int main(int argc, char** argv) {
     loadingFrame("Preparing shaders...", 0.8f);
     Vec3 savePos = E.player.pos;
     float saveYaw = E.player.yaw, savePitch = E.player.pitch;
-    int W = std::max(1, platform::width()), H = std::max(1, platform::height());
+    // warm-up at a small size: shader compiles are the same, the raster work is ~1/9 (it was full window, 10 frames)
+    int W = std::max(1, std::min(640, platform::width() / 3)), H = std::max(1, std::min(360, platform::height() / 3));
     scene.ensure(W, H);
     struct Spot { float x, z, yaw; };
     sky::warmPrograms();
     grass::setPreload(true);
-    Spot spots[5] = {{savePos.x, savePos.z, saveYaw}, {0, 14, 0}, {40, -60, 2.2f}, {world::SHRINES.empty() ? 0 : world::SHRINES[0].x - 20, world::SHRINES.empty() ? 0 : world::SHRINES[0].z, 1.57f}, {-6, 30, 0.35f}};
+    Spot spots[3] = {{savePos.x, savePos.z, saveYaw}, {0, 14, 0}, {world::SHRINES.empty() ? 40 : world::SHRINES[0].x - 20, world::SHRINES.empty() ? -60 : world::SHRINES[0].z, 1.57f}};   // 3 spots cover every shader (was 5)
     for (auto& sp : spots) {
       E.player.pos = {sp.x, world::getTerrainHeight(sp.x, sp.z) + 1.7f, sp.z};
       E.player.yaw = sp.yaw;
@@ -1055,6 +1218,28 @@ int main(int argc, char** argv) {
   platform::loadPump = nullptr;  // loading over: no more mid-step redraws
   while (!platform::shouldClose()) {
     platform::pollEvents();
+    if (app::g_pendingContinue != -2) {   // Continue from the title: load behind a loading screen, then let the world fill in
+      int slot = app::g_pendingContinue;
+      app::g_pendingContinue = -2;
+      platform::loadPump = pumpLoading;
+      loadingFrame("Loading your village...", 0.1f);
+      loadingFrame(nullptr, 0.15f);
+      app::continueGame(slot);
+      loadingFrame("Growing the forest around you...", 0.6f);
+      Vec3 sp = E.player.pos; float sy = E.player.yaw, spi = E.player.pitch;
+      for (int i = 0; i < 60; i++) {
+        player::updateCamera((float)platform::width() / platform::height());
+        forest::update(sp, render::cam.forward());
+        g_loadFrac = 0.6f + 0.4f * i / 60.0f;
+        pumpLoading();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+      loadingFrame("Ready", 1.0f);
+      E.player.pos = sp; E.player.yaw = sy; E.player.pitch = spi;
+      platform::loadPump = nullptr;
+      last = platform::time();
+      continue;
+    }
     double t = platform::time();
     float dt = (float)std::min(0.1, t - last);
     last = t;
@@ -1062,6 +1247,8 @@ int main(int argc, char** argv) {
     Input& in = platform::input();
 
     if (in.focusLost) needClick = true;
+    if (screens::capturingKey()) { for (bool& p : in.pressed) p = false; for (bool& d : in.down) d = false; }
+    if (in.pressed[K_H] && E.playing && !E.uiOpen) { g_settings.hudOn = !g_settings.hudOn; platform::saveSettings(); }
     if (in.pressed[K_F11]) platform::toggleFullscreen();
     if (in.pressed[K_F3]) screens::toggleStats();
     if (in.pressed[K_L] && E.playing && !E.uiOpen && !E.photo) { E.lanternOn = !E.lanternOn; audio::crispClick(); }
@@ -1126,7 +1313,7 @@ int main(int argc, char** argv) {
     static bool frozenValid = false;
     static int frozenW = 0, frozenH = 0;
     static float frozenRs = 1;
-    bool freeze = E.playing && !test && !cut && (A.menuOpen || A.howToOpen || A.tab == Tab::Map || A.tab == Tab::Inventory || A.tab == Tab::Quests);
+    bool freeze = E.playing && !test && !cut && (A.menuOpen || A.howToOpen || A.tab == Tab::Map || A.tab == Tab::Inventory || A.tab == Tab::Quests || A.tab == Tab::Skills);
     // other menus / dialogue: world at half rate; window in the background: world not redrawn at all
     bool unfocused = !test && !platform::focused();
     bool halfMenu = E.playing && !test && !cut && !freeze && E.world.placing.empty() && (A.tab != Tab::None || A.dialogue >= 0);
@@ -1198,7 +1385,100 @@ uniform vec2 u_px;
 uniform int u_fxaa;
 uniform float u_sharp;
 uniform float u_vig;
+uniform sampler2D u_bloom;
+uniform float u_bloomK;
+uniform vec3 u_warm;   // grade: highlight tint (sun colour), 0 = off
+uniform int u_easu;    // 1: edge-adaptive upscale (FSR1 EASU) from the lower-resolution scene
+uniform vec2 u_srcSize;
+uniform float u_easuSharp;
 out vec4 o;
+// ---- edge-adaptive spatial upscaling (AMD FidelityFX FSR 1.0 EASU, MIT licence; GLSL port) ----
+// 12 taps around the output pixel; the filter is stretched along edges and squeezed across them, so edges stay
+// sharp where plain bilinear would blur them, then clamped to the 4 nearest texels (no ringing).
+float eL(vec3 c){ return c.b * 0.5 + (c.r * 0.5 + c.g); }
+void eSet(inout vec2 dir, inout float len, float w, float lA, float lB, float lC, float lD, float lE){
+  float dc = lD - lC, cb = lC - lB;
+  float lenX = max(abs(dc), abs(cb)); lenX = 1.0 / max(lenX, 1e-5);
+  float dirX = lD - lB;
+  lenX = clamp(abs(dirX) * lenX, 0.0, 1.0); lenX *= lenX;
+  float ec = lE - lC, ca = lC - lA;
+  float lenY = max(abs(ec), abs(ca)); lenY = 1.0 / max(lenY, 1e-5);
+  float dirY = lE - lA;
+  lenY = clamp(abs(dirY) * lenY, 0.0, 1.0); lenY *= lenY;
+  dir += vec2(dirX, dirY) * w;
+  len += dot(vec2(w), vec2(lenX, lenY));
+}
+void eTap(inout vec3 aC, inout float aW, vec2 off, vec2 dir, vec2 len2, float lob, float clp, vec3 c){
+  vec2 v = vec2(dot(off, dir), dot(off, vec2(-dir.y, dir.x))) * len2;
+  float d2 = min(dot(v, v), clp);
+  float wB = 0.4 * d2 - 1.0, wA = lob * d2 - 1.0;
+  wB *= wB; wA *= wA;
+  wB = 1.5625 * wB - 0.5625;
+  float w = wB * wA;
+  aC += c * w; aW += w;
+}
+vec3 eF(ivec2 p){ return texelFetch(u_src, clamp(p, ivec2(0), ivec2(u_srcSize) - 1), 0).rgb; }
+vec3 easu(){
+  vec2 pp = v_uv * u_srcSize - 0.5;
+  vec2 fp = floor(pp); pp -= fp;
+  ivec2 ip = ivec2(fp);
+  vec3 b = eF(ip + ivec2(0, -1)), c = eF(ip + ivec2(1, -1));
+  vec3 e = eF(ip + ivec2(-1, 0)), f = eF(ip), g = eF(ip + ivec2(1, 0)), h = eF(ip + ivec2(2, 0));
+  vec3 i = eF(ip + ivec2(-1, 1)), j = eF(ip + ivec2(0, 1)), k = eF(ip + ivec2(1, 1)), l = eF(ip + ivec2(2, 1));
+  vec3 n = eF(ip + ivec2(0, 2)), oo = eF(ip + ivec2(1, 2));
+  float bL = eL(b), cL = eL(c), eLl = eL(e), fL = eL(f), gL = eL(g), hL = eL(h), iL = eL(i), jL = eL(j), kL = eL(k), lL = eL(l), nL = eL(n), oL = eL(oo);
+  vec2 dir = vec2(0.0); float len = 0.0;
+  eSet(dir, len, (1.0 - pp.x) * (1.0 - pp.y), bL, eLl, fL, gL, jL);
+  eSet(dir, len, pp.x * (1.0 - pp.y), cL, fL, gL, hL, kL);
+  eSet(dir, len, (1.0 - pp.x) * pp.y, fL, iL, jL, kL, nL);
+  eSet(dir, len, pp.x * pp.y, gL, jL, kL, lL, oL);
+  vec2 dir2 = dir * dir;
+  float dirR = dir2.x + dir2.y;
+  bool zro = dirR < 1.0 / 32768.0;
+  dirR = zro ? 1.0 : inversesqrt(dirR);
+  dir.x = zro ? 1.0 : dir.x;
+  dir *= dirR;
+  len = len * 0.5; len *= len;
+  float stretch = dot(dir, dir) / max(abs(dir.x), abs(dir.y));
+  vec2 len2 = vec2(1.0 + (stretch - 1.0) * len, 1.0 - 0.5 * len);
+  float lob = 0.5 + ((1.0 / 4.0 - 0.04) - 0.5) * len;
+  float clp = 1.0 / lob;
+  vec3 aC = vec3(0.0); float aW = 0.0;
+  eTap(aC, aW, vec2(0.0, -1.0) - pp, dir, len2, lob, clp, b);
+  eTap(aC, aW, vec2(1.0, -1.0) - pp, dir, len2, lob, clp, c);
+  eTap(aC, aW, vec2(-1.0, 1.0) - pp, dir, len2, lob, clp, i);
+  eTap(aC, aW, vec2(0.0, 1.0) - pp, dir, len2, lob, clp, j);
+  eTap(aC, aW, vec2(0.0, 0.0) - pp, dir, len2, lob, clp, f);
+  eTap(aC, aW, vec2(-1.0, 0.0) - pp, dir, len2, lob, clp, e);
+  eTap(aC, aW, vec2(1.0, 1.0) - pp, dir, len2, lob, clp, k);
+  eTap(aC, aW, vec2(2.0, 1.0) - pp, dir, len2, lob, clp, l);
+  eTap(aC, aW, vec2(2.0, 0.0) - pp, dir, len2, lob, clp, h);
+  eTap(aC, aW, vec2(1.0, 0.0) - pp, dir, len2, lob, clp, g);
+  eTap(aC, aW, vec2(1.0, 2.0) - pp, dir, len2, lob, clp, oo);
+  eTap(aC, aW, vec2(0.0, 2.0) - pp, dir, len2, lob, clp, n);
+  vec3 mn = min(min(f, g), min(j, k)), mx = max(max(f, g), max(j, k));
+  return clamp(aC / max(aW, 1e-5), mn, mx);
+}
+vec3 grade(vec3 c){
+  // bloom: bright sky and sunlit leaves glow softly over their surroundings, like light in a lens
+  c += texture(u_bloom, v_uv).rgb * u_bloomK;
+  // gentle grade: a touch richer colour, sun-warmed highlights, faintly cool shadows
+  float L = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  if (u_warm.z > 0.5) {
+    // filmic grade: neon greens pulled toward olive, an S-curve for contrast, warm highlights over cool shadows
+    float gx = max(c.g - max(c.r, c.b), 0.0);
+    c += vec3(0.42, -0.30, 0.04) * gx;
+    c = mix(vec3(L), c, 0.94);
+    c = mix(c, c * c * (3.0 - 2.0 * c), 0.38);
+    float w = 0.5 + 0.5 * u_warm.x;
+    c *= mix(vec3(0.95, 0.99, 1.07), vec3(1.0 + 0.07 * w, 1.0 + 0.02 * w, 1.0 - 0.08 * w), smoothstep(0.12, 0.8, L));
+    // cinematic split tone: teal in the shadows, gold in the highlights, a touch more depth in the darks
+    c = mix(c, c * vec3(0.9, 1.0, 1.06), (1.0 - smoothstep(0.05, 0.4, L)) * 0.6);
+    c = mix(c, c * vec3(1.05, 1.01, 0.93), smoothstep(0.55, 0.95, L) * 0.5 * w);
+    c = mix(c, c * c * (3.0 - 2.0 * c), 0.12);
+  }
+  return clamp(c, 0.0, 1.0);
+}
 float vig(){ vec2 d = (v_uv - 0.5) * vec2(1.6, 1.0); return 1.0 - smoothstep(0.35, 1.05, length(d)) * 0.38 * u_vig; }
 float lum(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
 vec3 sharpen(vec3 c){
@@ -1211,13 +1491,24 @@ vec3 sharpen(vec3 c){
   vec3 w = -amp * mix(0.125, 0.2, u_sharp);
   return clamp((c + (a + b + d + e) * w) / (1.0 + 4.0 * w), 0.0, 1.0);
 }
+// same sharpening from the four corner taps the anti-aliasing reads anyway (no extra texture reads)
+vec3 sharpenD(vec3 c, vec3 a, vec3 b, vec3 d, vec3 e){
+  if (u_sharp <= 0.0) return c;
+  vec3 mn = min(c, min(min(a, b), min(d, e))), mx = max(c, max(max(a, b), max(d, e)));
+  vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, 1e-4), 0.0, 1.0));
+  vec3 w = -amp * mix(0.125, 0.2, u_sharp) * 0.75;   // corners sit 1.41 px out: a little less weight
+  return clamp((c + (a + b + d + e) * w) / (1.0 + 4.0 * w), 0.0, 1.0);
+}
 void main(){
+  if (u_easu == 1) { vec3 e = easu(); o = vec4(grade(e + (sharpen(e) - e) * u_easuSharp) * vig(), 1.0); return; }
   vec3 m = texture(u_src, v_uv).rgb;
-  if (u_fxaa == 0) { o = vec4(sharpen(m) * vig(), 1.0); return; }
+  if (u_fxaa == 0) { o = vec4(grade(sharpen(m)) * vig(), 1.0); return; }
   vec3 nw = texture(u_src, v_uv + vec2(-1.0, -1.0) * u_px).rgb, ne = texture(u_src, v_uv + vec2(1.0, -1.0) * u_px).rgb;
   vec3 sw = texture(u_src, v_uv + vec2(-1.0, 1.0) * u_px).rgb, se = texture(u_src, v_uv + vec2(1.0, 1.0) * u_px).rgb;
   float lNW = lum(nw), lNE = lum(ne), lSW = lum(sw), lSE = lum(se), lM = lum(m);
   float lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE))), lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+  // no edge here (most of the screen): skip the 4 extra edge taps; sharpening reuses the corner taps already read
+  if (lMax - lMin < max(0.0312, lMax * 0.125)) { o = vec4(grade(m + (sharpenD(m, nw, ne, sw, se) - m) * u_sharp * 0.6) * vig(), 1.0); return; }
   vec2 dir = vec2(-((lNW + lNE) - (lSW + lSE)), (lNW + lSW) - (lNE + lSE));
   float red = max((lNW + lNE + lSW + lSE) * 0.03125, 1.0 / 128.0);
   float rcp = 1.0 / (min(abs(dir.x), abs(dir.y)) + red);
@@ -1226,7 +1517,7 @@ void main(){
   vec3 b = a * 0.5 + 0.25 * (texture(u_src, v_uv - dir * 0.5).rgb + texture(u_src, v_uv + dir * 0.5).rgb);
   float lB = lum(b);
   vec3 f = (lB < lMin || lB > lMax) ? a : b;
-  o = vec4((f + (sharpen(m) - m) * u_sharp * 0.6) * vig(), 1.0);
+  o = vec4(grade(f + (sharpenD(m, nw, ne, sw, se) - m) * u_sharp * 0.6) * vig(), 1.0);
 }
 )";
       GLuint presentTex = scene.color;
@@ -1267,14 +1558,105 @@ void main(){
         presentTex = g_taa.tex[g_taa.cur];
         presW = W; presH = H;
       } else g_taa.valid = false;
+      // ---- bloom at quarter resolution: bright-pass + two blur passes (~0.15 ms), added in the final pass
+      static const bool bloomOff = std::getenv("HW_NOBLOOM") != nullptr;
+      float bloomK = bloomOff ? 0.0f : 0.24f * (0.4f + 0.6f * E.daylight);
+      if (bloomK > 0) {
+        static const char* BP_FS = R"(in vec2 v_uv;
+uniform sampler2D u_src;
+uniform vec2 u_px;
+out vec4 o;
+void main(){
+  vec3 c = vec3(0.0);
+  // 4 filtered taps, each averaging 2x2 texels: the whole 4x4 block under this quarter-size pixel (bloom is blurred after anyway)
+  c += texture(u_src, v_uv + vec2(-1.5, -1.5) * u_px).rgb + texture(u_src, v_uv + vec2(1.5, -1.5) * u_px).rgb;
+  c += texture(u_src, v_uv + vec2(-1.5, 1.5) * u_px).rgb + texture(u_src, v_uv + vec2(1.5, 1.5) * u_px).rgb;
+  c *= 0.25;
+  float L = max(c.r, max(c.g, c.b));
+  o = vec4(c * smoothstep(0.8, 1.0, L) * smoothstep(0.0, 0.25, L - min(c.r, min(c.g, c.b)) + 0.12), 1.0);  // only near-white highlights; grey-white haze barely blooms
+}
+)";
+        static const char* BL_FS = R"(in vec2 v_uv;
+uniform sampler2D u_src;
+uniform vec2 u_dir;
+out vec4 o;
+void main(){
+  const float W[5] = float[5](0.227, 0.194, 0.122, 0.054, 0.016);
+  vec3 c = texture(u_src, v_uv).rgb * W[0];
+  for (int i = 1; i < 5; i++) c += (texture(u_src, v_uv + u_dir * float(i)).rgb + texture(u_src, v_uv - u_dir * float(i)).rgb) * W[i];
+  o = vec4(c, 1.0);
+}
+)";
+        struct BRT { GLuint fbo = 0, tex = 0; int w = 0, h = 0; };
+        static BRT bA, bB;
+        int bw = std::max(16, presW / 4), bh = std::max(16, presH / 4);
+        for (BRT* b : {&bA, &bB}) {
+          if (b->w == bw && b->h == bh && b->fbo) continue;
+          if (b->fbo) { glDeleteFramebuffers(1, &b->fbo); glDeleteTextures(1, &b->tex); }
+          b->w = bw; b->h = bh;
+          glGenTextures(1, &b->tex);
+          glBindTexture(GL_TEXTURE_2D, b->tex);
+          glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, bw, bh, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+          glGenFramebuffers(1, &b->fbo);
+          glBindFramebuffer(GL_FRAMEBUFFER, b->fbo);
+          glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, b->tex, 0);
+        }
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_BLEND);
+        glViewport(0, 0, bw, bh);
+        glActiveTexture(GL_TEXTURE0);
+        glBindFramebuffer(GL_FRAMEBUFFER, bA.fbo);
+        glBindTexture(GL_TEXTURE_2D, presentTex);
+        Shader& bp = render::program("bloomBright", UPVS, BP_FS);
+        bp.set1i("u_src", 0);
+        bp.set2f("u_px", 1.0f / presW, 1.0f / presH);
+        PROF(render::drawFullscreen());
+        Shader& bl = render::program("bloomBlur", UPVS, BL_FS);
+        bl.set1i("u_src", 0);
+        for (int pass = 0; pass < 2; pass++) {
+          glBindFramebuffer(GL_FRAMEBUFFER, bB.fbo);
+          glBindTexture(GL_TEXTURE_2D, bA.tex);
+          bl.set2f("u_dir", 1.6f * (pass + 1) / bw, 0);
+          render::drawFullscreen();
+          glBindFramebuffer(GL_FRAMEBUFFER, bA.fbo);
+          glBindTexture(GL_TEXTURE_2D, bB.tex);
+          bl.set2f("u_dir", 0, 1.6f * (pass + 1) / bh);
+          render::drawFullscreen();
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, W, H);
+        glActiveTexture(GL_TEXTURE26);
+        glBindTexture(GL_TEXTURE_2D, bA.tex);
+      }
       Shader& up = render::program("upscale", UPVS, UPFS);
       glDisable(GL_DEPTH_TEST);
       glDisable(GL_BLEND);
+      up.set1i("u_bloom", 26);
+      up.set1f("u_bloomK", bloomK);
+      {
+        static const bool gradeOff = std::getenv("HW_NOGRADE") != nullptr;
+        Vec3 sd = sky::sunDir();
+        float warm = gradeOff ? 0.0f : std::max(0.0f, std::min(1.0f, E.daylight * 1.4f)) * (0.5f + 0.5f * (1.0f - std::min(1.0f, std::max(0.0f, sd.y / 0.6f))));
+        up.set3f("u_warm", warm, 0.0f, gradeOff ? 0.0f : 1.0f);
+      }
       glActiveTexture(GL_TEXTURE0);
       glBindTexture(GL_TEXTURE_2D, presentTex);
       up.set1i("u_src", 0);
       up.set2f("u_px", 1.0f / presW, 1.0f / presH);
       up.set1i("u_fxaa", g_settings.fxaa && !taa ? 1 : 0);  // TAA already anti-aliases
+      {
+        // below ~97% scale (and without TAA, which reconstructs on its own) upscale edge-adaptively instead of bilinear
+        static const bool noEasu = std::getenv("HW_NOEASU") != nullptr;
+        bool easu = !noEasu && g_settings.edgeUpscale && !taa && presW < W - 8;
+        up.set1i("u_easu", easu ? 1 : 0);
+        up.set2f("u_srcSize", (float)presW, (float)presH);
+        static const float es = std::getenv("HW_EASUSHARP") ? (float)std::atof(std::getenv("HW_EASUSHARP")) : 0.0f;
+        up.set1f("u_easuSharp", es);
+      }
       up.set1f("u_vig", E.playing ? 1.0f : 0.0f);  // vignette folded into this pass: no extra full-screen draw
       up.set1f("u_sharp", taa ? 0.55f : clampf((1.0f - rs) / 0.28f, 0.0f, 1.0f) * 0.4f);  // light sharpening offsets the history blur
       PROF(render::drawFullscreen());
@@ -1306,7 +1688,7 @@ void main(){
     ms.released = free && in.mouseReleased[0];
     ms.wheel = free ? in.wheel : 0;
     ui::setMouse(ms);
-    PROF(screens::draw(dt, free));
+    { static const bool noUi = std::getenv("HW_NOUI") != nullptr; if (!noUi) PROF(screens::draw(dt, free)); }  // HW_NOUI: clean test shots
     bool uiTookClick = ui::clickConsumed();
     ui::end();
     if (needClick && in.mousePressed[0] && !uiTookClick && E.playing && !app::uiOpen()) needClick = false;
@@ -1319,12 +1701,30 @@ void main(){
       if (spin) {
         float sx = 0, sz = 0, y0 = 0, rate = 0, pit = 0;
         std::sscanf(spin, "%f,%f,%f,%f,%f", &sx, &sz, &y0, &rate, &pit);
+        static const char* treeName = std::getenv("HW_TREEAT");  // stand ~9 m from the nearest tree of that kind
+        if (treeName && frames == 250) { float tx, tz; if (forest::findTree(treeName, sx, sz, tx, tz)) { std::printf("tree at %.1f %.1f\n", tx, tz); { const char* td = std::getenv("HW_TREEDIST"); sx = tx - (td ? (float)std::atof(td) : 9.0f); } sz = tz; y0 = -1.5708f; } }
+        static float ssx = 0, ssz = 0, sy0 = 0; static bool moved = false;
+        if (treeName && frames == 250) { ssx = sx; ssz = sz; sy0 = y0; moved = true; }
+        if (moved) { sx = ssx; sz = ssz; y0 = sy0; }
+        if (frames == 200) if (const char* st = std::getenv("HW_SPINTIME")) {   // "seasonStart,day,hour": pick the season and hour for the spin
+          int ss = 1, sd = 2; float hr = 13;
+          std::sscanf(st, "%d,%d,%f", &ss, &sd, &hr);
+          restoreSeason(ss, sd, hr); forest::seasonJumped(); E.time = hr;
+        }
         if (frames >= 200 && frames < 380) {
           int k = std::max(0, frames - 300);
-          E.player.pos = {sx, world::getTerrainHeight(sx, sz) + 1.7f, sz};
+          if (std::getenv("HW_SPINPROF")) {   // per-call triangle / time breakdown over frames 300-329
+            if (frames == 300) { g_profMs.clear(); g_profTri.clear(); g_profDraw.clear(); g_prof = true; }
+            if (frames == 330) { for (auto& kv : g_profMs) std::printf("prof %8.1f ms %9lld tri %5lld draws  %s\n", kv.second / 30, g_profTri[kv.first] / 30, g_profDraw[kv.first] / 30, kv.first.c_str()); g_prof = false; std::fflush(stdout); }
+          }
+          static const char* mvs = std::getenv("HW_SPINMOVE");   // walk forward at this speed (m/s) instead of standing
+          float mvv = mvs ? (float)std::atof(mvs) : 0.0f;
+          float wx = sx + std::sin(y0) * mvv * (frames - 200) / 30.0f, wz = sz + std::cos(y0) * mvv * (frames - 200) / 30.0f;
+          if (mvv > 0) { sx = wx; sz = wz; }
+          { float fy = world::getTerrainHeight(sx, sz), cy; if (secrets::caveFloor(sx, sz, -1e9f, cy)) fy = cy; E.player.pos = {sx, fy + 1.7f, sz}; }
           E.player.yaw = y0 + rate * k;
           E.player.pitch = pit;
-          if (frames >= 300) screenshot(selftest + "/spin_" + std::to_string(frames - 300) + ".png");
+          if (frames >= 300 && (!std::getenv("HW_SPINSTEP") || (frames - 300) % std::atoi(std::getenv("HW_SPINSTEP")) == 0)) { screenshot(selftest + "/spin_" + std::to_string(frames - 300) + ".png"); std::printf("SPINTRIS %d %dk draws %d\n", frames - 300, lastFs.tris / 1000, lastFs.drawCalls); std::fflush(stdout); }
         }
         if (frames == 380) platform::requestClose();
       }
@@ -1382,6 +1782,13 @@ void main(){
       int cap = !platform::focused() ? 10 : menu ? g_settings.menuFps : g_settings.fpsLimit;
       static int hz = platform::refreshRate();
       if (g_settings.vsync && cap >= hz - 1) cap = 0;
+      // vsync on and the cap divides the refresh rate (30 on 60 Hz): let the display pace it (swap every 2nd refresh).
+      // The sleep-based limiter and vsync used to beat against each other: frames landed on 33 or 50 ms, averaging
+      // ~38 ms (26 fps) with a 30 fps cap, even when CPU and GPU each needed only ~10 ms
+      int every = 0;
+      if (g_settings.vsync && cap > 0 && hz > cap) { int k = (int)std::lround((double)hz / cap); if (k >= 2 && std::abs(hz - k * cap) <= 1) every = k; }   // 59/60/61 Hz all count
+      platform::setSwapInterval(g_settings.vsync ? std::max(1, every) : 0);
+      if (every > 0) cap = 0;
       if (cap > 0) {
         static double nextT = 0;
         double frame = 1.0 / cap, nowT = platform::time();

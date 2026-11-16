@@ -18,6 +18,7 @@ std::vector<Lake> LAKES;
 River RIVER;
 P2 BRIDGE_SITE{-32, 10};
 float BRIDGE_ROT = 0;
+std::vector<Place> PLACES;
 P2 FORD_SITE{-30, -135};
 
 namespace {
@@ -32,7 +33,12 @@ constexpr float REACH = 15.0f;
 constexpr float ROUTE_REACH = 34.0f;
 constexpr float RIVER_REACH = 46.0f;
 constexpr float CELL = 16.0f;
-constexpr int NC = (int)(GRID_SIZE / CELL) + 1;
+// lookup cells keep the first map's alignment (its grid began at -620): path and river queries only see what is
+// binned into their own cell, so shifting the cell edges would change answers near the reach limit - and the ground with them
+constexpr int CELL_PAD = (int)((-GRID_MIN - 620.0f) / CELL) + 1;   // whole cells added below the first map's -620
+constexpr float CELL0 = -620.0f - CELL * CELL_PAD;
+constexpr int NC = (int)((-CELL0) * 2 / CELL) + 2;
+static_assert(CELL0 <= GRID_MIN && CELL0 + NC * CELL >= -GRID_MIN, "lookup cells must cover the whole map (a 0.9.22 bug left x/z > 484 unindexed: trails there lost their carved path)");
 
 std::vector<float> g_grid;
 std::vector<uint32_t> g_colors;
@@ -125,8 +131,8 @@ struct SegIndex {
     for (size_t k = 0; k < segs.size(); k++) {
       const auto& s = segs[k];
       float R = s[4] * reachMul;
-      int x0 = (int)std::floor((std::min(s[0], s[2]) - R - GRID_MIN) / CELL), x1 = (int)std::floor((std::max(s[0], s[2]) + R - GRID_MIN) / CELL);
-      int z0 = (int)std::floor((std::min(s[1], s[3]) - R - GRID_MIN) / CELL), z1 = (int)std::floor((std::max(s[1], s[3]) + R - GRID_MIN) / CELL);
+      int x0 = (int)std::floor((std::min(s[0], s[2]) - R - CELL0) / CELL), x1 = (int)std::floor((std::max(s[0], s[2]) + R - CELL0) / CELL);
+      int z0 = (int)std::floor((std::min(s[1], s[3]) - R - CELL0) / CELL), z1 = (int)std::floor((std::max(s[1], s[3]) + R - CELL0) / CELL);
       for (int cz = std::max(0, z0); cz <= std::min(NC - 1, z1); cz++)
         for (int cx = std::max(0, x0); cx <= std::min(NC - 1, x1); cx++) tmp[(size_t)cz * NC + cx].push_back((uint32_t)k);
     }
@@ -136,7 +142,7 @@ struct SegIndex {
     for (size_t c = 0; c < tmp.size(); c++) std::copy(tmp[c].begin(), tmp[c].end(), items.begin() + cellStart[c]);
   }
   bool cell(float x, float z, int32_t& a, int32_t& b) const {
-    int cx = (int)std::floor((x - GRID_MIN) / CELL), cz = (int)std::floor((z - GRID_MIN) / CELL);
+    int cx = (int)std::floor((x - CELL0) / CELL), cz = (int)std::floor((z - CELL0) / CELL);
     if (cx < 0 || cz < 0 || cx >= NC || cz >= NC || cellStart.empty()) return false;
     a = cellStart[(size_t)cz * NC + cx];
     b = cellStart[(size_t)cz * NC + cx + 1];
@@ -224,6 +230,36 @@ void buildRiver() {
     tx /= l; tz /= l;
     BRIDGE_ROT = std::atan2(-tx, -tz);
   }
+  // --- the river beyond the first map: down through the vale, then east into a gorge under the far wall.
+  // Appended after everything above is final, so not one value of the old course changes.
+  {
+    std::vector<P2> ext = catmull({{{-70, 660}}, {{-74, 700}}, {{-62, 742}}, {{-36, 776}}, {{2, 800}}, {{52, 816}}, {{110, 826}}, {{170, 836}}, {{230, 850}}, {{290, 870}}}, 2.0f);
+    float s0 = R.cum.back(), w0 = R.wy.back();
+    size_t n0 = n;
+    for (size_t k = 1; k < ext.size(); k++) {
+      R.cum.push_back(R.cum.back() + hypot2(ext[k][0] - R.pts.back()[0], ext[k][1] - R.pts.back()[1]));
+      R.pts.push_back(ext[k]);
+    }
+    n = R.pts.size();
+    float extLen = R.cum.back() - s0, sFord2 = 0, fd2 = 1e9f;
+    for (size_t i = n0; i < n; i++) { float d = hypot2(R.pts[i][0] + 70, R.pts[i][1] - 690); if (d < fd2) { fd2 = d; sFord2 = R.cum[i]; } }
+    R.wy.resize(n); R.hw.resize(n); R.depth.resize(n); R.rapid.resize(n);
+    for (size_t i = n0; i < n; i++) {
+      float s = R.cum[i], e = (s - s0) / extLen;
+      float gorge = sstep(R.pts[i][0], -40.0f, 60.0f);                          // under the far wall the river narrows and runs white
+      R.wy[i] = w0 - 1.1f * e;
+      float hw = riverBaseHalfWidth(s) * (0.82f + 0.4f * valueNoise(s * 0.021f, 3.7f, 211)) * lerpf(1.3f, 0.85f, gorge);
+      hw = lerpf(R.hw[n0 - 1], hw, sstep(s - s0, 0.0f, 40.0f));
+      float depth = 0.72f + 0.3f * std::sin(s * 0.023f + 0.4f);
+      float kf = sstep(std::fabs(s - sFord2), 6.0f, 28.0f);                       // the ring road fords it here
+      hw = lerpf(9.0f, hw, kf);
+      depth = lerpf(0.3f, depth, kf);
+      R.rapid[i] = gorge * (0.35f + 0.45f * (0.5f + 0.5f * valueNoise(s * 0.03f, 9.1f, 213)));
+      R.hw[i] = hw;
+      R.depth[i] = lerpf(std::min(1.3f, depth), 0.42f, R.rapid[i] * 0.8f);
+    }
+    R.len = R.cum.back();
+  }
   std::vector<std::array<float, 5>> segs;
   for (size_t i = 1; i < n; i++) segs.push_back({R.pts[i - 1][0], R.pts[i - 1][1], R.pts[i][0], R.pts[i][1], R.hw[i] + RIVER_REACH});
   g_riverIndex.build(segs, 1.0f);
@@ -309,9 +345,11 @@ float valleyRadius(float x, float z) {
   return 300 + std::sin(t * 3 + 1) * 24 + std::sin(t * 5 + 2) * 14 + std::sin(t * 7 + 0.5f) * 8 + 128 * std::exp(-n * n) + 90 * std::exp(-s * s);
 }
 
+// the mountain wall that used to ring the first valley now rings the whole map: same shape, pushed out by WARP
+constexpr float WARP = MAP_HALF - CORE_HALF + 20;
 float mountainFactor(float x, float z) {
   float rv = valleyRadius(x, z);
-  return sstep(hypot2(x, z), rv - 14, rv + 95);
+  return sstep(hypot2(x, z) - WARP, rv - 14, rv + 95);
 }
 
 float forestDensity(float x, float z) {
@@ -330,7 +368,10 @@ float cliffMask(float x, float z) {
   float behind = px * dirx + pz * dirz - 4.0f;
   if (behind < -6) return 0;
   float side = std::fabs(px * -dirz + pz * dirx);
-  return sstep(behind, -4, 10) * (1 - sstep(side, 26, 78));
+  // the falls drop off a wooded bluff; behind it the bluff rounds off into the open country (it used to run into the
+  // mountain wall, which now stands at the map's edge)
+  float n = fbm(x * 0.02f + 1, z * 0.02f - 4, 2, 381) * 30;
+  return sstep(behind, -4, 10) * (1 - sstep(side + std::max(0.0f, behind - 60) * 0.35f, 26 + n * 0.4f, 90 + n)) * (1 - sstep(behind + n, 120, 260));
 }
 
 float mesaLift(float x, float z) {
@@ -425,7 +466,7 @@ void mountainLift(float x, float z, float r, float rv, float& u, float& m) {
   float crag = ridged(x * 0.04f, z * 0.04f, 2, 21);
   float fine = ridged(x * 0.11f + 7, z * 0.11f - 3, 2, 37);
   m = std::pow(u, 1.4f) * (62 + 92 * rn) + u * u * crag * 13 + u * fine * 2.0f;
-  m += sstep(r, rv + 80, MAP_HALF + 20) * 46;
+  m += sstep(r, rv + 80, CORE_HALF + 20) * 46;
   for (const Summit& s : SUMMITS) {
     float d = hypot2(x - s.x, z - s.z);
     if (d >= s.r * 1.3f) continue;
@@ -438,6 +479,94 @@ void mountainLift(float x, float z, float r, float rv, float& u, float& m) {
     float w = 1 - sstep(d, s.r * 0.45f, s.r * 1.3f);
     m = lerpf(m, std::max(ph, m * 0.62f), w);
   }
+}
+
+
+// ---------------------------------------------------------------------------------------------------------------
+// Outer lands. Beyond the first valley's mountain wall the ground drops into a ring of new country, each part with
+// its own lie of the land: a conifer vale along the river, benched crags, a snowbound birch upland, a low fern
+// forest and open flower meadows. Nothing here touches the ground inside r < 640, so old saves load unchanged.
+const float BIOME_ANG[B_COUNT] = {1.58f, 0.52f, -1.12f, 3.36f, 2.42f};
+const float BIOME_HALF[B_COUNT] = {0.52f, 0.56f, 1.10f, 0.62f, 0.34f};
+void rawBiome(float x, float z, float* w) {
+  float r = hypot2(x, z);
+  float a = std::atan2(z, x) + fbm(x * 0.0016f + 3, z * 0.0016f - 5, 2, 311) * 0.2f + (r - 600.0f) * 0.0004f;
+  float sum = 0;
+  for (int i = 0; i < B_COUNT; i++) {
+    float d = std::fabs(angDiff(a, BIOME_ANG[i]));
+    w[i] = 1 - sstep(d, BIOME_HALF[i] - 0.14f, BIOME_HALF[i] + 0.14f);
+    sum += w[i];
+  }
+  if (sum < 1e-4f) { w[B_VALE] = 1; sum = 1; }
+  for (int i = 0; i < B_COUNT; i++) w[i] /= sum;
+}
+float outerHeight(float x, float z, float r) {
+  float w[B_COUNT];
+  rawBiome(x, z, w);
+  float broad = fbm(x * 0.0038f + 3, z * 0.0038f - 8, 3, 321) * 0.5f + 0.5f;   // 250 m swells
+  float roll = fbm(x * 0.0062f - 2.3f, z * 0.0062f + 4.7f, 3, 324) * 0.5f + 0.5f;
+  float knob = ridged(x * 0.017f + 6, z * 0.017f - 1, 2, 325);
+  float mid = fbm(x * 0.011f - 5, z * 0.011f + 2, 3, 322);
+  float fine = fbm(x * 0.045f + 1, z * 0.045f + 6, 2, 323);
+  float h = 0;
+  if (w[B_VALE] > 0)                                                                                // wooded valley floor between low forested hills
+    h += w[B_VALE] * (3 + roll * roll * 30 + broad * 9 + knob * 6 + mid * 2.6f + fine * 0.9f);
+  if (w[B_CRAG] > 0) {                                                                              // rock benches, ledges and tors
+    float c = 20 + broad * 26 + roll * 16 + ridged(x * 0.009f + 2, z * 0.009f - 4, 3, 331) * 20;
+    const float st = 7.5f;
+    float q = c / st, fl = std::floor(q), fr = q - fl;
+    c = (fl + sstep(fr, 0.58f, 1.0f)) * st + mid * 1.8f + fine * 0.8f;
+    float tor = sstep(valueNoise(x * 0.028f + 3, z * 0.028f - 8, 332), 0.62f, 0.86f);
+    c += tor * (5 + 6 * knob);
+    h += w[B_CRAG] * c;
+  }
+  if (w[B_SNOW] > 0)                                                                                // high rolling plateau, wind-laid drifts
+    h += w[B_SNOW] * (44 + roll * roll * 24 + broad * 12 + knob * 4 + mid * 2.4f + fbm(x * 0.03f, z * 0.07f, 2, 335) * 1.1f);
+  if (w[B_FERN] > 0) {                                                                              // low wet basin: hummocks, sinks, old stream beds
+    float sink = sstep(valueNoise(x * 0.02f + 4, z * 0.02f - 9, 342), 0.3f, 0.8f);
+    float gully = ridged(x * 0.012f - 7, z * 0.012f + 3, 2, 343);
+    h += w[B_FERN] * std::max(0.7f, 3 + roll * roll * 14 + broad * 5 + mid * 2.4f + ridged(x * 0.03f, z * 0.03f, 2, 341) * 2.6f - sink * 2.6f - sstep(gully, 0.78f, 0.95f) * 3.0f);
+  }
+  if (w[B_MEADOW] > 0) {                                                                            // big smooth grass domes
+    float rl = fbm(x * 0.0055f + 8, z * 0.0055f - 3, 2, 351) * 0.5f + 0.5f;
+    h += w[B_MEADOW] * (10 + rl * rl * 40 + roll * 8 + mid * 1.4f + fine * 0.3f);
+  }
+  return h;
+}
+
+// passes cut through the old wall: a narrow floor along a line, blended into the slopes on either side
+struct Pass { std::vector<P2> pts; std::vector<float> h; float w, blend; std::vector<float> cum; };
+std::vector<Pass> PASSES = {
+  {{{{330, 29}}, {{400, 27}}, {{470, 31}}, {{540, 46}}, {{610, 40}}, {{690, 22}}, {{770, 26}}, {{850, 52}}}, {18, 27, 34, 38, 37, 34, 32, 31}, 13, 32, {}},          // east gap
+  {{{{-104, -400}}, {{-112, -440}}, {{-138, -490}}, {{-172, -560}}, {{-190, -640}}, {{-232, -720}}, {{-262, -800}}, {{-258, -860}}}, {14, 22, 34, 44, 50, 54, 55, 55}, 13, 32, {}},   // north-west col
+};
+float passBlend(float x, float z, float& target) {
+  float best = 0;
+  for (Pass& P : PASSES) {
+    float along;
+    float d = polyDist(P.pts, x, z, along);
+    if (d >= P.w + 120) continue;
+    float len = P.cum.back();
+    float open = sstep(along, 140.0f, 300.0f);                                   // tight between the trail peaks, opening out beyond them
+    d = std::max(0.0f, d + fbm(x * 0.022f + 4, z * 0.022f - 1, 2, 373) * (5 + 9 * open));   // ragged walls, not ruled lines
+    float blend = P.blend + 60 * open;
+    float k = (1 - sstep(d, P.w, P.w + blend)) * sstep(along, 0.0f, 70.0f) * (1 - sstep(along, len - 90.0f, len));
+    if (k <= best) continue;
+    size_t i = 1;
+    while (i + 1 < P.cum.size() && P.cum[i] < along) i++;
+    float t = clampf((along - P.cum[i - 1]) / std::max(1e-3f, P.cum[i] - P.cum[i - 1]), 0, 1);
+    target = lerpf(P.h[i - 1], P.h[i], t) + fbm(x * 0.03f + 2, z * 0.03f - 6, 2, 371) * 1.4f + sstep(d, P.w * 0.4f, P.w + blend) * (5.0f + 14 * open);
+    best = k;
+  }
+  return best;
+}
+// the river's own gorge through the south wall, widened enough to walk beside the water
+float southGate(float x, float z, float r, float& target) {
+  if (z < 430 || r > 820) return 0;
+  RiverHit q = riverQuery(x, z);
+  if (q.d > 95) return 0;
+  target = q.wy + 1.3f + std::max(0.0f, q.d - q.hw) * 0.09f + fbm(x * 0.04f - 3, z * 0.04f + 5, 2, 372) * 0.8f;
+  return (1 - sstep(q.d, 40.0f, 95.0f)) * sstep(z, 430.0f, 500.0f) * (1 - sstep(r, 740.0f, 820.0f));
 }
 
 
@@ -482,7 +611,7 @@ float naturalHeight(float x, float z) {
   float r = hypot2(x, z);
   float rv = valleyRadius(x, z);
   float u, m;
-  mountainLift(x, z, r, rv, u, m);
+  mountainLift(x, z, r - WARP, rv, u, m);
   float h = (fbm(x * 0.011f, z * 0.011f, 3, 1) * 0.5f + 0.5f) * 5 + fbm(x * 0.05f + 17, z * 0.05f - 9, 2, 3) * 1.6f + valueNoise(x * 0.12f, z * 0.12f, 41) * 0.45f;
   float hills = sstep(r, SETTLEMENT_RADIUS + 14, SETTLEMENT_RADIUS + 80) * (1 - u);
   if (hills > 0) {
@@ -520,6 +649,10 @@ float naturalHeight(float x, float z) {
     float notch = 1 - sstep(side, 3, 6);
     h += cm * CLIFF_HEIGHT - notch * cm * 1.6f;
   }
+  {
+    float ow = sstep(r - rv, 10.0f, 100.0f);
+    if (ow > 0) h = lerpf(h, outerHeight(x, z, r) * (1 - u) + m, ow);
+  }
   h = lerpf(h, 0.1f, 1 - sstep(r, SETTLEMENT_RADIUS, SETTLEMENT_RADIUS + 22));
   h = applyWater(x, z, h);
   return h;
@@ -527,7 +660,7 @@ float naturalHeight(float x, float z) {
 
 P2 trailhead(const Summit& s) {
   float a = std::atan2(-s.z, -s.x);
-  float d = hypot2(s.x, s.z) - (valleyRadius(s.x, s.z) - 6);
+  float d = hypot2(s.x, s.z) - (valleyRadius(s.x, s.z) - 6 + WARP);
   return {s.x + std::cos(a) * d, s.z + std::sin(a) * d};
 }
 
@@ -756,10 +889,17 @@ float baseHeight(float x, float z) {
   if (q.rd < 4) h -= (1 - sstep(q.rd, 1.2f, 3.2f)) * 0.1f;
   RiverHit rq = riverQuery(x, z);
   float rqd = rq.d < 1e8f ? std::max(0.0f, rq.d + clampf(bankNoise(x, z), -0.45f * rq.hw, 0.3f * rq.hw)) : rq.d;
-  if (rqd < rq.hw + 3) {
+  // where a road of the outer lands crosses the river it fords it: a shallow bed and long gentle banks you can walk
+  // up (the first map's roads cross on bridges and keep their banks)
+  bool ford = q.rid >= CORE_ROADS && q.rd < 9;
+  if (rqd < rq.hw + (ford ? 10 : 3)) {
     float u = clampf(rqd / std::max(0.5f, rq.hw), 0, 1);
     float bed = rq.wy - rq.depth * (1 - u * u) - 0.06f;
-    h = lerpf(h, std::min(h, bed), 1 - sstep(rqd, rq.hw - 0.5f, rq.hw + 2.5f));
+    if (ford) {   // the road has already ramped the ground down to the water: only keep a shallow bed under it
+      float k = 1 - sstep(q.rd, 4.0f, 9.0f);
+      bed = lerpf(bed, rq.wy - 0.35f, k);
+      h = lerpf(h, std::min(h, bed), (1 - sstep(rqd, rq.hw - 0.5f, rq.hw + 2.5f)) * (1 - k * 0.7f));
+    } else h = lerpf(h, std::min(h, bed), 1 - sstep(rqd, rq.hw - 0.5f, rq.hw + 2.5f));
   }
   for (const Lake& L : LAKES) {
     float d = lakeDist(L, x, z);
@@ -790,10 +930,21 @@ void parallelFor(int n, const std::function<void(int, int)>& fn) {
 
 }  // namespace
 
+float outerWeight(float x, float z) { return sstep(hypot2(x, z) - valleyRadius(x, z), 10.0f, 100.0f); }
+void biomeWeights(float x, float z, float* w) {
+  float ow = outerWeight(x, z);
+  if (ow <= 0) { for (int i = 0; i < B_COUNT; i++) w[i] = 0; return; }
+  rawBiome(x, z, w);
+  for (int i = 0; i < B_COUNT; i++) w[i] *= ow;
+}
+
 float naturalHeightAt(float x, float z) { return naturalHeight(x, z); }
 float terrainHeightRaw(float x, float z) { return baseHeight(x, z); }
 
-PathHit pathQuery(float x, float z) {
+static PathHit pathQueryN(float x, float z, int maxRoad);
+PathHit pathQuery(float x, float z) { return pathQueryN(x, z, 1 << 30); }
+float corePathDistance(float x, float z) { return pathQueryN(x, z, CORE_ROADS).rd; }
+static PathHit pathQueryN(float x, float z, int maxRoad) {
   PathHit Q;
   int32_t a, b;
   if (!g_pathIndex.cell(x, z, a, b)) return Q;
@@ -820,9 +971,10 @@ PathHit pathQuery(float x, float z) {
         Q.cap = std::min(Q.cap, th + 1.2f + std::max(0.0f, d - 7.0f) * 1.05f);  // lower envelope: no ridge left between switchbacks
         if (nc < 48) { cd[nc] = d; ch[nc] = th; cs[nc] = sa; ci[nc] = S.id; nc++; }
       }
-    } else if (d < Q.rd) {
+    } else if (d < Q.rd && (int)S.id < maxRoad) {
       const Road& r = ROADS[S.id];
       Q.rd = d;
+      Q.rid = (int)S.id;
       Q.rh = r.hs[S.i - 1] + (r.hs[S.i] - r.hs[S.i - 1]) * t;
     }
   }
@@ -849,26 +1001,23 @@ float routeHeightAt(const Route& r, float s) {
 
 void routePoint(const Route& r, float s, float& x, float& z, float& dx, float& dz) { routePointRaw(r.pts, r.cum, s, x, z, dx, dz); }
 
+// a point at angle a, `past` metres beyond the old valley's edge
+P2 outerPoint(float a, float past) {
+  float c = std::cos(a), sn = std::sin(a);
+  float r = valleyRadius(c * 260, sn * 260) + past;
+  return {c * r, sn * r};
+}
+
 void generate() {
   NORTH = std::atan2(-440.0f, -40.0f);
+  for (Pass& P : PASSES) P.cum = cumulative(P.pts);
   buildRiver();
   SUMMITS.clear();
   for (auto& P : PEAKS) {
     float cx = std::cos(P.a), cz = std::sin(P.a);
-    float rr = std::min(MAP_HALF - 70, valleyRadius(cx * 260, cz * 260) + 110);
+    float rr = std::min(MAP_HALF - 70, valleyRadius(cx * 260, cz * 260) + 110 + WARP);
     SUMMITS.push_back({P.name, cx * rr, cz * rr, P.h, P.r});
   }
-  std::vector<Lake> lakeDefs = {{"Sarovar Lake", 178, 132, 30, 0, 2.6f}, {"Tarn of Chandra", -186, -112, 23, 0, 2.2f}};
-  LAKES.clear();
-  for (Lake& L : lakeDefs) {
-    float lo = 1e9f;
-    for (int k = 0; k < 24; k++) {
-      float a = k * TAU / 24;
-      lo = std::min(lo, naturalHeight(L.x + std::cos(a) * (L.r + 6), L.z + std::sin(a) * (L.r + 6)));
-    }
-    L.level = std::max(0.2f, lo - 0.6f);
-  }
-  LAKES = lakeDefs;
   std::vector<P2> TH;
   for (auto& s : SUMMITS) TH.push_back(trailhead(s));
   P2 FORK{90, 4}, WFORK{-132, 24};
@@ -884,8 +1033,123 @@ void generate() {
     {{WFORK, {{-166, 0}}, {{-206, -36}}, {{-250, -70}}, TH[3]}, false},
     {{{{3, 15}}, {{12, 60}}, {{8, 120}}, {{6, 190}}, {{12, 260}}, {{6, 330}}, {{22, 400}}, {{14, 470}}}, false},
   };
+  // roads out of the valley and around the outer lands (appended after the first map's nine)
+  {
+    // gates on the ring road, which runs ~130 m beyond the old valley's edge all the way round
+    const float aS = 1.42f, aE = 0.06f, aN = -1.88f;   // south gate east of the river, not on its bank
+    P2 gS = outerPoint(aS, 130), gE = outerPoint(aE, 130), gN = outerPoint(aN, 130);
+    // south: down the river to the ring
+    defs.push_back({{{{14, 470}}, {{(gS[0] + 14) * 0.5f + 6, (gS[1] + 470) * 0.5f}}, gS}, false});
+    // east: from the lake road out to the ring
+    defs.push_back({{{{200, -80}}, {{240, -52}}, {{278, -14}}, {{312, 18}}, {{335, 29}}, {{400, 27}}, {{(gE[0] + 400) * 0.5f, (gE[1] + 27) * 0.5f}}, gE}, false});
+    // north-west: up the west bank past the falls
+    defs.push_back({{{{-128, -176}}, {{-112, -225}}, {{-108, -270}}, {{-116, -310}}, {{-110, -350}}, {{-104, -400}}, {{-112, -440}}, {{(gN[0] - 112) * 0.5f, (gN[1] - 440) * 0.5f}}, gN}, false});
+    auto leg = [&](float a0, float a1, P2 from, P2 to) {
+      int n = std::max(3, (int)std::lround(std::fabs(a1 - a0) / 0.13f));
+      std::vector<P2> c;
+      for (int i = 0; i <= n; i++) {
+        float a = lerpf(a0, a1, (float)i / n);
+        c.push_back(outerPoint(a, 130 + 18 * std::sin(a * 5 + 0.7f) + 10 * std::sin(a * 11 + 2.1f)));
+      }
+      c.front() = from; c.back() = to;
+      defs.push_back({c, false});
+    };
+    leg(aS, aE, gS, gE);
+    leg(aE, aN, gE, gN);
+    leg(aN, aS - TAU, gN, gS);
+  }
+  std::vector<Lake> lakeDefs = {{"Sarovar Lake", 178, 132, 30, 0, 2.6f}, {"Tarn of Chandra", -186, -112, 23, 0, 2.2f},
+                                {"Andhera Tal", 0, 0, 30, 0, 2.4f}, {"Him Kund", 0, 0, 24, 0, 2.0f}, {"Neel Tal", 0, 0, 22, 0, 2.0f}};
+  {   // the outer lakes sit out in the new country, a set distance past the old valley's edge
+    const float LA[3] = {3.01f, -1.30f, 2.21f};
+    for (int i = 0; i < 3; i++) { P2 g = outerPoint(LA[i], 125); lakeDefs[CORE_LAKES + i].x = g[0]; lakeDefs[CORE_LAKES + i].z = g[1]; }
+  }   // outer lands (appended: lake indices are saved)
+  {
+    // keep every lake clear of the roads: measured against each road's control line, a lake that the road would run
+    // through (or along the shore of) is slid away from it until the water stays >= 14 m off the road
+    auto segD = [](P2 a, P2 b, float x, float z, float& nx, float& nz) {
+      float vx = b[0] - a[0], vz = b[1] - a[1], L2 = vx * vx + vz * vz;
+      float t = L2 > 1e-6f ? clampf(((x - a[0]) * vx + (z - a[1]) * vz) / L2, 0, 1) : 0;
+      nx = a[0] + vx * t; nz = a[1] + vz * t;
+      return hypot2(x - nx, z - nz);
+    };
+    for (Lake& L : lakeDefs) {
+      for (int it = 0; it < 40; it++) {
+        float best = 1e9f, bx = 0, bz = 0;
+        for (auto& d : defs)
+          for (size_t k = 0; k + 1 < d.c.size(); k++) {
+            float nx, nz, dd = segD(d.c[k], d.c[k + 1], L.x, L.z, nx, nz);
+            if (dd < best) { best = dd; bx = nx; bz = nz; }
+          }
+        float need = L.r + 14;
+        if (best >= need) break;
+        float dx = L.x - bx, dz = L.z - bz, l = std::max(hypot2(dx, dz), 0.01f);
+        if (l < 0.05f) { dx = 1; dz = 0; l = 1; }
+        float step = std::min(need - best + 1.0f, 6.0f);
+        L.x += dx / l * step; L.z += dz / l * step;
+      }
+      if (std::getenv("HW_LAKECHECK")) std::printf("lake %s at %.1f %.1f r %.0f\n", L.name.c_str(), L.x, L.z, L.r);
+    }
+  }
+  LAKES.clear();
+  for (Lake& L : lakeDefs) {
+    float lo = 1e9f;
+    for (int k = 0; k < 24; k++) {
+      float a = k * TAU / 24;
+      lo = std::min(lo, naturalHeight(L.x + std::cos(a) * (L.r + 6), L.z + std::sin(a) * (L.r + 6)));
+    }
+    L.level = std::max(0.2f, lo - 0.6f);
+  }
+  LAKES = lakeDefs;
   ROADS.clear();
-  for (auto& d : defs) ROADS.push_back(makeRoad(d.c, d.anchor));
+  for (auto& d : defs) {
+    Road nr = makeRoad(d.c, d.anchor);
+    if ((int)ROADS.size() >= CORE_ROADS) {
+      // a later road meets or crosses earlier ones: take their height where they touch and ease into it over 25 m,
+      // so there is never a step at a junction or crossing (the first map's roads keep their heights)
+      size_t n = nr.pts.size();
+      std::vector<float> want(n, 1e9f);
+      for (size_t i = 0; i < n; i++)
+        for (const Road& o : ROADS) {
+          if (nr.pts[i][0] < o.minX - 6 || nr.pts[i][0] > o.maxX + 6 || nr.pts[i][1] < o.minZ - 6 || nr.pts[i][1] > o.maxZ + 6) continue;
+          for (size_t j = 0; j < o.pts.size(); j++)
+            if (hypot2(o.pts[j][0] - nr.pts[i][0], o.pts[j][1] - nr.pts[i][1]) < 5) { want[i] = o.hs[j]; break; }
+        }
+      std::vector<float> hs = nr.hs;
+      for (size_t i = 0; i < n; i++) {
+        float wsum = 0, hsum = 0;
+        for (size_t j = 0; j < n; j++) {
+          if (want[j] > 1e8f) continue;
+          float d = std::fabs(nr.cum[i] - nr.cum[j]);
+          if (d > 25) continue;
+          float w = 1 - d / 25;
+          if (w > wsum) { wsum = w; hsum = want[j]; }
+        }
+        if (wsum > 0) hs[i] = lerpf(hs[i], hsum, sstep(wsum, 0.0f, 1.0f));
+      }
+      // fords: dip the road to the water where it crosses the river, with banks at the road's own 0.3 grade either side
+      for (size_t i = 0; i < n; i++) {
+        RiverHit rq = riverQuery(nr.pts[i][0], nr.pts[i][1]);
+        if (rq.d < rq.hw + 1) hs[i] = std::min(hs[i], rq.wy - 0.3f);
+      }
+      for (size_t i = 1; i < n; i++) hs[i] = std::min(hs[i], hs[i - 1] + 0.3f * (nr.cum[i] - nr.cum[i - 1]));
+      for (size_t i = n - 1; i-- > 1;) hs[i] = std::min(hs[i], hs[i + 1] + 0.3f * (nr.cum[i + 1] - nr.cum[i]));
+      nr.hs = hs;
+    }
+    ROADS.push_back(nr);
+  }
+  if (std::getenv("HW_LAKECHECK"))
+    for (auto& L : LAKES) {
+      float m = 1e9f;
+      for (auto& r : ROADS) for (auto& q : r.pts) m = std::min(m, hypot2(q[0] - L.x, q[1] - L.z) - L.r);
+      std::printf("lake %s shore-to-road %.1f m\n", L.name.c_str(), m);
+    }
+  PLACES.clear();
+  {
+    struct PL { const char* n; float a, past; };
+    const PL pl[] = {{"Deodar Vale", 1.58f, 120}, {"Shila Gorge", 1.25f, 250}, {"Pathar Crags", 0.52f, 140}, {"Him Bugyal", -1.12f, 140}, {"Andhera Van", 3.36f, 140}, {"Neel Bugyal", 2.42f, 140}};
+    for (auto& p : pl) { P2 g = outerPoint(p.a, p.past); PLACES.push_back({p.n, g[0], g[1]}); }
+  }
 
   // spiral ascents: successive turns are ~45 m apart, so ledges never stack into walls
   // Gauri: long traverses across the face with three broad hairpins (no spiral)
@@ -976,8 +1240,8 @@ void generate() {
   g_stepCells.assign((size_t)NC * NC, {});
   for (size_t i = 0; i < STEPS.size(); i++) {
     const Step& S = STEPS[i];
-    for (int cz = (int)std::floor((S.z - 9 - GRID_MIN) / CELL); cz <= (int)std::floor((S.z + 9 - GRID_MIN) / CELL); cz++)
-      for (int cx = (int)std::floor((S.x - 9 - GRID_MIN) / CELL); cx <= (int)std::floor((S.x + 9 - GRID_MIN) / CELL); cx++)
+    for (int cz = (int)std::floor((S.z - 9 - CELL0) / CELL); cz <= (int)std::floor((S.z + 9 - CELL0) / CELL); cz++)
+      for (int cx = (int)std::floor((S.x - 9 - CELL0) / CELL); cx <= (int)std::floor((S.x + 9 - CELL0) / CELL); cx++)
         if (cx >= 0 && cz >= 0 && cx < NC && cz < NC) g_stepCells[(size_t)cz * NC + cx].push_back((int)i);
   }
 
@@ -1158,7 +1422,7 @@ float localSlope(float x, float z) {
 }
 
 float stepHeightAt(float x, float z, float h) {
-  int cx = (int)std::floor((x - GRID_MIN) / CELL), cz = (int)std::floor((z - GRID_MIN) / CELL);
+  int cx = (int)std::floor((x - CELL0) / CELL), cz = (int)std::floor((z - CELL0) / CELL);
   if (cx < 0 || cz < 0 || cx >= NC || cz >= NC || g_stepCells.empty()) return h;
   for (int i : g_stepCells[(size_t)cz * NC + cx]) {
     const Step& S = STEPS[i];
@@ -1190,13 +1454,29 @@ Color terrainColor(float x, float z, float h, float normalY) {
   float fine = valueNoise(x * 0.35f, z * 0.35f, 13);
   float r = hypot2(x, z);
   float rv = valleyRadius(x, z);
-  float u = sstep(r, rv - 14, rv + 95);
+  float u = sstep(r - WARP, rv - 14, rv + 95);
   Color out = grass;
   out = out.lerp(grassLight, sstep(broad, 0.0f, 0.6f) * 0.7f);
   out = out.lerp(grassDark, sstep(-broad, 0.1f, 0.7f) * 0.7f);
   out = out.lerp(dry, sstep(fbm(x * 0.03f + 5, z * 0.03f, 2, 17), 0.2f, 0.6f) * 0.65f);
   out = out.lerp(grassDark, forestDensity(x, z) * 0.35f);
   out = out.lerp(forest, u * (1 - sstep(h, 60, 85)) * sstep(forestDensity(x * 1.3f, z * 1.3f), 0.2f, 0.6f) * 0.75f);
+  // outer lands: each country has its own ground
+  float bw[B_COUNT];
+  biomeWeights(x, z, bw);
+  float pn = 0, pb = 0;
+  if (bw[B_VALE] + bw[B_CRAG] + bw[B_SNOW] + bw[B_FERN] + bw[B_MEADOW] > 0) {
+    static const Color litter = Color::hex("6b5a38"), moss = Color::hex("4f7a2a"), needle = Color::hex("3d5226"), fernG = Color::hex("2c5a22"), bog = Color::hex("3a3a22");
+    static const Color meadow = Color::hex("7fb044"), lupin = Color::hex("6f63b8"), heath = Color::hex("8a8450");
+    pn = fbm(x * 0.045f + 3, z * 0.045f - 2, 2, 401);    // 20 m patches
+    pb = fbm(x * 0.012f - 4, z * 0.012f + 9, 2, 402);    // 80 m patches
+    out = out.lerp(needle.lerp(moss, sstep(pn, -0.1f, 0.5f) * 0.7f).lerp(litter, sstep(-pn, 0.1f, 0.6f) * 0.6f), bw[B_VALE] * 0.75f);        // needle litter and moss
+    out = out.lerp(heath.lerp(dry, sstep(pn, 0.0f, 0.6f) * 0.5f), bw[B_CRAG] * 0.7f);                                                         // thin dry turf over rock
+    out = out.lerp(heath.lerp(dry, 0.4f), bw[B_SNOW] * 0.8f);                                                                                 // winter-killed grass under the snow
+    out = out.lerp(fernG.lerp(bog, sstep(-pb, 0.2f, 0.7f) * 0.6f).lerp(moss, sstep(pn, 0.2f, 0.7f) * 0.4f), bw[B_FERN] * 0.8f);              // deep shade, wet hollows
+    float fl = sstep(fbm(x * 0.02f + 7, z * 0.02f - 3, 2, 403), -0.05f, 0.4f);
+    out = out.lerp(meadow.lerp(grassLight, sstep(pn, 0.0f, 0.6f) * 0.4f).lerp(lupin, fl * 0.4f), bw[B_MEADOW] * 0.85f);                       // lush turf hazed with lupins
+  }
   float step;
   float tz = terraceZone(x, z, step) * (1 - u);
   if (tz > 0.05f) {
@@ -1246,6 +1526,7 @@ Color terrainColor(float x, float z, float h, float normalY) {
   float cliff = 1 - sstep(normalY, 0.42f, 0.66f);
   out = out.lerp(rk, std::min(1.0f, (slope * 0.6f + sstep(h, 130, 155) * 0.6f) * sstep(h, 85, 135) + cliff * (0.55f + 0.35f * sstep(fine, -0.3f, 0.5f))));
   out = out.lerp(scree, (1 - slope) * sstep(h, 85, 115) * sstep(fine, -0.2f, 0.6f) * 0.5f);
+  if (bw[B_CRAG] > 0) out = out.lerp(rk, bw[B_CRAG] * std::min(1.0f, sstep(pn + pb * 0.6f, 0.05f, 0.5f) * 0.75f + slope * 0.6f));   // bare slabs between the turf
   float tdw = q.td + fbm(x * 0.45f, z * 0.45f, 3, 93) * 1.1f + fbm(x * 1.7f, z * 1.7f, 2, 94) * 0.35f;  // wavy, broken edge
   float tq = 1 - sstep(tdw, 2.4f, 3.6f);
   if (tq > 0) {
@@ -1254,6 +1535,10 @@ Color terrainColor(float x, float z, float h, float normalY) {
   }
   float snowLine = 152 + fbm(x * 0.02f, z * 0.02f, 2, 61) * 18;
   out = out.lerp(snow, sstep(h, snowLine, snowLine + 22) * (0.08f + 0.92f * sstep(normalY, 0.58f, 0.8f)) * (1 - tq * 0.5f));
+  if (bw[B_SNOW] > 0) {   // the snowfields keep their snow all year: drifts on the flats, grass and rock showing on bumps and slopes
+    float cover = sstep(fbm(x * 0.03f + 1, z * 0.03f + 8, 2, 404) + fine * 0.15f, -0.5f, -0.05f);
+    out = out.lerp(snow, bw[B_SNOW] * cover * (0.12f + 0.88f * sstep(normalY, 0.62f, 0.84f)) * (1 - pm * 0.6f) * (1 - tq * 0.5f));
+  }
   out = out.offsetHSL(0, 0, fine * 0.03f);
   return out;
 }

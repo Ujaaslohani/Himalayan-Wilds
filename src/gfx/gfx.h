@@ -17,7 +17,7 @@ struct InstLite { float x, y, z, s, yaw; };
 struct InstFull { float r0[4], r1[4], r2[4]; uint32_t tint; };
 
 struct Mesh {
-  GLuint vao = 0, vbo = 0, ibo = 0;
+  GLuint vao = 0, vbo = 0, ibo = 0, vbo2 = 0;
   GLsizei count = 0;
   GLenum indexType = GL_UNSIGNED_SHORT;
   VFmt fmt = VFmt::P3C4;
@@ -35,6 +35,7 @@ struct MeshData {
   VFmt fmt = VFmt::P3C4;
   std::vector<uint8_t> verts;
   std::vector<uint32_t> idx;
+  std::vector<float> card;   // optional, 4 floats per vertex (leaf cards: card centre xyz + importance rank 0..1) -> a_extra
   int vertexCount = 0;
   Vec3 bmin{1e9f, 1e9f, 1e9f}, bmax{-1e9f, -1e9f, -1e9f};
 };

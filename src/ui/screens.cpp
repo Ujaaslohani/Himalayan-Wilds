@@ -1,3 +1,5 @@
+#include "../game/skills.h"
+#include "../game/wildlife.h"
 #include "../game/buildings.h"
 #include "../game/tutorial.h"
 #include "../game/relics.h"
@@ -31,8 +33,8 @@ namespace {
 
 uint32_t C(const char* h, float a = 1) { return rgba(h, a); }
 
-const char* ICON_HEX[MI_COUNT] = {"#c2773a", "#7d9bc1", "#9bc53d", "#b26ad6", "#e05d44", "#f2b31d", "#3fb6a8", "#ffd23f", "#e8a15c", "#d6c3a1", "#f2d16b", "#ef4444", "#e2e8f0", "#f87171"};
-float ICON_RANGE[MI_COUNT] = {55, 55, 50, 50, 70, 140, 110, 600, 0, 0, 0, 0, 0, 120};
+const char* ICON_HEX[MI_COUNT] = {"#c2773a", "#7d9bc1", "#9bc53d", "#b26ad6", "#e05d44", "#f2b31d", "#3fb6a8", "#ffd23f", "#e8a15c", "#d6c3a1", "#f2d16b", "#ef4444", "#e2e8f0", "#f87171", "#38bdf8", "#fb923c"};
+float ICON_RANGE[MI_COUNT] = {55, 55, 50, 50, 70, 140, 110, 600, 0, 0, 0, 0, 0, 0, 3000, 0};  // waypoint: any range; hunter tips: map and compass only  // bandits: minimap only
 
 struct Popup { std::string text; uint32_t color; double t0; };
 std::vector<Popup> g_popups;
@@ -115,6 +117,16 @@ void glyph(MarkerIcon icon, float cx, float cy, float r, float alpha = 1) {
     case MI_FOE:  // one bandit: a hooded head over a downward chevron
       circle(cx, cy - 2.2f * u, 2.6f * u, col);
       tri({cx - 4.6f * u, cy + 0.9f * u}, {cx + 4.6f * u, cy + 0.9f * u}, {cx, cy + 5.6f * u}, col);
+      break;
+    case MI_WAYPOINT:  // a flag on a pole
+      line(cx - 2.6f * u, cy + 5 * u, cx - 2.6f * u, cy - 5 * u, 1.3f * u, col);
+      tri({cx - 2.0f * u, cy - 5 * u}, {cx + 4.8f * u, cy - 2.6f * u}, {cx - 2.0f * u, cy - 0.2f * u}, col);
+      break;
+    case MI_TRACK:  // a cloven hoofprint: the herd Kalyan told you about
+      for (int k = -1; k <= 1; k += 2) {
+        ellipse(cx + k * 1.7f * u, cy - 0.6f * u, 1.45f * u, 3.4f * u, col);
+        circle(cx + k * 1.9f * u, cy + 4.1f * u, 0.9f * u, col);
+      }
       break;
     case MI_QUEST:
       poly({{cx, cy - 5.5f * u}, {cx + 4 * u, cy}, {cx, cy + 5.5f * u}, {cx - 4 * u, cy}}, col);
@@ -215,18 +227,20 @@ bool button(const Rect& r, const std::string& label, int style, float size = 13,
   bool hot = !g_block && style != ST_OFF && hovered(r);
   uint32_t bg, fg, bd = 0;
   switch (style) {
-    case ST_AMBER: bg = C(hot ? "#f59e0b" : "#d97706"); fg = C("#0c0a09"); break;
+    case ST_AMBER: bg = C(hot ? "#ecb955" : "#d9a441"); fg = C("#17120a"); break;
     case ST_EMERALD: bg = C(hot ? "#10b981" : "#059669"); fg = C("#ffffff"); break;
     case ST_RED: bg = C(hot ? "#991b1b" : "#7f1d1d", 0.75f); fg = C("#fecaca"); bd = C("#b91c1c"); break;
-    case ST_OFF: bg = C("#292524"); fg = C("#78716c"); break;
+    case ST_OFF: bg = C("#1d1a18"); fg = C("#6b655c"); bd = C("#2a2622"); break;
     case ST_MENU: bg = C(hot ? "#d97706" : "#b45309", 0.92f); fg = C("#f5f5f4"); bd = C("#f59e0b", 0.7f); break;
-    case ST_ACTIVE: bg = C("#d97706"); fg = C("#0c0a09"); bd = C("#fbbf24"); break;
+    case ST_ACTIVE: bg = C("#d9a441"); fg = C("#17120a"); break;
     case ST_GHOST: bg = C("#ffffff", hot ? 0.12f : 0); fg = C("#f5f5f4"); break;
     case ST_GHOSTON: bg = C("#ffffff", hot ? 0.12f : 0); fg = C("#fbbf24"); bd = C("#fbbf24", 0.8f); break;
-    default: bg = C(hot ? "#44403c" : "#292524"); fg = C("#e7e5e4"); bd = C("#44403c"); break;
+    default: bg = C(hot ? "#3a332b" : "#27231f"); fg = C("#ebe5d8"); bd = C(hot ? "#6b5d49" : "#463e34"); break;
   }
-  if ((bg >> 24) & 255) rect(r, bg, std::min(10.0f, r.h * 0.3f));
-  if (bd) border(r, bd, 1, std::min(10.0f, r.h * 0.3f));
+  const float rad = std::min(5.0f, r.h * 0.25f);
+  if ((bg >> 24) & 255) rect(r, bg, rad);
+  if (style == ST_AMBER || style == ST_ACTIVE) rect({r.x + 1, r.y + 1, r.w - 2, r.h * 0.45f}, C("#ffffff", 0.10f), rad);   // top sheen
+  if (bd) border(r, bd, 1, rad);
   float kw = 0;
   if (key) kw = textWidth(key, size * 0.62f, SANS) + 8;
   float tw = textWidth(label, size, f);
@@ -247,9 +261,27 @@ bool button(const Rect& r, const std::string& label, int style, float size = 13,
   return false;
 }
 
-void card(const Rect& r, const char* bd = "#292524", const char* bg = "#0c0a09", float a = 0.8f) {
-  rect(r, C(bg, a), 12);
-  border(r, C(bd), 1, 12);
+void card(const Rect& r, const char* bd = "#2f2a25", const char* bg = "#1a1714", float a = 0.88f) {
+  rect(r, C(bg, a), 6);
+  border(r, C(bd), 1, 6);
+}
+// small-caps section label with a rule running to the right edge; optional right-aligned note
+float sectionLabel(const std::string& t, float x, float y, float w, const std::string& note = "") {
+  float tw = text(t, x, y + 8, 10.5f, C("#b9a37a"), SANS);
+  float nw = note.empty() ? 0 : textWidth(note, 10.5f, SANS) + 10;
+  line(x + tw + 10, y + 8, x + w - nw, y + 8, 1, C("#332d26"));
+  if (!note.empty()) text(note, x + w, y + 8, 10.5f, C("#8f877b"), SANS, 2);
+  return 26;
+}
+void progressBar(const Rect& r, float t, const char* hex = "#d9a441") {
+  rect(r, C("#26221e"), r.h / 2);
+  if (t > 0.001f) rect({r.x, r.y, std::max(r.h, r.w * clampf(t, 0, 1)), r.h}, C(hex), r.h / 2);
+}
+void checkBox(float x, float y, bool on) {
+  Rect b{x, y - 6, 12, 12};
+  rect(b, on ? C("#d9a441") : C("#1f1c19"), 2);
+  if (!on) border(b, C("#4a4238"), 1, 2);
+  else { line(x + 2.6f, y + 0.2f, x + 5.0f, y + 2.8f, 1.6f, C("#17120a")); line(x + 5.0f, y + 2.8f, x + 9.6f, y - 3.0f, 1.6f, C("#17120a")); }
 }
 
 std::string costText(const Cost& c, const char* sep = ", ") {
@@ -300,7 +332,7 @@ const Quest* activeQuest() {
 // ---------------------------------------------------------------- map texture
 void buildMap() {
   if (g_mapTex.id) return;
-  const int N = 256;
+  const int N = 512;
   std::vector<uint8_t> px((size_t)N * N * 4 * 3);
   float step = MAP_HALF * 2 / N;
   for (int j = 0; j < N; j++)
@@ -420,6 +452,14 @@ void drawRadar(float X, float Y, float size) {
     if (d > RANGE) { float k = RANGE * 0.9f / d; c.x *= k; c.y *= k; }
     glyph(MI_QUEST, cx + c.x, cy + c.y, 6);
   }
+  auto edgeGlyph = [&](float wx, float wz, MarkerIcon ic) {   // pinned to the rim when out of range
+    float d = hypot2(wx - p.x, wz - p.z);
+    Vec2 c = tx(wx, wz);
+    if (d > RANGE) { float k = RANGE * 0.9f / d; c.x *= k; c.y *= k; }
+    glyph(ic, cx + c.x, cy + c.y, 6);
+  };
+  if (E.waypoint.valid) edgeGlyph(E.waypoint.x, E.waypoint.z, MI_WAYPOINT);
+  if (E.hunterTip.valid) edgeGlyph(E.hunterTip.x, E.hunterTip.z, MI_TRACK);
   uint32_t pc = C("#fef3c7");
   tri({cx, cy - 5.5f}, {cx + 4, cy + 4.5f}, {cx, cy + 2}, pc);
   tri({cx, cy - 5.5f}, {cx, cy + 2}, {cx - 4, cy + 4.5f}, pc);
@@ -456,6 +496,8 @@ void drawCompass(float W) {
     if (dist < 1000) text(std::to_string((int)std::lround(dist)) + "m", sx, y + 27, 10, C("#fde68a"), SANS, 1, 1);
   };
   if (E.questTarget.valid) show(relativeBearing(E.questTarget.x, E.questTarget.z), MI_QUEST, hypot2(E.questTarget.x - p.x, E.questTarget.z - p.z));
+  if (E.waypoint.valid) show(relativeBearing(E.waypoint.x, E.waypoint.z), MI_WAYPOINT, hypot2(E.waypoint.x - p.x, E.waypoint.z - p.z));
+  if (E.hunterTip.valid) show(relativeBearing(E.hunterTip.x, E.hunterTip.z), MI_TRACK, hypot2(E.hunterTip.x - p.x, E.hunterTip.z - p.z));
   MarkerIcon ri[4] = {MI_WOOD, MI_STONE, MI_FIBER, MI_HERB};
   for (int t = 0; t < 4; t++) {
     const ResNode* n = resources::nearestOfType((ResType)t, p.x, p.z);
@@ -492,6 +534,18 @@ void drawWorldIcons(float W, float H) {
   };
   for (auto& m : g_markers) put(m.x, m.y, m.z, m.icon);
   if (E.questTarget.valid) put(E.questTarget.x, world::getTerrainHeight(E.questTarget.x, E.questTarget.z) + 3.2f, E.questTarget.z, MI_QUEST);
+  if (E.waypoint.valid) {
+    if (hypot2(E.waypoint.x - p.x, E.waypoint.z - p.z) < 6) E.waypoint.valid = false;   // arrived
+    else put(E.waypoint.x, world::getTerrainHeight(E.waypoint.x, E.waypoint.z) + 3.2f, E.waypoint.z, MI_WAYPOINT);
+  }
+  // the herd moves: follow it, and drop the mark once it has been hunted out
+  static double nextTip = 0;
+  if (E.hunterTip.valid && t >= nextTip) {
+    nextTip = t + 2;
+    float hx, hz;
+    if (wildlife::nearestHerd((Species)E.hunterTip.sp, E.hunterTip.x, E.hunterTip.z, hx, hz) && hypot2(hx - E.hunterTip.x, hz - E.hunterTip.z) < 250) { E.hunterTip.x = hx; E.hunterTip.z = hz; }
+    else E.hunterTip.valid = false;
+  }
 }
 
 void drawCutscene(float W, float H) {
@@ -524,16 +578,30 @@ void drawHud(float W, float H) {
   while (g_popups.size() > 5) g_popups.erase(g_popups.begin());
 
   collectMarkers(g_markers);
-  drawWorldIcons(W, H);
+  if (hudShows(HUD_MARKERS)) drawWorldIcons(W, H);
   float cx = W / 2, cy = H / 2;
+  {  // stealth: a mark around the crosshair pointing at the bandit who is noticing you; fills and reddens toward 3 s
+    float bx, bz, k = extras::banditAwareness(bx, bz);
+    if (k > 0.03f) {
+      Vec3 f = render::cam.forward(); float fl = std::max(0.01f, hypot2(f.x, f.z)); f.x /= fl; f.z /= fl;
+      float rx = bx - E.player.pos.x, rz = bz - E.player.pos.z;
+      float a = std::atan2(rx * -f.z + rz * f.x, rx * f.x + rz * f.z);
+      float R = 58, sa = std::sin(a), ca = std::cos(a), s = 7 + 5 * k;
+      float px = cx + sa * R, py = cy - ca * R;
+      uint32_t col = k < 0.5f ? C("#fde68a", 0.35f + k) : C(k < 0.85f ? "#fb923c" : "#ef4444", 0.6f + 0.4f * k);
+      tri({px + sa * s, py - ca * s}, {px + ca * s * 0.8f, py + sa * s * 0.8f}, {px - ca * s * 0.8f, py - sa * s * 0.8f}, col);
+      if (k > 0.5f) text("!", px - sa * 13, py + ca * 13, 13, col, SANS, 1);
+    }
+  }
 
   float vig = std::max(0.0f, std::max(0.75f - (float)(t - g_knockT) / 0.9f, E.player.hp < 35 ? 0.3f + 0.15f * std::sin((float)t * 1000 / 180) : 0.0f));
   if (vig > 0.01f) radialVignette(C("#b91c1c", 0.65f * vig), 0.45f);
 
-  { float b = ui::scale(); ui::setScale(b * COMPASS_K); drawCompass(W / COMPASS_K); ui::setScale(b); }
-  drawRadar(18, H - 18 - 160, 160);
+  if (hudShows(HUD_COMPASS)) { float b = ui::scale(); ui::setScale(b * COMPASS_K); drawCompass(W / COMPASS_K); ui::setScale(b); }
+  if (hudShows(HUD_MINIMAP)) drawRadar(18, H - 18 - 160, 160);
 
   float sc = E.bow.aiming ? 0.8f : 1;
+  if (hudShows(HUD_CROSSHAIR)) {
   ring(cx, cy, 15 * sc, 2.5f * sc, C("#ffffff", 0.18f));
   if (E.bow.draw > 0.005f) ring(cx, cy, 15 * sc, 2.5f * sc, E.bow.draw >= 1 ? C("#34d399") : C("#fbbf24"), 0, TAU * std::min(1.0f, E.bow.draw) * 0.9999f);
   circle(cx, cy, 1.8f, C("#ffffff", 0.9f));
@@ -543,14 +611,17 @@ void drawHud(float W, float H) {
     line(cx - 8, cy - 8, cx + 8, cy + 8, 3, hc);
     line(cx - 8, cy + 8, cx + 8, cy - 8, 3, hc);
   }
+  }
   auto& w = E.world;
   std::string prompt = !w.placing.empty() ? (w.previewValid ? "Click to place · Q/E rotate · Esc cancel" : w.previewReason) : E.nearbyPrompt;
+  if (w.placing.empty()) { size_t q = prompt.find("[E]"); if (q != std::string::npos) prompt.replace(q, 3, "[" + platform::actionKeyName(K_E) + "]"); }
+  if (!hudShows(HUD_PROMPTS) && w.placing.empty()) prompt.clear();
   if (!prompt.empty()) textShadowed(prompt, cx, cy - 46, 15, !w.placing.empty() && !w.previewValid ? C("#fca5a5") : C("#fcd34d"), SERIF, 1);
   const char* stealth = E.player.crouching ? "Crouching · quiet" : E.player.sprinting ? "Sprinting · loud" : "";
-  if (*stealth) textShadowed(stealth, cx, cy + 30, 11, C("#e7e5e4", 0.8f), SERIF, 1);
+  if (*stealth && hudShows(HUD_PROMPTS)) textShadowed(stealth, cx, cy + 30, 11, C("#e7e5e4", 0.8f), SERIF, 1);
 
   float py = cy - 10;
-  for (auto& p : g_popups) {
+  if (hudShows(HUD_POPUPS)) for (auto& p : g_popups) {
     float k = (float)(t - p.t0) / 2.2f;
     float op = k < 0.12f ? k / 0.12f : k < 0.7f ? 1 : 1 - (k - 0.7f) / 0.3f;
     float dy = k < 0.12f ? 6 * (1 - k / 0.12f) : k < 0.7f ? 0 : -26 * (k - 0.7f) / 0.3f;
@@ -559,6 +630,7 @@ void drawHud(float W, float H) {
     py += 22;
   }
 
+  if (!hudShows(HUD_HEALTH)) return;
   float hpf = E.player.hp / std::max(1.0f, E.player.maxHp);
   float tw = 160 * std::min(1.9f, 0.75f + 0.25f * E.player.maxHp / 100);
   std::string lbl = std::to_string((int)std::ceil(E.player.hp)) + "/" + std::to_string((int)E.player.maxHp);
@@ -589,15 +661,17 @@ void drawTopBar(float W) {
   Clock ck = formatClock(E.time);
   std::string sl = std::string(SEASON_NAMES[season.index]) + " " + std::to_string(season.dayOfSeason) + "/" + std::to_string(DAYS_PER_SEASON);
   float cw = std::max(textWidth(sl, 10, SERIF) + 22, textWidth(ck.time, 13, SANS) + 22) + 8;
+  if (hudShows(HUD_CLOCK)) {
   chip(ix, iy, cw, ih);
   seasonGlyph(season.index, ix + 11, iy + 11, 5);
   text(sl, ix + 20, iy + 11, 10, C("#fbbf24", 0.9f));
   text(ck.time, ix + 10, iy + 26, 13, C("#e7e5e4"), SANS);
   ix += cw + 6;
+  }
 
   StageInfo st = computeStage();
   int cap = app::capacity();
-  if (W >= 900) {
+  if (W >= 900 && hudShows(HUD_RENOWN)) {
     std::string a = std::to_string(A.score) + " renown";
     std::string b = (W >= 1000 ? st.name + " · " : std::string()) + "Pop " + std::to_string(A.population) + "/" + std::to_string(cap);
     float w2 = std::max(textWidth(a, 10, SERIF), textWidth(b, 12, SERIF)) + 18;
@@ -607,6 +681,7 @@ void drawTopBar(float W) {
     ix += w2 + 6;
   }
 
+  if (hudShows(HUD_ARROWS)) {
   int arrows = invCount("arrow");
   std::string an = std::to_string(arrows);
   float aw = 26 + textWidth(an, 13, SANS) + 6 + 58;
@@ -614,10 +689,12 @@ void drawTopBar(float W) {
   itemIcon("arrow", ix + 13, iy + ih / 2, 8);
   text(an, ix + 25, iy + ih / 2, 13, arrows == 0 ? C("#f87171") : C("#7dd3fc"), SANS);
   Rect cr{ix + aw - 62, iy + 7, 56, ih - 14};
-  if (button(cr, "+10", ST_GHOSTON, 11, "R", SANS)) app::craftArrows(false);
+  std::string rk = platform::actionKeyName(K_R);
+  if (button(cr, "+10", ST_GHOSTON, 11, rk.c_str(), SANS)) app::craftArrows(false);
   ix += aw + 6;
+  }
 
-  if (W >= 1100) {
+  if (W >= 1100 && hudShows(HUD_RESOURCES)) {
     int food = invCount("food");
     int need = dailyNeed(A.population, season.index == 3);
     const char* ids[5] = {"food", "wood", "stone", "fiber", "herb"};
@@ -635,9 +712,11 @@ void drawTopBar(float W) {
   }
 
   struct TabDef { Tab t; const char* label; const char* key; };
-  TabDef tabs[4] = {{Tab::Inventory, "Pouch", "Tab"}, {Tab::Quests, "Journal", "J"}, {Tab::Buildings, "Build", "B"}, {Tab::Map, "Map", "M"}};
+  std::string kn[5] = {platform::actionKeyName(K_TAB), platform::actionKeyName(K_J), platform::actionKeyName(K_B), platform::actionKeyName(K_M), platform::actionKeyName(K_L)};
+  TabDef tabs[4] = {{Tab::Inventory, "Pouch", kn[0].c_str()}, {Tab::Quests, "Journal", kn[1].c_str()}, {Tab::Buildings, "Build", kn[2].c_str()}, {Tab::Map, "Map", kn[3].c_str()}};
   bool labels = W >= 1020;
   float rx = x + bw - 6;
+  if (hudShows(HUD_BUTTONS)) {
   float mw = labels ? 92 : 66;
   rx -= mw;
   if (button({rx, iy + 3, mw, ih - 6}, labels ? "Menu" : "II", ST_GHOST, 12, "Esc")) A.menuOpen = true;
@@ -652,14 +731,15 @@ void drawTopBar(float W) {
   {
     // lantern toggle, lit (amber) while it burns; same as pressing L
     std::string lab = labels ? "Lantern" : "La";
-    float tw = textWidth(lab, 12) + textWidth("L", 7.5f, SANS) + 8 + 5 + 18;
+    float tw = textWidth(lab, 12) + textWidth(kn[4], 7.5f, SANS) + 8 + 5 + 18;
     rx -= tw;
-    if (button({rx, iy + 3, tw, ih - 6}, lab, E.lanternOn ? ST_GHOSTON : ST_GHOST, 12, "L")) { E.lanternOn = !E.lanternOn; audio::crispClick(); }
+    if (button({rx, iy + 3, tw, ih - 6}, lab, E.lanternOn ? ST_GHOSTON : ST_GHOST, 12, kn[4].c_str())) { E.lanternOn = !E.lanternOn; audio::crispClick(); }
     rx -= 4;
+  }
   }
 
   float room = rx - ix - 12;
-  if (room > 180) {
+  if (room > 180 && hudShows(HUD_OBJECTIVE)) {
     const Quest* q = activeQuest();
     std::string t1 = q ? q->title : "All chapters complete";
     std::string t2 = q ? q->objective + (q->target > 1 ? " (" + std::to_string(q->progress) + "/" + std::to_string(q->target) + ")" : "") : "Free exploration";
@@ -673,16 +753,22 @@ void drawTopBar(float W) {
 }
 
 void drawNotification(float W) {
-  if (A.notification.empty()) return;
-  double age = now() - A.notifyAt;
-  if (age > 5.5) return;
-  float op = clampf((float)std::min(age / 0.25, (5.5 - age) / 0.5), 0, 1);
+  double t = now();
+  auto& N = A.notes;
+  N.erase(std::remove_if(N.begin(), N.end(), [&](const App::Note& n) { return t - n.at > n.life; }), N.end());
+  if (!hudShows(HUD_NOTES)) return;
+  if (N.empty()) return;
   float maxW = std::min(448.0f, W * 0.4f);
-  auto lines = wrap(A.notification, 14, maxW);
   float y = 66 + 8;
-  for (auto& l : lines) {
-    textShadowed(l, W - 20, y + 8, 14, C("#fcd34d", op), SERIF, 2);
-    y += 19;
+  for (int i = (int)N.size() - 1; i >= 0; i--) {  // newest on top, older ones pushed down and dimmed a little
+    double age = t - N[i].at;
+    float op = clampf((float)std::min(age / 0.25, (N[i].life - age) / 0.6), 0, 1);
+    if (i != (int)N.size() - 1) op *= 0.82f;
+    for (auto& l : wrap(N[i].text, 14, maxW)) {
+      textShadowed(l, W - 20, y + 8, 14, C(i == (int)N.size() - 1 ? "#fcd34d" : "#e7d9a8", op), SERIF, 2);
+      y += 19;
+    }
+    y += 9;
   }
 }
 
@@ -774,8 +860,12 @@ Rect modal(float W, float H, float mw, float mh, const char* bd = "#44403c") {
   mw = std::min(mw, W - 32);
   mh = std::min(mh, H - 32);
   Rect r{(W - mw) / 2, (H - mh) / 2, mw, mh};
-  rect(r, C("#1c1917", 0.96f), 16);
-  border(r, C(bd), 2, 16);
+  (void)bd;
+  for (int i = 5; i >= 1; i--) rect({r.x - i * 3.0f, r.y - i * 3.0f + 6, r.w + i * 6.0f, r.h + i * 6.0f}, C("#000000", 0.06f), 8 + i * 3.0f);  // soft drop shadow
+  rect(r, C("#131110", 0.975f), 8);
+  gradientV({r.x + 2, r.y + 2, r.w - 4, std::min(140.0f, r.h * 0.4f)}, C("#2b241b", 0.5f), C("#131110", 0.0f));   // warm light from the top edge
+  border(r, C("#3f372d"), 1, 8);
+  rect({r.x + 28, r.y, r.w - 56, 2}, C("#d9a441", 0.95f), 1);   // gold hairline
   return r;
 }
 
@@ -797,13 +887,13 @@ void drawDialogue(float W, float H) {
   line(x, y, x + inner, y, 1, C("#292524"));
   y += 12;
   Rect dr{x, y, inner, dh};
-  rect(dr, C("#0c0a09", 0.5f), 12);
-  border(dr, C("#292524"), 1, 12);
+  rect(dr, C("#0c0a09", 0.5f), 6);
+  border(dr, C("#292524"), 1, 6);
   paragraph("\"" + s.dialogue + "\"", x + 16, y + 16, inner - 32, 13, C("#e7e5e4"), SANS, 1.38f);
   y += dh + 14;
   Rect br{x, y, inner, bh};
-  rect(br, C("#451a03", 0.4f), 12);
-  border(br, C("#78350f", 0.5f), 1, 12);
+  rect(br, C("#451a03", 0.4f), 6);
+  border(br, C("#78350f", 0.5f), 1, 6);
   paragraph("Benefit: " + s.bonus, x + 12, y + 12, inner - 24, 12, C("#fde68a", 0.9f), SANS, 1.33f);
   y += bh + 14;
   if (!s.recruited && !cost.empty()) {
@@ -812,6 +902,31 @@ void drawDialogue(float W, float H) {
   }
   float by = r.y + r.h - 24 - 36;
   bool ok = app::has(cost);
+  if (s.id == "hunter") {   // once a day Kalyan tells you where he last saw a herd
+    bool asked = E.hunterTip.day == season.day;
+    if (button({r.x + 24, by, 130, 36}, asked ? "Ask tomorrow" : "Ask for tracks", asked ? ST_STONE : ST_AMBER, 12) && !asked) {
+      static const Species SP[6] = {SP_DEER, SP_BOAR, SP_GORAL, SP_WOLF, SP_BEAR, SP_LEOPARD};
+      int start = (int)(randf() * 6) % 6;
+      for (int k = 0; k < 6; k++) {
+        Species sp = SP[(start + k) % 6];
+        // anywhere on the map, not mostly near the village where most herds live: pick a random spot over the
+        // whole land and tell of the herd of that kind nearest to it
+        float hx = 0, hz = 0;
+        bool got = false;
+        for (int t = 0; t < 12 && !got; t++) {
+          float rx = (randf() * 2 - 1) * (MAP_HALF - 80), rz = (randf() * 2 - 1) * (MAP_HALF - 80);
+          if (!wildlife::nearestHerd(sp, rx, rz, hx, hz)) break;
+          got = hypot2(hx - rx, hz - rz) < 220 && hypot2(hx - E.player.pos.x, hz - E.player.pos.z) > 90;
+        }
+        if (!got && !wildlife::randomHerd(sp, E.player.pos.x, E.player.pos.z, 90, hx, hz)) continue;
+        E.hunterTip = {true, (int)sp, hx, hz, season.day};
+        int dist = (int)hypot2(hx - E.player.pos.x, hz - E.player.pos.z);
+        actions::notify(std::string("Kalyan: \"") + (wildlife::isPredator(sp) ? "Fresh tracks - " : "I saw ") + wildlife::speciesName(sp) + (wildlife::isPredator(sp) ? " about " : " about ") + std::to_string(dist) + " m from here. I've marked it on your map.\"");
+        break;
+      }
+      if (E.hunterTip.day != season.day) { E.hunterTip.day = season.day; actions::notify("Kalyan: \"Nothing worth the walk today. Ask me tomorrow.\""); }
+    }
+  }
   if (!s.recruited) {
     float w2 = 210;
     if (button({r.x + r.w - 24 - w2, by, w2, 36}, ok ? "Recruit to the village" : "Recruit (need more)", ok ? ST_AMBER : ST_STONE, 12)) app::recruit(A.dialogue);
@@ -824,7 +939,7 @@ float tabInventory(float x, float y, float w) {
   float y0 = y;
   if (g_invSection == 1) {
   Rect fr{x, y, w, 52};
-  card(fr, "#292524", "#0c0a09", 0.7f);
+  card(fr, "#2f2a25", "#1a1714", 0.7f);
   text("Fletching", x + 14, y + 26, 13, C("#d6d3d1"));
   float bw2 = std::min(220.0f, (w - 140) / 2);
   if (button({x + w - 12 - bw2, y + 10, bw2, 32}, "+25 arrows (2 timber, 1 fibre)", ST_EMERALD, bw2 < 200 ? 9.5f : 11)) app::craftArrows(true);
@@ -838,7 +953,7 @@ float tabInventory(float x, float y, float w) {
   int cols = w > 520 ? 2 : 1;
   int rows = (9 + cols - 1) / cols;
   float th = 40 + rows * 30 + 6;
-  card({x, y, w, th}, "#292524", "#0c0a09", 0.7f);
+  card({x, y, w, th}, "#2f2a25", "#1a1714", 0.7f);
   text("Market trades", x + 14, y + 20, 13, C("#e7e5e4"));
   if (!market) text("Build a Market Stall to trade", x + w - 14, y + 20, 11, C("#fdba74"), SANS, 2);
   float cw = (w - 28 - (cols - 1) * 6) / cols;
@@ -858,19 +973,23 @@ float tabInventory(float x, float y, float w) {
   float cx_, cy_, cz_, cw_;
   if (events::traderPos(cx_, cy_, cz_, cw_)) {
     // the caravan: rare goods, today only
-    float ch = 40 + 4 * 30 + 6;
-    card({x, y, w, ch}, "#78350f", "#0c0a09", 0.75f);
-    text("Travelling caravan · rare goods, today only", x + 14, y + 20, 13, C("#fbbf24"));
-    for (int i = 0; i < 4; i++) {
+    bool big = events::caravanBig();
+    int cn = big ? CARAVAN_N : CARAVAN_BASIC;
+    float ch = 40 + cn * 30 + 6;
+    card({x, y, w, ch}, "#5c4a2a", "#1a1714", 0.75f);
+    text(big ? "Seasonal caravan · across your bridge, today only" : "Travelling trader · rare goods, today only", x + 14, y + 20, 13, C("#fbbf24"));
+    for (int i = 0; i < cn; i++) {
       const Trade& t = CARAVAN[i];
       Rect r{x + 14, y + 38 + i * 30, w - 28, 26};
-      bool ok = app::has(t.give);
+      bool once = i >= CARAVAN_BASIC, sold = once && events::caravanSold(i);
+      bool ok = !sold && app::has(t.give);
+      if (once) text(sold ? "taken" : i == 6 ? "standing order" : i == 7 ? "teaching" : "once", r.x + r.w - 8, r.y + 13, 10, sold ? C("#78716c") : C("#fdba74"), SANS, 2);
       bool hot = ok && !g_block && hovered(r);
       rect(r, ok ? C(hot ? "#292524" : "#1c1917") : C("#0c0a09", 0), 5);
       border(r, ok ? C("#f59e0b") : C("#292524"), 1, 5);
       float gx = text(costText(t.give, " + ") + "  ->  ", r.x + 8, r.y + 13, 11, ok ? C("#e7e5e4") : C("#78716c"), SANS);
       text(costText(t.get, " + "), r.x + 8 + gx, r.y + 13, 11, ok ? C("#fcd34d") : C("#78716c"), SANS);
-      if (ok && !g_block && clicked(r)) { app::spend(t.give); actions::addItems(t.get); audio::coinPickup(); popup("Bought " + costText(t.get), rgbHex("#fde68a")); }
+      if (ok && !g_block && clicked(r)) { app::trade(t); if (once) events::caravanMarkSold(i); }
     }
     y += ch + 14;
   }
@@ -878,7 +997,7 @@ float tabInventory(float x, float y, float w) {
 
   if (g_invSection == 1) {
   float gh = 36 + GEAR_COUNT * 62;
-  card({x, y, w, gh}, "#292524", "#0c0a09", 0.7f);
+  card({x, y, w, gh}, "#2f2a25", "#1a1714", 0.7f);
   text("Craft gear", x + 14, y + 20, 13, C("#e7e5e4"));
   for (int i = 0; i < GEAR_COUNT; i++) {
     const GearDef& g = GEAR[i];
@@ -901,8 +1020,8 @@ float tabInventory(float x, float y, float w) {
     int n = invCount(id);
     Rect r{x + (i % ic) * (iw + 12), y + (i / ic) * (ih + 12), iw, ih};
     float a = n ? 1 : 0.6f;
-    rect(r, C("#0c0a09", 0.8f * a), 12);
-    border(r, n ? C("#44403c") : C("#292524"), 1, 12);
+    rect(r, C("#0c0a09", 0.8f * a), 6);
+    border(r, n ? C("#44403c") : C("#292524"), 1, 6);
     itemIcon(id, r.x + 24, r.y + 24, 13);
     std::string cnt = "x" + std::to_string(n);
     float cw2 = textWidth(cnt, 11, SANS) + 16;
@@ -919,25 +1038,109 @@ float tabInventory(float x, float y, float w) {
   return y - y0;
 }
 
+// ---- skill tree: three branches side by side, five skills each, learned top to bottom
+float tabSkills(float x, float y, float w) {
+  float y0 = y;
+  int L = skills::level(), pts = skills::points();
+  int lo = skills::levelFloor(L), hi = skills::levelFloor(L + 1);
+  // header: level, renown progress, points to spend
+  Rect hd{x, y, w, 64};
+  rect(hd, C("#0c0a09", 0.8f), 6);
+  border(hd, C("#44403c"), 1, 6);
+  text("Level " + std::to_string(L), hd.x + 18, hd.y + 22, 20, C("#fbbf24"));
+  text(std::to_string(A.score) + " / " + std::to_string(hi) + " renown to level " + std::to_string(L + 1), hd.x + 18, hd.y + 46, 11, C("#a8a29e"), SANS);
+  float bx = hd.x + 250, bw = std::max(60.0f, hd.w - 250 - 190);
+  rect({bx, hd.y + 28, bw, 8}, C("#292524"), 4);
+  rect({bx, hd.y + 28, bw * clampf((float)(A.score - lo) / std::max(1, hi - lo), 0, 1), 8}, C("#f59e0b"), 4);
+  std::string pt = std::to_string(pts) + (pts == 1 ? " skill point" : " skill points");
+  Rect pr{hd.x + hd.w - 170, hd.y + 16, 152, 32};
+  rect(pr, pts > 0 ? C("#451a03", 0.8f) : C("#1c1917", 0.8f), 16);
+  border(pr, pts > 0 ? C("#f59e0b") : C("#44403c"), 1, 16);
+  text(pt, pr.x + pr.w / 2, pr.y + 16, 12, pts > 0 ? C("#fbbf24") : C("#a8a29e"), SANS, 1);
+  y += 64 + 16;
+
+  const float gap = 14, cw = (w - gap * 2) / 3, nh = 96, vg = 18;
+  static const char* BCOL[3] = {"#f59e0b", "#f87171", "#6ee7b7"};
+  for (int b = 0; b < skills::BRANCHES; b++) {
+    float cx = x + b * (cw + gap);
+    text(skills::BRANCH_NAMES[b], cx + 4, y + 10, 16, C(BCOL[b]));
+    text(skills::BRANCH_BLURB[b], cx + 4, y + 30, 10.5f, C("#a8a29e"), SANS);
+    line(cx, y + 44, cx + cw, y + 44, 2, C(BCOL[b], 0.55f));
+    for (int i = 0; i < skills::COUNT; i++) {
+      const skills::Def& d = skills::DEFS[i];
+      if (d.branch != b) continue;
+      float ny = y + 58 + d.tier * (nh + vg);
+      Rect r{cx, ny, cw, nh};
+      bool own = skills::owned(i), lock = skills::locked(i), can = skills::canBuy(i);
+      if (d.tier > 0) line(cx + 22, ny - vg, cx + 22, ny, 2, own ? C(BCOL[b], 0.8f) : C("#44403c"));   // link to the skill above
+      rect(r, own ? C("#1c1917", 0.95f) : C("#0c0a09", lock ? 0.5f : 0.85f), 10);
+      border(r, own ? C(BCOL[b]) : can ? C("#b45309") : C("#292524"), own ? 1.5f : 1, 10);
+      float ta = lock ? 0.45f : 1.0f;
+      // tier pip
+      ellipse(r.x + 22, r.y + 22, 11, 11, own ? C(BCOL[b]) : C("#292524"));
+      text(std::to_string(d.tier + 1), r.x + 22, r.y + 22, 11, own ? C("#0c0a09") : C("#a8a29e", ta), SANS, 1);
+      text(d.name, r.x + 42, r.y + 22, 13.5f, own ? C(BCOL[b]) : C("#e7e5e4", ta));
+      auto lines = wrap(d.desc, 10.5f, cw - 24, SANS);
+      for (size_t k = 0; k < lines.size() && k < 2; k++) text(lines[k], r.x + 12, r.y + 47 + k * 14, 10.5f, C("#a8a29e", ta), SANS);
+      std::string lab = own ? "Learned" : lock ? "Locked" : "Learn · " + std::to_string(d.cost) + (d.cost == 1 ? " pt" : " pts");
+      float lw = 96;
+      if (own) text(lab, r.x + r.w - 12, r.y + nh - 15, 10.5f, C(BCOL[b]), SANS, 2);
+      else if (button({r.x + r.w - 10 - lw, r.y + nh - 28, lw, 22}, lab, can ? ST_AMBER : ST_OFF, 10.5f, nullptr, SANS)) skills::buy(i);
+    }
+  }
+  y += 58 + skills::TIERS * (nh + vg);
+  text("Renown raises your level; each level gives one skill point. The travelling caravan also sells a teaching.", x, y + 4, 10.5f, C("#78716c"), SANS);
+  y += 24;
+  return y - y0;
+}
+
 float tabQuests(float x, float y, float w) {
   float y0 = y;
-  {
-    // collectibles: count only, no locations (they're meant to be found)
-    Rect r{x, y, w, 44};
-    rect(r, C("#0c0a09", 0.8f), 12);
-    border(r, C("#b45309", 0.5f), 1, 12);
-    text("Lost prayer wheels", x + 16, y + 22, 14, C("#fbbf24"));
-    text(std::to_string(relics::count()) + " / " + std::to_string(relics::total()) + " found — hidden off the roads: high, deep and out of the way", x + w - 16, y + 22, 11, C("#d6d3d1"), SANS, 2);
-    y += 54;
+  const Quest* aq = activeQuest();
+  y += sectionLabel("STORY", x, y, w, std::to_string((int)std::count_if(A.quests.begin(), A.quests.end(), [](const Quest& q) { return q.completed; })) + " of " + std::to_string(A.quests.size()) + " chapters complete");
+  // the chapter in hand first, then what lies ahead, finished chapters last
+  std::vector<const Quest*> order;
+  for (auto& q : A.quests) if (&q == aq) order.push_back(&q);
+  for (auto& q : A.quests) if (&q != aq && !q.completed) order.push_back(&q);
+  for (auto& q : A.quests) if (&q != aq && q.completed) order.push_back(&q);
+  for (const Quest* qp : order) {
+    const Quest& q = *qp;
+    bool act = &q == aq;
+    auto dl = wrap(q.desc, 12, w - 32, SANS);
+    float h = 16 + 34 + dl.size() * 16 + 8 + 18 + (act && E.questTarget.valid ? 18 : 0) + 12;
+    Rect r{x, y, w, h};
+    float a = q.completed || act ? 1 : 0.7f;
+    rect(r, q.completed ? C("#10201a", 0.55f) : act ? C("#2a2015", 0.9f) : C("#1a1714", 0.88f), 6);
+    border(r, q.completed ? C("#1f4a3a", 0.7f) : act ? C("#8a6a2c") : C("#2f2a25"), 1, 6);
+    if (act) rect({r.x, r.y + 8, 3, r.h - 16}, C("#d9a441"), 1.5f);
+    text(q.title, x + 16, y + 24, act ? 16 : 14, C(q.completed ? "#9fd8c0" : "#f2c35b", a));
+    text("From: " + q.giver, x + 16, y + 42, 10, C("#a8a29e", a), SANS);
+    std::string badge = q.completed ? "DONE" : std::to_string(q.progress) + "/" + std::to_string(q.target);
+    float bw = textWidth(badge, 10, SANS) + 20;
+    Rect br{x + w - 16 - bw, y + 14, bw, 22};
+    rect(br, q.completed ? C("#064e3b", 0.6f) : C("#78350f", 0.6f), 11);
+    text(badge, br.x + bw / 2, br.y + 11, 10, q.completed ? C("#6ee7b7") : C("#fcd34d"), SANS, 1);
+    float yy = y + 58;
+    for (auto& l : dl) { text(l, x + 16, yy, 12, C("#d6d3d1", a), SANS); yy += 16; }
+    yy += 6;
+    float ow = text("Objective: ", x + 16, yy, 11, C("#d6d3d1", a), SANS);
+    text(q.objective, x + 16 + ow, yy, 11, C("#a8a29e", a), SANS);
+    if (act && E.questTarget.valid) {
+      yy += 18;
+      text("Next: " + E.questTarget.label + " — follow the gold marker on your compass.", x + 16, yy, 11, C("#fcd34d"), SANS);
+    }
+    y += h + 8;
   }
+  y += 10;
+  y += sectionLabel("VILLAGE", x, y, w);
   {
     // bounty board
     const auto& bs = extras::bounties();
     int acc = 0;
     for (auto& b : bs) acc += b.accepted;
     float h = 40 + std::max(1, acc) * 34;
-    card({x, y, w, h}, "#78350f", "#0c0a09", 0.75f);
-    text("Today's tasks", x + 14, y + 20, 14, C("#fbbf24"));
+    card({x, y, w, h});
+    text("Today's tasks", x + 14, y + 20, 14, C("#f2c35b"));
     text("Take and turn in tasks at the notice board by the hearth", x + w - 14, y + 20, 10.5f, C("#a8a29e"), SANS, 2);
     if (!acc) text("No tasks taken. Read the notice board by the hearth [E] to pick some.", x + 14, y + 46, 11, C("#a8a29e"), SANS);
     int row = 0;
@@ -957,8 +1160,8 @@ float tabQuests(float x, float y, float w) {
     // trophy rack
     const char* T[5] = {"deer_pelt", "boar_hide", "goral_horn", "wolf_fur", "bear_hide"};
     float h = 76;
-    card({x, y, w, h}, "#292524", "#0c0a09", 0.7f);
-    text("Trophy rack by the hearth", x + 14, y + 20, 14, C("#fbbf24"));
+    card({x, y, w, h});
+    text("Trophy rack by the hearth", x + 14, y + 20, 14, C("#f2c35b"));
     text("Each mounted trophy: +2 village appeal (" + std::to_string(extras::trophyAppeal()) + " now)", x + w - 14, y + 20, 11, C("#a8a29e"), SANS, 2);
     float bw = (w - 28 - 4 * 8) / 5;
     for (int i = 0; i < 5; i++) {
@@ -969,53 +1172,41 @@ float tabQuests(float x, float y, float w) {
     }
     y += h + 10;
   }
+  y += 8;
+  {
+    // collectibles: count only, no locations (they're meant to be found)
+    y += sectionLabel("RECORDS", x, y, w);
+    Rect r{x, y, w, 52};
+    card(r);
+    text("Lost prayer wheels", x + 16, y + 19, 14, C("#f2c35b"));
+    text("Hidden off the roads: high, deep and out of the way", x + 16, y + 37, 10.5f, C("#8f877b"), SANS);
+    text(std::to_string(relics::count()) + " / " + std::to_string(relics::total()), x + w - 16, y + 18, 13, C("#ebe5d8"), SANS, 2);
+    progressBar({x + w - 16 - 180, y + 32, 180, 6}, relics::total() ? (float)relics::count() / relics::total() : 0);
+    y += 60;
+  }
   {
     // achievements and stats
     auto ach = extras::achievements();
     int got = 0;
     for (auto& a : ach) got += a.got;
     int cols = w > 640 ? 2 : 1, rows = ((int)ach.size() + cols - 1) / cols;
-    float h = 40 + rows * 20 + 46;
-    card({x, y, w, h}, "#292524", "#0c0a09", 0.7f);
-    text("Achievements " + std::to_string(got) + "/" + std::to_string(ach.size()), x + 14, y + 20, 14, C("#fbbf24"));
+    float h = 46 + rows * 22 + 46;
+    card({x, y, w, h});
+    text("Achievements", x + 14, y + 20, 14, C("#f2c35b"));
+    text(std::to_string(got) + " / " + std::to_string(ach.size()), x + w - 14, y + 18, 13, C("#ebe5d8"), SANS, 2);
+    progressBar({x + w - 14 - 180 - 50, y + 16, 180, 6}, ach.empty() ? 0 : (float)got / ach.size());
     float cw = (w - 28) / cols;
     for (size_t i = 0; i < ach.size(); i++) {
-      float ax = x + 14 + (i % cols) * cw, ay = y + 40 + (i / cols) * 20;
-      text(std::string(ach[i].got ? "[*] " : "[ ] ") + ach[i].name, ax, ay + 8, 11.5f, ach[i].got ? C("#fde047") : C("#78716c"), SANS);
-      text(ach[i].desc, ax + 170, ay + 8, 10.5f, ach[i].got ? C("#d6d3d1") : C("#57534e"), SANS);
+      float ax = x + 14 + (i % cols) * cw, ay = y + 46 + (i / cols) * 22;
+      checkBox(ax, ay + 8, ach[i].got);
+      text(ach[i].name, ax + 20, ay + 8, 12, ach[i].got ? C("#f2c35b") : C("#c9c2b5"), SANS);
+      text(ach[i].desc, ax + 180, ay + 8, 10.5f, ach[i].got ? C("#c9c2b5") : C("#7d766b"), SANS);
     }
     char st[300];
     std::snprintf(st, sizeof st, "Animals hunted %.0f  ·  Wolves %.0f  ·  Distance walked %.1f km  ·  Nights slept %.0f  ·  Festivals %.0f  ·  Raids repelled %.0f  ·  Bounties %.0f",
                   extras::getStat("kills"), extras::getStat("kill_wolf"), extras::getStat("walked") / 1000, extras::getStat("slept"), extras::getStat("festivals"), extras::getStat("raids"), extras::getStat("bounties"));
     text(ellipsize(st, 10.5f, w - 28, SANS), x + 14, y + h - 18, 10.5f, C("#a8a29e"), SANS);
     y += h + 10;
-  }
-  const Quest* aq = activeQuest();
-  for (auto& q : A.quests) {
-    bool act = &q == aq;
-    auto dl = wrap(q.desc, 12, w - 32, SANS);
-    float h = 16 + 34 + dl.size() * 16 + 8 + 18 + (act && E.questTarget.valid ? 18 : 0) + 12;
-    Rect r{x, y, w, h};
-    float a = q.completed || act ? 1 : 0.7f;
-    rect(r, q.completed ? C("#022c22", 0.3f) : act ? C("#451a03", 0.3f) : C("#0c0a09", 0.8f), 12);
-    border(r, q.completed ? C("#065f46", 0.5f) : act ? C("#b45309", 0.6f) : C("#292524"), 1, 12);
-    text(q.title, x + 16, y + 24, 14, C("#fbbf24", a));
-    text("From: " + q.giver, x + 16, y + 42, 10, C("#a8a29e", a), SANS);
-    std::string badge = q.completed ? "DONE" : std::to_string(q.progress) + "/" + std::to_string(q.target);
-    float bw = textWidth(badge, 10, SANS) + 20;
-    Rect br{x + w - 16 - bw, y + 14, bw, 22};
-    rect(br, q.completed ? C("#064e3b", 0.6f) : C("#78350f", 0.6f), 11);
-    text(badge, br.x + bw / 2, br.y + 11, 10, q.completed ? C("#6ee7b7") : C("#fcd34d"), SANS, 1);
-    float yy = y + 58;
-    for (auto& l : dl) { text(l, x + 16, yy, 12, C("#d6d3d1", a), SANS); yy += 16; }
-    yy += 6;
-    float ow = text("Objective: ", x + 16, yy, 11, C("#d6d3d1", a), SANS);
-    text(q.objective, x + 16 + ow, yy, 11, C("#a8a29e", a), SANS);
-    if (act && E.questTarget.valid) {
-      yy += 18;
-      text("Next: " + E.questTarget.label + " — follow the gold marker on your compass.", x + 16, yy, 11, C("#fcd34d"), SANS);
-    }
-    y += h + 12;
   }
   return y - y0;
 }
@@ -1031,7 +1222,7 @@ float stageCard(float x, float y, float w) {
   std::string extra = cap == 0 ? "Build a home so settlers can move in." : A.population >= cap ? "All beds are taken. Build more homes to welcome new settlers." : "";
   if (!extra.empty()) h += 14;
   h += 8;
-  card({x, y, w, h}, "#78350f");
+  card({x, y, w, h}, "#5c4a2a");
   text(st.name, x + 14, y + 18, 14, C("#fbbf24"));
   text("Residents " + std::to_string(A.population) + "/" + std::to_string(cap) + " · Appeal " + std::to_string(villageAppeal()), x + w - 14, y + 18, 11, C("#d6d3d1"), SANS, 2);
   float yy = y + 38;
@@ -1232,7 +1423,7 @@ float tabBuildings(float x, float y, float w) {
 float tabMap(float x, float y, float w) {
   float y0 = y;
   buildMap();
-  float s = std::min(w, 460.0f);
+  float s = std::min(w, 540.0f);
   float mx = x + (w - s) / 2, my = y;
   image((season.snow > 0.5f ? g_mapTexWinter : season.autumn > 0.5f ? g_mapTexAutumn : g_mapTex).id, {mx, my, s, s});
   border({mx, my, s, s}, C("#78350f", 0.6f), 2, 10);
@@ -1252,6 +1443,7 @@ float tabMap(float x, float y, float w) {
     circ(settlementSafe() * k, 2.5f, C("#4ade80", 0.9f), false);
     circ(settlementLimit() * k, 2.0f, C("#f59e0b", 0.95f), true);
   }
+  for (auto& pl : world::PLACES) { Vec2 p = P(pl.x, pl.z); textShadowed(pl.name, p.x, p.y, 9.5f, C("#f5efe0", 0.92f), SANS, 1); }   // the outer lands and the gates to them
   std::vector<Marker> ms;
   collectMarkers(ms);
   for (auto& m : ms)
@@ -1269,6 +1461,29 @@ float tabMap(float x, float y, float w) {
     Vec2 p = P(E.questTarget.x, E.questTarget.z);
     glyph(MI_QUEST, p.x, p.y, 11 + std::sin(E.clock * 4) * 1.2f);
     if (hypot2(mouse().x - p.x, mouse().y - p.y) < 11) tip = E.questTarget.label;
+  }
+  if (E.hunterTip.valid) {
+    Vec2 p = P(E.hunterTip.x, E.hunterTip.z);
+    glyph(MI_TRACK, p.x, p.y, 10);
+    if (hypot2(mouse().x - p.x, mouse().y - p.y) < 10) tip = std::string(wildlife::speciesName((Species)E.hunterTip.sp)) + " (Kalyan's tip)";
+  }
+  // waypoint: click the map to place it, click it again to remove it
+  {
+    Rect mr{mx, my, s, s};
+    bool onWp = false;
+    if (E.waypoint.valid) {
+      Vec2 p = P(E.waypoint.x, E.waypoint.z);
+      glyph(MI_WAYPOINT, p.x, p.y, 10);
+      onWp = hypot2(mouse().x - p.x, mouse().y - p.y) < 10;
+      if (onWp) tip = "Waypoint " + std::to_string((int)hypot2(E.waypoint.x - E.player.pos.x, E.waypoint.z - E.player.pos.z)) + " m (click to remove)";
+    }
+    if (clicked(mr)) {
+      if (onWp) E.waypoint.valid = false;
+      else {
+        float wx = ((mouse().x - mx) / s - 0.5f) * 2 * MAP_HALF, wz = ((mouse().y - my) / s - 0.5f) * 2 * MAP_HALF;
+        E.waypoint = {true, wx, wz};
+      }
+    }
   }
   Vec2 pp = P(E.player.pos.x, E.player.pos.z);
   float a = -E.player.yaw;
@@ -1311,6 +1526,8 @@ float tabMap(float x, float y, float w) {
     lx += 18 + text(gl[i], lx + 18, y + 8, 11, C("#d6d3d1"), SANS) + 12;
   }
   y += 42;
+  text(E.waypoint.valid ? "Click the flag to remove your waypoint" : "Click anywhere on the map to set a waypoint", x + w / 2, y + 8, 11, C("#7dd3fc"), SANS, 1);
+  y += 20;
   if (E.questTarget.valid) { text("Objective: " + E.questTarget.label, x + w / 2, y + 8, 12, C("#fcd34d"), SERIF, 1); y += 22; }
   return y - y0;
 }
@@ -1323,37 +1540,60 @@ void drawTabs(float W, float H) {
   backdrop(W, H, 0.6f);
   float mw = std::min(940.0f, W - 32), mh = std::min(H * 0.9f, H - 32);
   Rect r = modal(W, H, mw, mh);
-  Rect head{r.x + 2, r.y + 2, r.w - 4, 52};
-  rect(head, C("#0c0a09", 0.9f), 14);
   struct TD { Tab t; const char* l; const char* k; };
-  TD tabs[4] = {{Tab::Inventory, "Pouch", "Tab"}, {Tab::Quests, "Journal", "J"}, {Tab::Buildings, "Build", "B"}, {Tab::Map, "Map", "M"}};
-  float tw = (r.w - 16 - 8 * 4 - 44) / 4;
-  for (int i = 0; i < 4; i++)
-    if (button({r.x + 8 + i * (tw + 8), r.y + 10, tw, 36}, tabs[i].l, A.tab == tabs[i].t ? ST_ACTIVE : ST_STONE, 13, tabs[i].k)) A.tab = tabs[i].t;
-  if (button({r.x + r.w - 8 - 44, r.y + 10, 44, 36}, "x", ST_STONE, 14, nullptr, SANS)) { A.tab = Tab::None; return; }
-  line(r.x, r.y + 56, r.x + r.w, r.y + 56, 1, C("#292524"));
-  Rect body{r.x + 2, r.y + 57, r.w - 4, r.h - 59};
+  TD tabs[5] = {{Tab::Inventory, "Pouch", "Tab"}, {Tab::Quests, "Journal", "J"}, {Tab::Buildings, "Build", "B"}, {Tab::Skills, "Skills", "K"}, {Tab::Map, "Map", "M"}};
+  {
+    // tab strip: plain labels with their key, the open one in gold over an underline
+    float tx = r.x + 22;
+    for (int i = 0; i < 5; i++) {
+      bool on = A.tab == tabs[i].t;
+      float lw = textWidth(tabs[i].l, 16), kw = textWidth(tabs[i].k, 9.5f, SANS) + 10;
+      Rect tr{tx, r.y + 6, lw + kw + 34, 48};
+      bool hot = !g_block && hovered(tr);
+      if (hot && !on) rect({tr.x, tr.y + 6, tr.w, tr.h - 12}, C("#ffffff", 0.05f), 5);
+      text(tabs[i].l, tx + 12, r.y + 30, 16, on ? C("#f2c35b") : hot ? C("#f5f1e8") : C("#a39c90"));
+      Rect kr{tx + 12 + lw + 8, r.y + 22, kw, 16};
+      border(kr, on ? C("#d9a441", 0.7f) : C("#4a4238"), 1, 3);
+      text(tabs[i].k, kr.x + kr.w / 2, kr.y + 8, 9.5f, on ? C("#f2c35b") : C("#8f877b"), SANS, 1);
+      if (on) rect({tx + 8, r.y + 53, lw + kw + 18, 3}, C("#d9a441"), 1.5f);
+      if (!g_block && !on && clicked(tr)) { audio::crispClick(); A.tab = tabs[i].t; }
+      tx += tr.w + 4;
+    }
+  }
+  if (button({r.x + r.w - 20 - 92, r.y + 16, 92, 28}, "Close", ST_STONE, 11, "Esc", SANS)) { A.tab = Tab::None; return; }
+  line(r.x + 1, r.y + 56, r.x + r.w - 1, r.y + 56, 1, C("#2e2924"));
+  {
+    // status footer: where and when you are, and what you have to spend
+    float fy = r.y + r.h - 30;
+    line(r.x + 1, fy, r.x + r.w - 1, fy, 1, C("#2e2924"));
+    rect({r.x + 1, fy + 1, r.w - 2, 28}, C("#0d0c0b", 0.6f), 0);
+    std::string st = std::string(SEASON_NAMES[season.index]) + ", day " + std::to_string(season.dayOfSeason) + "   ·   " + formatClock(E.time).time + "   ·   " + std::to_string(A.score) + " renown";
+    text(st, r.x + 22, fy + 15, 10.5f, C("#8f877b"), SANS);
+    int sp = skills::points();
+    text(sp > 0 ? std::to_string(sp) + (sp == 1 ? " skill point to spend  [K]" : " skill points to spend  [K]") : "Mouse wheel scrolls", r.x + r.w - 22, fy + 15, 10.5f, sp > 0 ? C("#f2c35b") : C("#8f877b"), SANS, 2);
+  }
+  Rect body{r.x + 2, r.y + 57, r.w - 4, r.h - 59 - 30};
 
   bool side = A.tab == Tab::Inventory || A.tab == Tab::Buildings;
   std::string sectionTitle;
   if (side) {
     float sw = 190;
     Rect sb{body.x, body.y, sw, body.h};
-    rect(sb, C("#0c0a09", 0.55f), 0);
-    line(sb.x + sw, sb.y, sb.x + sw, sb.y + sb.h, 1, C("#292524"));
+    rect(sb, C("#0d0c0b", 0.5f), 0);
+    line(sb.x + sw, sb.y, sb.x + sw, sb.y + sb.h, 1, C("#2e2924"));
     float y = sb.y + 16;
     auto item = [&](const char* label, const char* sub, bool on) {
       Rect b{sb.x + 10, y, sw - 20, 46};
       bool hot = !g_block && hovered(b);
-      rect(b, on ? C("#d97706", 0.18f) : C("#ffffff", hot ? 0.06f : 0), 8);
-      if (on) rect({b.x, b.y + 8, 3, b.h - 16}, C("#f59e0b"), 1.5f);
-      text(label, b.x + 14, b.y + 17, 13, on ? C("#fbbf24") : C("#e7e5e4"));
-      text(sub, b.x + 14, b.y + 33, 10, C("#a8a29e"), SANS);
+      rect(b, on ? C("#d9a441", 0.14f) : C("#ffffff", hot ? 0.05f : 0), 5);
+      if (on) rect({b.x, b.y + 6, 3, b.h - 12}, C("#d9a441"), 1.5f);
+      text(label, b.x + 14, b.y + 17, 14, on ? C("#f2c35b") : C("#ebe5d8"));
+      text(sub, b.x + 14, b.y + 34, 10.5f, C("#8f877b"), SANS);
       y += 52;
       if (!g_block && clicked(b)) { audio::crispClick(); return true; }
       return false;
     };
-    auto group = [&](const char* g) { text(g, sb.x + 22, y + 8, 9.5f, C("#78716c"), SANS); y += 20; };
+    auto group = [&](const char* g) { text(g, sb.x + 22, y + 8, 9.5f, C("#b9a37a"), SANS); y += 22; };
     if (A.tab == Tab::Inventory) {
       const char* L[3] = {"Items", "Crafting", "Market"};
       const char* S[3] = {"Everything you carry", "Arrows and gear", "Trade trophies"};
@@ -1381,8 +1621,9 @@ void drawTabs(float W, float H) {
   float cx = body.x + 20, cy = body.y + 16 - g_scroll, cw = body.w - 40 - (maxS > 0 ? 8 : 0);
   float h = 0;
   if (!sectionTitle.empty()) {
-    text(sectionTitle, cx, cy + 14, 20, C("#fbbf24"));
-    line(cx, cy + 34, cx + cw, cy + 34, 1, C("#292524"));
+    text(sectionTitle, cx, cy + 14, 22, C("#f2c35b"));
+    line(cx, cy + 34, cx + cw, cy + 34, 1, C("#332d26"));
+    rect({cx, cy + 33, 46, 2}, C("#d9a441"), 1);
     cy += 48;
     h += 48;
   }
@@ -1392,6 +1633,7 @@ void drawTabs(float W, float H) {
     case Tab::Quests: h += tabQuests(cx, cy, cw); break;
     case Tab::Buildings: h += tabBuildings(cx, cy, cw); break;
     case Tab::Map: h += tabMap(cx, cy, cw); break;
+    case Tab::Skills: h += tabSkills(cx, cy, cw); break;
     default: break;
   }
   g_block = wasBlock;
@@ -1482,108 +1724,224 @@ bool toggle(float x, float y, float w, const char* label, bool on, const char* o
   return button(r, on ? onTxt : offTxt, on ? ST_ACTIVE : ST_STONE, 11, nullptr, SANS);
 }
 
+// ---- options: categories down the left, one setting per row, the hovered row explained in the footer
+int g_optCat = 0;
+int g_capture = -1;   // Controls: index into BINDS waiting for a key
+
+struct OptCtx { float x, y, w; std::string hint; };
+static bool optRowBg(OptCtx& o, const char* label, const char* hint) {
+  Rect r{o.x - 12, o.y, o.w + 24, 40};
+  bool hot = !g_block && hovered(r);
+  if (hot) { rect(r, C("#ffffff", 0.045f), 5); o.hint = hint; }
+  text(label, o.x, o.y + 20, 13, hot ? C("#f5f1e8") : C("#d8d1c4"), SANS);
+  line(o.x - 12, o.y + 40, o.x + o.w + 12, o.y + 40, 1, C("#211e1b"));
+  return hot;
+}
+static bool optSlider(OptCtx& o, const char* label, float& v, float lo, float hi, const char* fmt, float mul, const char* hint) {
+  optRowBg(o, label, hint);
+  float tw = std::min(230.0f, o.w * 0.42f), tx = o.x + o.w - tw - 58, ty = o.y + 17;
+  char b[32];
+  std::snprintf(b, sizeof b, fmt, v * mul);
+  text(b, o.x + o.w, o.y + 20, 12.5f, C("#f2c35b"), SANS, 2);
+  float t = clampf((v - lo) / (hi - lo), 0, 1);
+  rect({tx, ty, tw, 6}, C("#2b2622"), 3);
+  rect({tx, ty, tw * t, 6}, C("#d9a441"), 3);
+  circle(tx + tw * t, ty + 3, 8, C("#17120a"));
+  circle(tx + tw * t, ty + 3, 6, C("#f2c35b"));
+  Rect hit{tx - 8, o.y + 4, tw + 16, 32};
+  const MouseState& m = mouse();
+  bool ch = false;
+  if (!g_block && m.pressed && hovered(hit)) { g_drag = &v; consumeClick(); }
+  if (!m.down && g_drag == &v) g_drag = nullptr;
+  if (g_drag == &v) {
+    float nv = lo + clampf((m.x - tx) / tw, 0, 1) * (hi - lo);
+    if (nv != v) { v = nv; ch = true; }
+  }
+  o.y += 41;
+  return ch;
+}
+static bool optSwitch(OptCtx& o, const char* label, bool on, const char* hint) {
+  optRowBg(o, label, hint);
+  Rect sw{o.x + o.w - 46, o.y + 9, 46, 22};
+  rect(sw, on ? C("#d9a441") : C("#2b2622"), 11);
+  if (!on) border(sw, C("#4a4238"), 1, 11);
+  circle(on ? sw.x + sw.w - 11 : sw.x + 11, sw.y + 11, 8, on ? C("#17120a") : C("#8f877b"));
+  text(on ? "On" : "Off", sw.x - 10, o.y + 20, 11.5f, on ? C("#f2c35b") : C("#8f877b"), SANS, 2);
+  Rect hit{o.x - 12, o.y, o.w + 24, 40};
+  bool c = !g_block && clicked(hit);
+  if (c) audio::crispClick();
+  o.y += 41;
+  return c;
+}
+// returns -1 / +1 when the value should step back / forward
+static int optChoice(OptCtx& o, const char* label, const std::string& value, const char* hint) {
+  optRowBg(o, label, hint);
+  float bw = 150;
+  Rect l{o.x + o.w - bw, o.y + 7, 26, 26}, rr{o.x + o.w - 26, o.y + 7, 26, 26};
+  int d = 0;
+  for (int k = 0; k < 2; k++) {
+    const Rect& b = k ? rr : l;
+    bool hot = !g_block && hovered(b);
+    rect(b, C(hot ? "#3a332b" : "#27231f"), 4);
+    border(b, C(hot ? "#6b5d49" : "#463e34"), 1, 4);
+    float cx = b.x + 13, cy = b.y + 13, sgn = k ? 1.0f : -1.0f;
+    tri({cx + sgn * 4, cy}, {cx - sgn * 3, cy - 5}, {cx - sgn * 3, cy + 5}, C(hot ? "#f2c35b" : "#c9c2b5"));
+    if (!g_block && clicked(b)) { audio::crispClick(); d = k ? 1 : -1; }
+  }
+  text(value, o.x + o.w - bw / 2, o.y + 20, 12.5f, C("#f2c35b"), SANS, 1);
+  o.y += 41;
+  return d;
+}
+static void optNote(OptCtx& o, const std::string& t) {
+  o.y += 8;
+  o.y += paragraph(t, o.x, o.y + 8, o.w, 11.5f, C("#8f877b"), SANS, 1.45f) + 10;
+}
+
 void drawOptions(float W, float H) {
-  backdrop(W, H, 0.7f);
-  Rect r = modal(W, H, 760, 640, "#b45309");
-  text("OPTIONS", r.x + 32, r.y + 38, 24, C("#fbbf24"));
+  backdrop(W, H, 0.72f);
+  Rect r = modal(W, H, 880, 620, "#b45309");
+  text("Options", r.x + 28, r.y + 34, 24, C("#f2c35b"));
+  text("Changes apply at once and are kept in config.ini next to the game", r.x + 30 + textWidth("Options", 24) + 14, r.y + 37, 11, C("#8f877b"), SANS);
+  line(r.x + 1, r.y + 62, r.x + r.w - 1, r.y + 62, 1, C("#2e2924"));
   Settings& st = g_settings;
-  {
-    // one-click quality presets (tuned for entry-level cards up to mid-range)
-    const char* PN[3] = {"Low", "Medium", "High"};
-    float bx = r.x + r.w - 32 - 3 * 92;
-    text("PRESET", bx - 62, r.y + 38, 10, C("#78716c"), SANS);
-    for (int i = 0; i < 3; i++) {
-      bool cur = (i == 0 && st.drawDistance <= 1.55f && st.shadowSize <= 1024) || (i == 1 && st.drawDistance > 1.55f && st.drawDistance <= 2.05f && st.shadowSize == 1536) ||
-                 (i == 2 && st.drawDistance >= 2.95f && st.shadowSize >= 2048);
-      if (button({bx + i * 92, r.y + 24, 84, 28}, PN[i], cur ? ST_AMBER : ST_STONE, 12, nullptr, SANS)) {
-        static const float DD[3] = {1.5f, 2.0f, 3.0f}, GR[3] = {26, 32, 36};
-        static const int SHS[3] = {1024, 1536, 2048}, MS[3] = {0, 0, 2}, FPS[3] = {45, 60, 60};
-        st.drawDistance = DD[i]; st.shadowSize = SHS[i]; st.msaa = MS[i]; st.fxaa = true; st.grassRadius = GR[i]; st.fpsLimit = FPS[i];
-        g_settingsDirty = true;
-        actions::notify(std::string(PN[i]) + " quality preset applied. Anti-aliasing changes take effect after a restart.");
+  const float SW = 196, FH = 66;
+  Rect sb{r.x + 2, r.y + 63, SW, r.h - 65 - FH};
+  rect(sb, C("#0d0c0b", 0.5f), 0);
+  line(sb.x + SW, sb.y, sb.x + SW, sb.y + sb.h, 1, C("#2e2924"));
+  const char* CN[6] = {"Display", "Graphics", "Performance", "Audio", "Controls", "HUD"};
+  const char* CS[6] = {"Screen and view", "Detail and effects", "Holding the frame rate", "Music and effects", "Mouse and keys", "What shows on screen"};
+  for (int i = 0; i < 6; i++) {
+    Rect b{sb.x + 10, sb.y + 14 + i * 52.0f, SW - 20, 46};
+    bool on = g_optCat == i, hot = !g_block && hovered(b);
+    rect(b, on ? C("#d9a441", 0.14f) : C("#ffffff", hot ? 0.05f : 0), 5);
+    if (on) rect({b.x, b.y + 6, 3, b.h - 12}, C("#d9a441"), 1.5f);
+    text(CN[i], b.x + 14, b.y + 17, 14, on ? C("#f2c35b") : C("#ebe5d8"));
+    text(CS[i], b.x + 14, b.y + 34, 10.5f, C("#8f877b"), SANS);
+    if (!g_block && !on && clicked(b)) { audio::crispClick(); g_optCat = i; g_capture = -1; }
+  }
+  OptCtx o{r.x + SW + 40, r.y + 80, r.w - SW - 80, ""};
+  text(CN[g_optCat], o.x, o.y + 8, 20, C("#f2c35b"));
+  rect({o.x, o.y + 26, 46, 2}, C("#d9a441"), 1);
+  o.y += 40;
+  auto dirty = [] { g_settingsDirty = true; };
+  if (g_optCat == 0) {
+    if (optSwitch(o, "Fullscreen", platform::isFullscreen(), "Fill the whole screen. F11 does the same at any time.")) platform::toggleFullscreen();
+    if (optSwitch(o, "VSync", st.vsync, "Match the frame rate to the monitor. Removes tearing; can add a little input delay.")) { platform::setVsync(!st.vsync); dirty(); }
+    if (optSlider(o, "Field of view", st.fov, 60, 100, "%.0f", 1, "How wide the view is. Wider shows more but makes distant things smaller.")) dirty();
+    if (optSlider(o, "Interface size", st.uiScale, 0.8f, 1.4f, "%.2f", 1, "Scales every menu and the on-screen display.")) dirty();
+    if (optSlider(o, st.adaptiveQuality ? "Resolution scale (upper limit)" : "Resolution scale", st.renderScale, 0.5f, 1.0f, "%.0f%%", 100, "Render the 3D view below screen resolution for speed. With dynamic resolution on, this is the ceiling.")) dirty();
+    if (optSwitch(o, "Edge-aware upscaling", st.edgeUpscale, "Below 100% resolution scale, rebuild edges sharply (FSR 1 style) instead of a plain blur. ~0.3-0.6 ms.")) { st.edgeUpscale = !st.edgeUpscale; dirty(); }
+    {
+      int mi = st.msaa >= 4 ? 3 : st.msaa >= 2 ? 2 : st.fxaa ? 1 : 0;
+      const char* MSN[4] = {"Off", "FXAA", "MSAA 2x", "MSAA 4x"};
+      if (int d = optChoice(o, "Anti-aliasing", MSN[mi], "Smooths jagged edges. FXAA is nearly free; MSAA is sharper, costs more, and needs a restart.")) {
+        int nm = (mi + d + 4) % 4;
+        st.fxaa = nm == 1; st.msaa = nm == 2 ? 2 : nm == 3 ? 4 : 0; dirty();
       }
     }
+    {
+      const int FL[8] = {30, 40, 45, 60, 90, 120, 144, 0};
+      int fi = 3;
+      for (int i = 0; i < 8; i++) if (FL[i] == st.fpsLimit) fi = i;
+      char lb[16];
+      std::snprintf(lb, sizeof lb, FL[fi] ? "%d fps" : "Unlimited", FL[fi]);
+      if (int d = optChoice(o, "Frame rate limit", lb, "Caps the frame rate. A lower cap keeps the graphics card cooler and quieter.")) { st.fpsLimit = FL[(fi + d + 8) % 8]; dirty(); }
+    }
+  } else if (g_optCat == 1) {
+    {
+      const char* PN[3] = {"Low", "Medium", "High"};
+      int cur = (st.drawDistance <= 1.55f && st.shadowSize <= 1024) ? 0 : (st.drawDistance > 1.55f && st.drawDistance <= 2.05f && st.shadowSize == 1536) ? 1 : (st.drawDistance >= 2.95f && st.shadowSize >= 2048) ? 2 : -1;
+      optRowBg(o, "Quality preset", "Sets draw distance, shadows, grass and anti-aliasing together. Tuned for entry-level to mid-range cards.");
+      for (int i = 0; i < 3; i++) {
+        if (button({o.x + o.w - (3 - i) * 84.0f + 4, o.y + 7, 80, 26}, PN[i], cur == i ? ST_ACTIVE : ST_STONE, 11.5f, nullptr, SANS)) {
+          static const float DD[3] = {1.5f, 2.0f, 3.0f}, GR[3] = {26, 32, 36};
+          static const int SHS[3] = {1024, 1536, 2048}, MS[3] = {0, 0, 2}, FPS[3] = {45, 60, 60};
+          st.drawDistance = DD[i]; st.shadowSize = SHS[i]; st.msaa = MS[i]; st.fxaa = true; st.grassRadius = GR[i]; st.fpsLimit = FPS[i];
+          dirty();
+          actions::notify(std::string(PN[i]) + " quality preset applied. Anti-aliasing changes take effect after a restart.");
+        }
+      }
+      o.y += 41;
+    }
+    if (optSlider(o, st.fullMap ? "Draw distance (full map is on)" : "Draw distance", st.drawDistance, 1.0f, 3.0f, "%.1fx", 1, "How far grass, rocks, trees and villagers are drawn in full detail.")) dirty();
+    {
+      const int SH[3] = {1024, 1536, 2048};
+      const char* SHN[3] = {"Low", "Medium", "High"};
+      int si = st.shadowSize >= 2048 ? 2 : st.shadowSize >= 1536 ? 1 : 0;
+      if (int d = optChoice(o, "Shadow quality", SHN[si], "Sharpness of sun shadows near you.")) { st.shadowSize = SH[(si + d + 3) % 3]; dirty(); }
+    }
+    if (optSwitch(o, "Volumetric light", st.volumetric, "Sun beams through the trees, the mist and over ridges, strongest at dawn and dusk. About 1 ms on entry-level cards.")) { st.volumetric = !st.volumetric; dirty(); }
+    if (optSwitch(o, "Water reflections", st.waterRefl, "Lakes and rivers mirror the trees, banks, houses and sky. About 1 ms while water is on screen.")) { st.waterRefl = !st.waterRefl; dirty(); }
+    if (optSwitch(o, "Volumetric fog", st.volFog, "Drifting ground fog that catches the sun, lanterns and campfires, thickest in the morning and in rain. About 0.4 ms.")) { st.volFog = !st.volFog; dirty(); }
+    if (optSwitch(o, "Ambient occlusion", st.ssao, "Soft contact shading in corners and under objects.")) { st.ssao = !st.ssao; dirty(); }
+    if (optSwitch(o, "Temporal upscaling", st.temporalUpscale, "Renders fewer pixels and rebuilds the image over several frames. Faster and smoother edges, slightly softer picture.")) { st.temporalUpscale = !st.temporalUpscale; dirty(); }
+    if (optSwitch(o, "Render the full map", st.fullMap, "Draws the whole valley at once. For high-end graphics cards only.")) { st.fullMap = !st.fullMap; dirty(); }
+    {
+      const char* PN[3] = {"Off", "On", "Auto"};
+      int lp = std::max(0, std::min(2, st.leafPrepass));
+      if (int d = optChoice(o, "Leaf pre-pass", PN[lp], "A speed-up for dense foliage. Turn it off if leaves show speckles on your graphics card.")) { st.leafPrepass = (lp + d + 3) % 3; dirty(); }
+    }
+  } else if (g_optCat == 2) {
+    if (optSwitch(o, "Dynamic resolution", st.adaptiveQuality, "Lowers the render resolution when the frame rate dips and restores it when there is headroom.")) { st.adaptiveQuality = !st.adaptiveQuality; dirty(); }
+    if (optSwitch(o, "Dynamic detail", st.adaptiveDetail, "Thins distant undergrowth and pulls tree detail closer to hold the frame rate. Off keeps full detail at all times.")) { st.adaptiveDetail = !st.adaptiveDetail; if (!st.adaptiveDetail) st.detailScale = 1; dirty(); }
+    {
+      float tb = st.triBudget / 1000.0f;
+      if (optSlider(o, "Forest triangle budget", tb, 0, 1500, st.triBudget ? "%.0fk" : "Off", 1, "The most forest geometry dynamic detail will allow per frame. 0 turns the limit off.")) { st.triBudget = (int)(std::round(tb / 50) * 50) * 1000; dirty(); }
+    }
+    if (optSwitch(o, "Eco mode", st.eco, "Keeps the graphics card at roughly half load: cooler and quieter, lower frame rate.")) { st.eco = !st.eco; dirty(); }
+    optNote(o, "Press F3 in the game to show frame rate, CPU and GPU time, and what each part of the frame costs.");
+  } else if (g_optCat == 3) {
+    if (optSlider(o, "Music volume", st.musicVolume, 0, 1, "%.0f%%", 100, "Volume of the music.")) { audio::setMusicVolume(st.musicVolume); dirty(); }
+    if (optSlider(o, "Effects volume", st.sfxVolume, 0, 1, "%.0f%%", 100, "Volume of the bow, animals, weather and the forest.")) { audio::setSfxVolume(st.sfxVolume); dirty(); }
+  } else if (g_optCat == 4) {
+    float sens = st.mouseSensitivity * 1000;
+    if (optSlider(o, "Mouse sensitivity", sens, 0.5f, 6, "%.1f", 1, "How far the view turns for a given mouse movement.")) { st.mouseSensitivity = sens / 1000; dirty(); }
+    o.y += 10;
+    text("KEYS  ·  click one, then press the new key (Esc cancels)", o.x, o.y + 8, 10.5f, C("#b9a37a"), SANS);
+    o.y += 22;
+    if (g_capture >= 0) {
+      int k = platform::takeLastRawKey();
+      if (k == 256) g_capture = -1;                                   // Esc
+      else if (k > 0 && !(k >= 290 && k <= 314)) {                    // not F1..F25 (fixed)
+        platform::setBind(platform::BINDS[g_capture].key, k);
+        g_capture = -1; audio::crispClick(); dirty();
+      }
+    }
+    float cw2 = (o.w - 16) / 2;
+    for (int i = 0; i < platform::BIND_COUNT; i++) {
+      float kx = o.x + (i % 2) * (cw2 + 16), ky = o.y + (i / 2) * 31.0f;
+      int act = platform::BINDS[i].key;
+      bool cap = g_capture == i, changed = st.binds[act] && st.binds[act] != platform::BINDS[i].def;
+      text(platform::BINDS[i].name, kx, ky + 13, 11.5f, C("#c9c2b5"), SANS);
+      std::string kname = cap ? "press a key..." : platform::actionKeyName(act);
+      Rect kr{kx + cw2 - 110, ky + 1, 110, 24};
+      if (button(kr, kname.c_str(), cap ? ST_ACTIVE : changed ? ST_GHOSTON : ST_STONE, 11, nullptr, SANS)) { platform::takeLastRawKey(); g_capture = cap ? -1 : i; }
+    }
+    o.y += ((platform::BIND_COUNT + 1) / 2) * 31.0f + 8;
+    if (button({o.x, o.y, 170, 30}, "Reset to defaults", ST_STONE, 12, nullptr, SANS)) { platform::resetBinds(); g_capture = -1; dirty(); actions::notify("Controls reset to defaults."); }
+    text("Fixed: Esc pause, F2 screenshot, F3 stats, F11 fullscreen, mouse to aim and shoot", o.x + 186, o.y + 15, 10.5f, C("#8f877b"), SANS);
+  } else {
+    if (optSwitch(o, "Show the HUD", st.hudOn, "Hide or show everything on screen at once. H does the same in the game.")) { st.hudOn = !st.hudOn; dirty(); }
+    o.y += 8;
+    text("ITEMS  ·  click to show or hide each one", o.x, o.y + 8, 10.5f, C("#b9a37a"), SANS);
+    o.y += 24;
+    float cw2 = (o.w - 16) / 2;
+    for (int i = 0; i < HUD_ITEM_COUNT; i++) {
+      float kx = o.x + (i % 2) * (cw2 + 16), ky = o.y + (i / 2) * 36.0f;
+      bool on = !(st.hudHide & (1u << i));
+      std::string lab = std::string(on ? "[x]  " : "[  ]  ") + HUD_ITEM_NAMES[i];
+      if (button({kx, ky, cw2, 30}, lab.c_str(), on ? ST_GHOSTON : ST_STONE, 12, nullptr, SANS)) { st.hudHide ^= 1u << i; audio::crispClick(); dirty(); }
+    }
+    o.y += ((HUD_ITEM_COUNT + 1) / 2) * 36.0f + 6;
+    if (button({o.x, o.y, 150, 30}, "Show all", ST_STONE, 12, nullptr, SANS)) { st.hudHide = 0; st.hudOn = true; dirty(); }
   }
-  float colW = (r.w - 64 - 40) / 2, x1 = r.x + 32, x2 = x1 + colW + 40, y0 = r.y + 76;
-  text("DISPLAY", x1, y0, 10, C("#78716c"), SANS);
-  float y = y0 + 16;
-  if (slider(x1, y, colW, st.fullMap ? "Draw distance (full map on)" : "Draw distance", st.drawDistance, 1.0f, 3.0f, "%.1fx")) g_settingsDirty = true;
-  y += 50;
-  if (slider(x1, y, colW, st.adaptiveQuality ? "Resolution scale (max, dynamic on)" : "Resolution scale", st.renderScale, 0.5f, 1.0f, "%.0f%%", 100)) g_settingsDirty = true;
-  y += 50;
-  if (slider(x1, y, colW, "Field of view", st.fov, 60, 100, "%.0f")) g_settingsDirty = true;
-  y += 50;
-  if (slider(x1, y, colW, "UI scale", st.uiScale, 0.8f, 1.4f, "%.2f")) g_settingsDirty = true;
-  y += 54;
-  if (toggle(x1, y, colW, "Fullscreen", platform::isFullscreen())) platform::toggleFullscreen();
-  y += 36;
-  if (toggle(x1, y, colW, "VSync", st.vsync)) { platform::setVsync(!st.vsync); g_settingsDirty = true; }
-  y += 36;
-  if (toggle(x1, y, colW, "Dynamic resolution", st.adaptiveQuality)) { st.adaptiveQuality = !st.adaptiveQuality; g_settingsDirty = true; }
-  y += 36;
-  if (toggle(x1, y, colW, "Dynamic detail (hold FPS)", st.adaptiveDetail)) { st.adaptiveDetail = !st.adaptiveDetail; if (!st.adaptiveDetail) st.detailScale = 1; g_settingsDirty = true; }
-  y += 36;
-  const int SH[3] = {1024, 1536, 2048};
-  const char* SHN[3] = {"Low", "Medium", "High"};
-  int si = st.shadowSize >= 2048 ? 2 : st.shadowSize >= 1536 ? 1 : 0;
-  text("Shadow quality", x1, y + 14, 12, C("#d6d3d1"), SANS);
-  if (button({x1 + colW - 90, y + 2, 90, 26}, SHN[si], ST_STONE, 11, nullptr, SANS)) { st.shadowSize = SH[(si + 1) % 3]; g_settingsDirty = true; }
-  y += 36;
-  {
-    const int FL[8] = {30, 40, 45, 60, 90, 120, 144, 0};
-    int fi = 3;
-    for (int i = 0; i < 8; i++) if (FL[i] == st.fpsLimit) fi = i;
-    text("FPS limit (lower = cooler GPU)", x1, y + 14, 12, C("#d6d3d1"), SANS);
-    char lb[16];
-    std::snprintf(lb, sizeof lb, FL[fi] ? "%d" : "Unlimited", FL[fi]);
-    if (button({x1 + colW - 90, y + 2, 90, 26}, lb, ST_STONE, 11, nullptr, SANS)) { st.fpsLimit = FL[(fi + 1) % 8]; g_settingsDirty = true; }
-  }
-  y += 36;
-  if (toggle(x1, y, colW, "Render full map (high-end GPU)", st.fullMap)) { st.fullMap = !st.fullMap; g_settingsDirty = true; }
-  y += 36;
-  if (toggle(x1, y, colW, "Temporal upscaling (faster)", st.temporalUpscale)) { st.temporalUpscale = !st.temporalUpscale; g_settingsDirty = true; }
-  y += 36;
-  if (toggle(x1, y, colW, "Eco mode (GPU at most ~half busy)", st.eco)) { st.eco = !st.eco; g_settingsDirty = true; }
-  y += 36;
-  {
-    const char* PN[3] = {"Off", "On", "Auto"};
-    text("Leaf pre-pass (off if leaves speckle)", x1, y + 14, 12, C("#d6d3d1"), SANS);
-    if (button({x1 + colW - 90, y + 2, 90, 26}, PN[std::max(0, std::min(2, st.leafPrepass))], ST_STONE, 11, nullptr, SANS)) { st.leafPrepass = (st.leafPrepass + 1) % 3; g_settingsDirty = true; }
-  }
-
-  text("AUDIO & CONTROLS", x2, y0, 10, C("#78716c"), SANS);
-  y = y0 + 16;
-  if (slider(x2, y, colW, "Music volume", st.musicVolume, 0, 1, "%.0f%%", 100)) { audio::setMusicVolume(st.musicVolume); g_settingsDirty = true; }
-  y += 50;
-  if (slider(x2, y, colW, "Effects volume", st.sfxVolume, 0, 1, "%.0f%%", 100)) { audio::setSfxVolume(st.sfxVolume); g_settingsDirty = true; }
-  y += 50;
-  float sens = st.mouseSensitivity * 1000;
-  if (slider(x2, y, colW, "Mouse sensitivity", sens, 0.5f, 6, "%.1f")) { st.mouseSensitivity = sens / 1000; g_settingsDirty = true; }
-  y += 54;
-  int mi = st.msaa >= 4 ? 3 : st.msaa >= 2 ? 2 : st.fxaa ? 1 : 0;
-  text("Anti-aliasing (MSAA needs restart)", x2, y + 14, 12, C("#d6d3d1"), SANS);
-  const char* MSN[4] = {"Off", "FXAA", "MSAA 2x", "MSAA 4x"};
-  if (button({x2 + colW - 90, y + 2, 90, 26}, MSN[mi], ST_STONE, 11, nullptr, SANS)) {
-    int nm = (mi + 1) % 4;
-    st.fxaa = nm == 1;
-    st.msaa = nm == 2 ? 2 : nm == 3 ? 4 : 0;
-    g_settingsDirty = true;
-  }
-  y += 44;
-  if (toggle(x2, y, colW, "Ambient occlusion (SSAO)", st.ssao)) { st.ssao = !st.ssao; g_settingsDirty = true; }
-  y += 44;
-  {
-    float tb = st.triBudget / 1000.0f;
-    if (slider(x2, y, colW, "Forest triangle budget (k, 0 = off)", tb, 0, 1500, "%.0fk")) { st.triBudget = (int)(std::round(tb / 50) * 50) * 1000; g_settingsDirty = true; }
-  }
-  y += 60;
-  text("SAVE FILE", x2, y, 10, C("#78716c"), SANS);
-  y += 12;
-  paragraph(platform::saveDir() + "/save.json", x2, y, colW, 11, C("#a8a29e"), SANS, 1.35f);
-
-  float by = r.y + r.h - 32 - 42;
-  text("Settings are saved to config.ini next to the game.", r.x + 32, by + 21, 11, C("#78716c"), SANS);
-  if (button({r.x + r.w - 32 - 160, by, 160, 42}, "Save & Close", ST_AMBER, 14)) {
+  // footer: what the hovered setting does, and the way out
+  float fy = r.y + r.h - FH;
+  line(r.x + 1, fy, r.x + r.w - 1, fy, 1, C("#2e2924"));
+  rect({r.x + 1, fy + 1, r.w - 2, FH - 2}, C("#0d0c0b", 0.6f), 0);
+  std::string hint = o.hint.empty() ? "Save file: " + platform::saveDir() + "/save.json" : o.hint;
+  paragraph(hint, r.x + 28, fy + 20, r.w - 28 - 220, 11.5f, o.hint.empty() ? C("#6f685e") : C("#c9c2b5"), SANS, 1.4f);
+  if (button({r.x + r.w - 28 - 160, fy + 14, 160, 38}, "Save & Close", ST_AMBER, 14, "Esc")) {
     platform::saveSettings();
     g_settingsDirty = false;
     g_options = false;
@@ -1638,7 +1996,7 @@ void drawTitle(float W, float H) {
   if (g_titlePage == 0) {
     paragraph("Hunt, gather, recruit four specialists and grow a struggling camp into a thriving Kath-Kuni village.", x + 18, y, w, 12, C("#d6d3d1"), SANS, 1.4f);
     y += 56;
-    if (menuItem(x, y, w, "Continue", hasSave ? "Slot " + std::to_string(latest + 1) + " · " + summary : "No saved village yet", hasSave, hasSave)) { audio::confirmSelect(); app::continueGame(latest); return; }
+    if (menuItem(x, y, w, "Continue", hasSave ? "Slot " + std::to_string(latest + 1) + " · " + summary : "No saved village yet", hasSave, hasSave)) { audio::confirmSelect(); app::g_pendingContinue = latest; return; }
     y += 66;
     if (menuItem(x, y, w, "Save Slots", "Load a village or start a new one in any of 3 slots", !hasSave)) g_titlePage = 2;
     y += 66;
@@ -1657,7 +2015,7 @@ void drawTitle(float W, float H) {
       std::string lab = "Slot " + std::to_string(k + 1) + (has ? "" : " · empty");
       if (menuItem(x, y, w, lab, has ? slotSum[k] : "Start a new village here", has)) {
         audio::confirmSelect();
-        if (has) { app::continueGame(k); g_titlePage = 0; return; }
+        if (has) { app::g_pendingContinue = k; g_titlePage = 0; return; }
         A.saveSlot = k;
         g_titlePage = 1;
         return;
@@ -1674,8 +2032,8 @@ void drawTitle(float W, float H) {
   for (int i = 0; i < 4; i++) {
     Rect b{x + 18 + i * (cw + 10), y, cw, 190};
     bool on = A.startSeason == i, hot = hovered(b);
-    rect(b, C("#0c0a09", on ? 0.75f : hot ? 0.6f : 0.45f), 12);
-    border(b, on ? C("#f59e0b") : C("#57534e", 0.6f), on ? 2 : 1, 12);
+    rect(b, C("#0c0a09", on ? 0.75f : hot ? 0.6f : 0.45f), 6);
+    border(b, on ? C("#f59e0b") : C("#57534e", 0.6f), on ? 2 : 1, 6);
     seasonGlyph(i, b.x + cw / 2, b.y + 44, 22);
     text(SEASON_NAMES[i], b.x + cw / 2, b.y + 92, 17, on ? C("#fbbf24") : C("#e7e5e4"), SERIF, 1);
     paragraph(SEASON_NOTES[i], b.x + 12, b.y + 116, cw - 24, 10.5f, C("#a8a29e"), SANS, 1.35f, 1);
@@ -1734,6 +2092,7 @@ bool takeSettingsChanged() { bool d = g_settingsDirty; g_settingsDirty = false; 
 void setStats(const FrameStats& s) { g_fs = s; }
 
 bool escape() {
+  if (g_capture >= 0) { g_capture = -1; return true; }
   if (A.howToOpen) { A.howToOpen = false; return true; }
   if (g_options) { platform::saveSettings(); g_options = false; return true; }
   if (A.status == Status::Start && g_titlePage) { g_titlePage = 0; return true; }
@@ -1850,6 +2209,11 @@ static void drawInner(float, bool cursorFree) {
 }
 
 void prebuildMap() { buildMap(); }
+bool capturingKey() { return g_capture >= 0; }
+void setOptCat(int c) { g_optCat = c; g_capture = -1; }
 void shutdown() { g_mapTex.destroy(); g_mapTexWinter.destroy(); g_mapTexAutumn.destroy(); }
 
 }  // namespace screens
+
+const char* HUD_ITEM_NAMES[HUD_ITEM_COUNT] = {"Clock & season", "Renown & population", "Arrows", "Resources", "Objective", "Menu buttons", "Compass",
+                                              "Minimap", "Crosshair", "Health bar", "Prompts", "Notifications", "World markers", "Damage popups"};

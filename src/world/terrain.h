@@ -5,10 +5,14 @@
 #include <string>
 #include <array>
 
-constexpr float MAP_HALF = 600.0f;
+// The first map was a 1200 m square (CORE_HALF). The world was later widened to MAP_HALF by adding grid rows on
+// every side at the same spacing, so every old grid point - and with it every saved position - is where it was.
+constexpr float MAP_HALF = 832.5f;   // 2x the first map's area (a 4x version, MAP_HALF 1220 / 1024 segments, was built in 0.9.21)
+constexpr float CORE_HALF = 600.0f;
+constexpr int CORE_ROADS = 9, CORE_LAKES = 2;   // roads and lakes of the first map (saved relics were placed against these)
 constexpr float SETTLEMENT_RADIUS = 18.0f;
 constexpr float PLATEAU = 19.0f;
-constexpr int TERRAIN_SEGMENTS = 512;
+constexpr int TERRAIN_SEGMENTS = 704;
 constexpr float GRID_SIZE = MAP_HALF * 2 + 40;
 constexpr float GRID_STEP = GRID_SIZE / TERRAIN_SEGMENTS;
 constexpr float GRID_MIN = -GRID_SIZE / 2;
@@ -63,9 +67,17 @@ struct Step { float x, z, dx, dz, hl, hw, top, bottom; };
 struct Gap { float x, z, dx, dz, hl, base, rx, rz, yaw; bool pillars; };
 struct Shrine { std::string name; float x, z, y, yaw; };
 
-struct PathHit { float rd = 99, rh = 0, td = 99, th = 0, td2 = 99, th2 = 0, cap = 1e9f; };
+struct PathHit { float rd = 99, rh = 0, td = 99, th = 0, td2 = 99, th2 = 0, cap = 1e9f; int rid = -1; };
+
+// outer lands: the country beyond the first valley's mountain wall
+enum Biome { B_VALE, B_CRAG, B_SNOW, B_FERN, B_MEADOW, B_COUNT };
+struct Place { std::string name; float x, z; };
 
 namespace world {
+extern std::vector<Place> PLACES;
+float outerWeight(float x, float z);                 // 0 in the first valley and its wall, 1 in the outer lands
+void biomeWeights(float x, float z, float* w);       // B_COUNT weights, summing to outerWeight
+float corePathDistance(float x, float z);            // distance to the first map's roads only
 extern std::vector<Summit> SUMMITS;
 extern std::vector<Road> ROADS;
 extern std::vector<Route> ROUTES;
@@ -86,6 +98,7 @@ float getTerrainHeight(float x, float z);
 float slopeAt(float x, float z);
 float localSlope(float x, float z);
 float valleyRadius(float x, float z);
+P2 outerPoint(float a, float past);   // a point at angle a, `past` metres beyond the first valley's edge
 float mountainFactor(float x, float z);
 float forestDensity(float x, float z);
 RiverHit riverQuery(float x, float z);
@@ -107,3 +120,5 @@ MeshData buildBackdrop();
 float terrainHeightRaw(float x, float z);
 float naturalHeightAt(float x, float z);
 }  // namespace world
+static_assert(GRID_SIZE == 1705.0f && GRID_MIN == -852.5f, "envUV() in glsl.h and grass.cpp hard-code the grid extent");
+static_assert(GRID_STEP == 2.421875f, "grid spacing must stay 1240/512 so old grid points keep their place");

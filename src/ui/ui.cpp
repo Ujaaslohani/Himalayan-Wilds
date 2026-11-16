@@ -247,7 +247,20 @@ int decode(const std::string& s, size_t& i) {
   return cp;
 }
 
+const Glyph* glyphSlow(int f, int cp);
+// HUD text looks up a glyph per character per frame: plain ASCII answers from a flat table instead of a hash map
 const Glyph* glyph(int f, int cp) {
+  static const Glyph* fast[2][128];
+  static size_t seen[2] = {0, 0};
+  if (cp < 0 || cp >= 128) return glyphSlow(f, cp);
+  if (seen[f] != g_glyphs[0].size() + g_glyphs[1].size()) {   // atlas grew: forget the table
+    seen[f] = g_glyphs[0].size() + g_glyphs[1].size();
+    for (auto& e : fast[f]) e = nullptr;
+  }
+  if (!fast[f][cp]) fast[f][cp] = glyphSlow(f, cp);
+  return fast[f][cp];
+}
+const Glyph* glyphSlow(int f, int cp) {
   auto it = g_glyphs[f].find(cp);
   if (it != g_glyphs[f].end() && it->second.ok) return &it->second;
   int other = 1 - f;
@@ -448,7 +461,23 @@ void popClip() {
   applyClip();
 }
 
+// The HUD measures and wraps the same strings every frame: remember the answers (cleared when it grows large)
+struct TextKey { std::string s; float a, b; int f; bool operator==(const TextKey& o) const { return a == o.a && b == o.b && f == o.f && s == o.s; } };
+struct TextKeyHash { size_t operator()(const TextKey& k) const { return std::hash<std::string>()(k.s) ^ (std::hash<float>()(k.a) * 31) ^ (std::hash<float>()(k.b) * 131) ^ (size_t)k.f * 7919; } };
+static std::unordered_map<TextKey, float, TextKeyHash> g_widthMemo;
+static std::unordered_map<TextKey, std::vector<std::string>, TextKeyHash> g_wrapMemo;
+static float textWidthRaw(const std::string& s, float size, FontId f);
 float textWidth(const std::string& s, float size, FontId f) {
+  if (s.size() < 2) return textWidthRaw(s, size, f);
+  TextKey key{s, size, 0, (int)f};
+  auto it = g_widthMemo.find(key);
+  if (it != g_widthMemo.end()) return it->second;
+  if (g_widthMemo.size() > 6000) g_widthMemo.clear();
+  float w = textWidthRaw(s, size, f);
+  g_widthMemo.emplace(std::move(key), w);
+  return w;
+}
+static float textWidthRaw(const std::string& s, float size, FontId f) {
   float k = size / BASE, w = 0;
   size_t i = 0;
   while (i < s.size()) {
@@ -489,7 +518,17 @@ float textShadowed(const std::string& s, float x, float y, float size, uint32_t 
   return text(s, x, y, size, c, f, align, std::max(1.0f, size * 0.08f));
 }
 
+static std::vector<std::string> wrapRaw(const std::string& s, float size, float maxW, FontId f);
 std::vector<std::string> wrap(const std::string& s, float size, float maxW, FontId f) {
+  TextKey key{s, size, maxW, (int)f};
+  auto it = g_wrapMemo.find(key);
+  if (it != g_wrapMemo.end()) return it->second;
+  if (g_wrapMemo.size() > 1500) g_wrapMemo.clear();
+  auto lines = wrapRaw(s, size, maxW, f);
+  g_wrapMemo.emplace(std::move(key), lines);
+  return lines;
+}
+static std::vector<std::string> wrapRaw(const std::string& s, float size, float maxW, FontId f) {
   std::vector<std::string> lines;
   std::string cur, word;
   auto flushWord = [&]() {

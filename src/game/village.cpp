@@ -498,13 +498,15 @@ void syncResidents() {
 void resetResidents() { g_res.clear(); g_nextResident = 1; }
 
 // names and traits come from the villager's id, so they stay the same after loading a save
-static const char* RNAMES[24] = {"Asha", "Bhim", "Chandni", "Dorje", "Gauri", "Hari", "Ishaan", "Jamuna", "Kesang", "Lata", "Mohan", "Nima",
-                                 "Parvati", "Ramesh", "Sonam", "Tara", "Uma", "Vikram", "Yangchen", "Zara", "Pema", "Kunal", "Dechen", "Meera"};
+// the body is picked by id % 3 (0 man, 1 woman, 2 elder man), so the name list is picked the same way
+static const char* RNAMES_F[14] = {"Asha", "Chandni", "Gauri", "Jamuna", "Lata", "Parvati", "Tara", "Uma", "Yangchen", "Zara", "Pema", "Dechen", "Meera", "Lhamo"};
+static const char* RNAMES_M[14] = {"Bhim", "Dorje", "Hari", "Ishaan", "Mohan", "Ramesh", "Vikram", "Kunal", "Tashi", "Tenzin", "Norbu", "Karma", "Gopi", "Jigme"};
 struct TraitDef { const char* name; const char* blurb; float work; };
 static const TraitDef TRAITS[5] = {{"Hard worker", "gets 20% more done", 1.2f}, {"Early riser", "starts work at first light (+10%)", 1.1f},
                                    {"Easy-going", "works at their own pace (-15%)", 0.85f}, {"Cheerful", "lifts everyone's spirits", 1.0f}, {"Steady", "reliable, no surprises", 1.0f}};
 static uint32_t rhash(int id, uint32_t salt) { uint32_t h = (uint32_t)id * 2654435761u ^ salt; h ^= h >> 15; h *= 2246822519u; h ^= h >> 13; return h; }
-static const char* residentName(int id) { return RNAMES[rhash(id, 7) % 24]; }
+static const char* residentName(int id) { return (id % 3 == 1 ? RNAMES_F : RNAMES_M)[rhash(id, 7) % 14]; }
+const char* nextResidentName() { return residentName(g_nextResident); }
 static int residentTrait(int id) { return (int)(rhash(id, 91) % 5); }
 
 float traitMult(int j) {

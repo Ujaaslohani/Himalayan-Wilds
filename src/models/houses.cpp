@@ -3,16 +3,19 @@
 #include <memory>
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
+#include <cmath>
+#include "../platform/platform.h"
 
 const KindInfo KINDS[SK_COUNT] = {
     {"cottage", "Small Cottage", KG_HOME, "Stone-and-timber home with a sloped roof and a small chimney. Houses 2.", {{"wood", 10}, {"stone", 6}}, 2, 1, 2.9f, {LO_ROOF, LO_WALL, LO_WOOD, LO_DOOR, LO_ACCENT, LO_DECO}},
-    {"raised_house", "Raised Wooden House", KG_HOME, "Timber upper floor over a stone base, with a balcony and outside stairs. Houses 3.", {{"wood", 16}, {"stone", 8}, {"fiber", 4}}, 3, 2, 3.4f, {LO_ROOF, LO_WALL, LO_WOOD, LO_DOOR, LO_ACCENT, LO_DECO}},
-    {"family_house", "Large Family House", KG_HOME, "A bigger two-storey home with a side wing and porch. Houses 5.", {{"wood", 24}, {"stone", 14}, {"fiber", 6}}, 5, 3, 4.6f, {LO_ROOF, LO_WALL, LO_WOOD, LO_DOOR, LO_ACCENT, LO_DECO}},
-    {"communal_house", "Communal House", KG_HOME, "A long shared house for many residents. Houses 8.", {{"wood", 36}, {"stone", 22}, {"fiber", 10}}, 8, 3, 5.6f, {LO_ROOF, LO_WALL, LO_WOOD, LO_DOOR, LO_ACCENT, LO_DECO}},
+    {"raised_house", "Raised Wooden House", KG_HOME, "Timber upper floor over a stone base, with a balcony and outside stairs. Houses 3.", {{"wood", 24}, {"stone", 12}, {"fiber", 6}}, 3, 2, 3.4f, {LO_ROOF, LO_WALL, LO_WOOD, LO_DOOR, LO_ACCENT, LO_DECO}},
+    {"family_house", "Large Family House", KG_HOME, "A bigger two-storey home with a side wing and porch. Houses 5.", {{"wood", 45}, {"stone", 28}, {"fiber", 12}}, 5, 3, 4.6f, {LO_ROOF, LO_WALL, LO_WOOD, LO_DOOR, LO_ACCENT, LO_DECO}},
+    {"communal_house", "Communal House", KG_HOME, "A long shared house for many residents. Houses 8.", {{"wood", 80}, {"stone", 50}, {"fiber", 22}}, 8, 3, 5.6f, {LO_ROOF, LO_WALL, LO_WOOD, LO_DOOR, LO_ACCENT, LO_DECO}},
     {"market_stall", "Market Stall", KG_VILLAGE, "Timber stall with a counter, baskets, pottery and hanging cloth.", {{"wood", 8}, {"fiber", 6}}, 0, 3, 2.3f, {LO_ROOF, LO_WOOD, LO_ACCENT}},
-    {"animal_shelter", "Animal Shelter", KG_VILLAGE, "Roofed enclosure with rails, hay and storage.", {{"wood", 12}, {"fiber", 6}, {"stone", 2}}, 0, 2, 3.4f, {LO_ROOF, LO_WOOD}},
-    {"community_hall", "Community Hall", KG_VILLAGE, "Large gathering hall with timber pillars, benches and carved beams.", {{"wood", 40}, {"stone", 30}, {"fiber", 12}}, 0, 8, 6.6f, {LO_ROOF, LO_WALL, LO_WOOD, LO_DOOR, LO_ACCENT}},
-    {"food_store", "Food Store", KG_VILLAGE, "Raised timber granary on stone pillars. Holds 80 more food for winter.", {{"wood", 18}, {"stone", 12}}, 0, 1, 2.9f, {LO_ROOF, LO_WALL, LO_WOOD, LO_DOOR}},
+    {"animal_shelter", "Animal Shelter", KG_VILLAGE, "Roofed enclosure with rails, hay and storage.", {{"wood", 16}, {"fiber", 8}, {"stone", 4}}, 0, 2, 3.4f, {LO_ROOF, LO_WOOD}},
+    {"community_hall", "Community Hall", KG_VILLAGE, "Large gathering hall with timber pillars, benches and carved beams.", {{"wood", 110}, {"stone", 80}, {"fiber", 30}}, 0, 8, 6.6f, {LO_ROOF, LO_WALL, LO_WOOD, LO_DOOR, LO_ACCENT}},
+    {"food_store", "Food Store", KG_VILLAGE, "Raised timber granary on stone pillars. Holds 80 more food for winter.", {{"wood", 28}, {"stone", 20}}, 0, 1, 2.9f, {LO_ROOF, LO_WALL, LO_WOOD, LO_DOOR}},
     {"fence", "Fence", KG_DECOR, "A 3 m timber fence section.", {{"wood", 1}}, 0, 0, 0.6f, {LO_WOOD}},
     {"path", "Stone Path", KG_DECOR, "A 2 m square of flat stones.", {{"stone", 1}}, 0, 0, 0.6f, {}},
     {"lamp_post", "Lantern Post", KG_DECOR, "Lights the way at night.", {{"wood", 1}, {"fiber", 1}}, 0, 1, 0.6f, {LO_WOOD}},
@@ -294,7 +297,72 @@ struct Out {
   V door;
 };
 
+// ---- baked building models (assets/buildings/*.hwb, made from Uğur Yakışık's CC BY medieval packs) ----
+// per triangle: 3 corners, sRGB colour, class (0 keep, 1 wall, 2 roof, 3 wood, 4 lit window); classes 1-3 take the Look colours
+struct HWB {
+  bool ok = false;
+  std::vector<float> p;
+  std::vector<uint32_t> c, k;
+  std::vector<V> lights;
+  float ref[5] = {1, 1, 1, 1, 1};
+  V mn{1e9f, 1e9f, 1e9f}, mx{-1e9f, -1e9f, -1e9f};
+};
+const HWB& hwb(const char* name) {
+  static std::map<std::string, HWB> cache;
+  auto it = cache.find(name);
+  if (it != cache.end()) return it->second;
+  HWB& h = cache[name];
+  std::vector<uint8_t> b;
+  if (!platform::readFile(platform::assetPath(std::string("buildings/") + name + ".hwb"), b) || b.size() < 36 || std::memcmp(b.data(), "HWB1", 4) != 0) return h;
+  uint32_t nt, nl, nr;
+  std::memcpy(&nt, &b[4], 4); std::memcpy(&nl, &b[8], 4); std::memcpy(&nr, &b[12], 4);
+  size_t off = 16;
+  for (uint32_t i = 0; i < nr && i < 5; i++) std::memcpy(&h.ref[i], &b[off + i * 4], 4);
+  off += nr * 4;
+  if (b.size() < off + nl * 12 + (size_t)nt * 44) return h;
+  for (uint32_t i = 0; i < nl; i++) { float f[3]; std::memcpy(f, &b[off], 12); off += 12; h.lights.push_back({f[0], f[1], f[2]}); }
+  h.p.resize((size_t)nt * 9); h.c.resize(nt); h.k.resize(nt);
+  for (uint32_t i = 0; i < nt; i++) {
+    std::memcpy(&h.p[(size_t)i * 9], &b[off], 36); std::memcpy(&h.c[i], &b[off + 36], 4); std::memcpy(&h.k[i], &b[off + 40], 4); off += 44;
+    for (int v = 0; v < 3; v++) {
+      const float* q = &h.p[(size_t)i * 9 + v * 3];
+      h.mn = {std::min(h.mn.x, q[0]), std::min(h.mn.y, q[1]), std::min(h.mn.z, q[2])};
+      h.mx = {std::max(h.mx.x, q[0]), std::max(h.mx.y, q[1]), std::max(h.mx.z, q[2])};
+    }
+  }
+  h.ok = true;
+  return h;
+}
+uint32_t tintPacked(uint32_t src, uint32_t target, float ref) {
+  float r = (src & 255) / 255.f, g = ((src >> 8) & 255) / 255.f, bl = ((src >> 16) & 255) / 255.f;
+  float l = 0.299f * r + 0.587f * g + 0.114f * bl;
+  float f = std::min(1.6f, std::max(0.45f, l / std::max(0.02f, ref)));
+  auto ch = [&](int sh) { return (uint32_t)std::min(255.f, std::round(((target >> sh) & 255) * f)) << sh; };
+  return ch(0) | ch(8) | ch(16) | (255u << 24);
+}
+// adds a baked model; returns false (so the caller can fall back to the procedural build) when the file is missing
+bool addModel(Shape& b, std::vector<V>& lights, const char* name, const Look& L, V off = {0, 0, 0}, int maxLights = 4) {
+  const HWB& h = hwb(name);
+  if (!h.ok) return false;
+  uint32_t tgt[4] = {0, hexToPacked(wallColor(L)), hexToPacked(roofCol(L)), hexToPacked(WOODC[L.wood][0])};
+  for (size_t i = 0; i < h.c.size(); i++) {
+    const float* q = &h.p[i * 9];
+    V a{q[0], q[1], q[2]}, c1{q[3], q[4], q[5]}, c2{q[6], q[7], q[8]};
+    V n = (c1 - a).cross(c2 - a);
+    float ln = n.length();
+    n = ln > 1e-9f ? n * (1.0f / ln) : V{0, 1, 0};
+    uint32_t k = h.k[i], col = (k >= 1 && k <= 3) ? tintPacked(h.c[i], tgt[k], h.ref[k]) : h.c[i];
+    b.verts.push_back({a + off, n, col});
+    b.verts.push_back({c1 + off, n, col});
+    b.verts.push_back({c2 + off, n, col});
+  }
+  for (size_t i = 0; i < h.lights.size() && (int)i < maxLights; i++) lights.push_back(h.lights[(i * h.lights.size()) / std::min<size_t>(h.lights.size(), maxLights)] + off);
+  return true;
+}
+V modelFront(const char* name) { const HWB& h = hwb(name); return {0, 0, h.ok ? h.mx.z + 1.0f : 3.0f}; }
+
 Out cottage(const Look& L) {
+  { Out m; if (addModel(m.s, m.lights, "cottage", L)) { m.door = modelFront("cottage"); return m; } }
   Out o;
   Shape& b = o.s;
   float w = 4.2f, d = 3.6f, h = 2.3f, y0 = 0.34f;
@@ -330,6 +398,7 @@ Out cottage(const Look& L) {
 }
 
 Out raisedHouse(const Look& L) {
+  { Out m; if (addModel(m.s, m.lights, "raised_house", L)) { m.door = modelFront("raised_house"); return m; } }
   Out o;
   Shape& b = o.s;
   float w = 4.4f, d = 3.8f;
@@ -366,6 +435,7 @@ Out raisedHouse(const Look& L) {
 }
 
 Out familyHouse(const Look& L) {
+  { Out m; if (addModel(m.s, m.lights, "family_house", L)) { m.door = modelFront("family_house"); return m; } }
   Out o;
   Shape& b = o.s;
   float w = 6, d = 4.6f, h = 3.9f, y0 = 0.34f;
@@ -394,6 +464,7 @@ Out familyHouse(const Look& L) {
 }
 
 Out communalHouse(const Look& L) {
+  { Out m; if (addModel(m.s, m.lights, "communal_house", L)) { m.door = modelFront("communal_house"); return m; } }
   Out o;
   Shape& b = o.s;
   float w = 9, d = 5, h = 3.7f, y0 = 0.34f;
@@ -418,6 +489,7 @@ Out communalHouse(const Look& L) {
 const char* roofCol(const Look& L) { return L.roof == R_THATCH ? "#c9a95c" : L.roof == R_SHINGLE ? "#8a5a34" : "#4b5563"; }
 
 Out marketStall(const Look& L) {
+  { Out m; if (addModel(m.s, m.lights, "market_stall", L)) { m.door = modelFront("market_stall"); return m; } }
   Out o;
   Shape& b = o.s;
   const char *w1 = WOODC[L.wood][0], *w2 = WOODC[L.wood][1];
@@ -449,8 +521,10 @@ Out animalShelter(const Look& L) {
   const char *w1 = WOODC[L.wood][0], *w2 = WOODC[L.wood][1];
   float W = 5, D = 3.5f;
   float posts[6][3] = {{-W / 2, D / 2, 2.4f}, {0, D / 2, 2.4f}, {W / 2, D / 2, 2.4f}, {-W / 2, -D / 2, 2.0f}, {0, -D / 2, 2.0f}, {W / 2, -D / 2, 2.0f}};
-  for (auto& p : posts) b.rod(w2, {p[0], 0, p[1]}, {p[0], p[2], p[1]}, 0.09f, 0.09f, 6);
-  b.box(roofCol(L), {0, 2.3f, 0}, {W + 0.6f, L.roof == R_THATCH ? 0.3f : 0.14f, D + 0.7f}, {-0.12f, 0, 0});
+  if (!addModel(b, o.lights, "animal_shelter", L, {0, 0, -0.2f})) {
+    for (auto& p : posts) b.rod(w2, {p[0], 0, p[1]}, {p[0], p[2], p[1]}, 0.09f, 0.09f, 6);
+    b.box(roofCol(L), {0, 2.3f, 0}, {W + 0.6f, L.roof == R_THATCH ? 0.3f : 0.14f, D + 0.7f}, {-0.12f, 0, 0});
+  }
   for (int i = 0; i < 6; i++) b.box(i % 2 ? w1 : w2, {0, 0.2f + i * 0.32f, -D / 2}, {W, 0.3f, 0.08f});
   for (float y : {0.45f, 0.95f}) {
     b.box(w1, {0, y, D / 2}, {W, 0.08f, 0.08f});
@@ -480,9 +554,11 @@ Out foodStore(const Look& L) {
       b.tube(STONE[2], {sx * 1.4f, 0.95f, sz * 1.1f}, 0.38f, 0.3f, 0.1f, 8);
     }
   b.box(w2, {0, 1.05f, 0}, {w + 0.3f, 0.16f, d + 0.3f});
-  walls(b, L, w, d, y0, 2.0f);
-  roof(b, L, w, d, y0 + 2.0f, 0.6f);
-  doorAt(b, L, 0, y0, d / 2, 1.4f, 0.8f);
+  if (!addModel(b, o.lights, "food_store", L, {0, y0 - 0.02f, 0}, 2)) {
+    walls(b, L, w, d, y0, 2.0f);
+    roof(b, L, w, d, y0 + 2.0f, 0.6f);
+    doorAt(b, L, 0, y0, d / 2, 1.4f, 0.8f);
+  }
   for (int s = -1; s <= 1; s += 2) b.rod(w1, {s * 0.32f, 0, d / 2 + 1.0f}, {s * 0.32f, 1.2f, d / 2 + 0.18f}, 0.04f, 0.04f, 5);
   for (int i = 1; i < 5; i++) {
     float t = i / 5.0f;
@@ -500,6 +576,7 @@ Out foodStore(const Look& L) {
 }
 
 Out communityHall(const Look& L) {
+  { Out m; if (addModel(m.s, m.lights, "community_hall", L)) { m.door = modelFront("community_hall"); return m; } }
   Out o;
   Shape& b = o.s;
   float w = 10, d = 7, h = 4.2f, y0 = 0.5f;

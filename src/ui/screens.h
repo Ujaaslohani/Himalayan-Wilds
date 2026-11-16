@@ -17,5 +17,7 @@ void setStats(const FrameStats& s);
 void setPassText(const std::string& gpu, const std::string& cpu);
 bool statsVisible();
 bool escape();
+bool capturingKey();
+void setOptCat(int c);  // selftest   // Options > Controls is waiting for a key
 void shutdown();
 }

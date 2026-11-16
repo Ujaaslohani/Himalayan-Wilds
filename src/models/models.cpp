@@ -1,6 +1,9 @@
 #include <cstdlib>
 #include <cstdio>
 #include "models.h"
+#include "fp_hands_data.h"
+#include "../platform/platform.h"
+#include <cstring>
 #include <memory>
 #include <functional>
 
@@ -593,10 +596,11 @@ const Mesh& arrow() {
   });
 }
 
+void tagMat(Shape& s, const char* hex, uint8_t code);
 const Mesh& bow() {
-  return cached("bow", [] {
+  return cached("bow2", [] {
     Shape b;
-    const char *WOOD = "#6b3f1f", *BACK = "#b07a45", *HORN = "#e8dcc4", *BRASS = "#c8992e", *LEATHER = "#3b2416", *STITCH = "#c9a86a";
+    const char *WOOD = "#7b5232", *BACK = "#8f6440", *HORN = "#bfae8c", *BRASS = "#33241a", *LEATHER = "#3b2a1d", *STITCH = "#2e2117";
     b.tube(LEATHER, {0, 0, 0}, 0.031f, 0.031f, 0.17f, 14);
     for (int k = 0; k < 6; k++) b.tube(STITCH, {0, -0.07f + k * 0.028f, 0}, 0.0325f, 0.0325f, 0.004f, 14);
     for (float s : {1.0f, -1.0f}) {
@@ -617,62 +621,267 @@ const Mesh& bow() {
       b.ball(HORN, {0, s * 0.565f, 0.152f}, {0.011f, 0.011f, 0.011f}, Z0, 1);
     }
     b.box(LEATHER, {0.026f, 0.1f, -0.004f}, {0.012f, 0.03f, 0.03f});
+    tagMat(b, WOOD, 60); tagMat(b, BACK, 60); tagMat(b, HORN, 30);
+    for (const char* c : {LEATHER, STITCH, BRASS}) tagMat(b, c, 150);
     return b.build(true);
   });
 }
 
+// ---- first-person hands: smooth swept fingers (3 phalanges each, real proportions, knuckles, nails and pads),
+// a fleshy palm with thenar and heel pads, a wrist that narrows and a forearm that swells toward the elbow.
+// Units: the view model is drawn at 0.5 scale, so 1 unit = ~0.6 m (a finger is ~0.028 units across).
+// a tube swept along a polyline with a radius per point, rounded caps at both ends, slightly flattened
+// (fingers and wrists are wider than they are deep); smooth normals so joints don't show seams
+Geo sweep(const std::vector<V>& P, const std::vector<float>& R, int sides, float flat = 0.88f, V flatAxis = {0, 0, 0}, bool capStart = true) {
+  Geo g;
+  int n = (int)P.size();
+  std::vector<V> T(n);
+  for (int i = 0; i < n; i++) T[i] = (P[std::min(n - 1, i + 1)] - P[std::max(0, i - 1)]).normalized();
+  V up = std::fabs(T[0].y) < 0.9f ? V(0, 1, 0) : V(1, 0, 0);
+  if (flatAxis.lengthSq() > 0) up = flatAxis;
+  V N = (up - T[0] * up.dot(T[0])).normalized();
+  auto ring = [&](V c, V t, V nn, float r, float rf) {
+    V b = t.cross(nn).normalized();
+    for (int k = 0; k <= sides; k++) {
+      float a = (float)k / sides * TAU;
+      V d = nn * (std::cos(a) * flat) + b * std::sin(a);
+      g.pos.push_back(c + d * r * rf);
+      g.nrm.push_back((nn * (std::cos(a) / flat) + b * std::sin(a)).normalized());
+    }
+  };
+  // cap rings (hemisphere) at the start
+  int rings = 0;
+  for (int c = 3; c >= 1 && capStart; c--) { float a = c / 4.0f * 1.5708f; ring(P[0] - T[0] * (R[0] * std::sin(a) * 0.9f), T[0], N, R[0], std::cos(a)); rings++; }
+  for (int i = 0; i < n; i++) {
+    if (i > 0) { N = (N - T[i] * N.dot(T[i])).normalized(); }  // parallel transport: no twisting
+    ring(P[i], T[i], N, R[i], 1.0f); rings++;
+  }
+  for (int c = 1; c <= 3; c++) { float a = c / 4.0f * 1.5708f; ring(P[n - 1] + T[n - 1] * (R[n - 1] * std::sin(a) * 0.9f), T[n - 1], N, R[n - 1], std::cos(a)); rings++; }
+  int W = sides + 1;
+  for (int r = 0; r + 1 < rings; r++)
+    for (int k = 0; k < sides; k++) {
+      uint32_t a = r * W + k, b = a + 1, c = a + W, d = c + 1;
+      g.idx.insert(g.idx.end(), {a, b, c, b, d, c});  // outward-facing (front faces are culled-in otherwise)
+    }
+  return g;
+}
+// material codes in the vertex alpha for the view-model shader: 250 skin, 200 nail, 150 leather, 100 cloth,
+// 60 wood, 30 horn (255 = plain colour)
+void tagMat(Shape& s, const char* hex, uint8_t code) {
+  uint32_t k = hexToPacked(hex) & 0xffffffu;
+  for (auto& v : s.verts) if ((v.c & 0xffffffu) == k) v.c = (v.c & 0xffffffu) | ((uint32_t)code << 24);
+}
+// smooth a coarse polyline into a Catmull-Rom curve (4 samples per span) so long limbs bend without visible kinks
+template <class T> std::vector<T> densify(const std::vector<T>& p) {
+  std::vector<T> o;
+  int n = (int)p.size();
+  for (int i = 0; i + 1 < n; i++) {
+    const T &a = p[std::max(0, i - 1)], &b = p[i], &c = p[i + 1], &d = p[std::min(n - 1, i + 2)];
+    for (int k = 0; k < 4; k++) {
+      float t = k / 4.0f, t2 = t * t, t3 = t2 * t;
+      o.push_back((b * 2.0f + (c - a) * t + (a * 2.0f - b * 5.0f + c * 4.0f - d) * t2 + (b * 3.0f - a - c * 3.0f + d) * t3) * 0.5f);
+    }
+  }
+  o.push_back(p.back());
+  return o;
+}
+Shape& addGeo(Shape& s, const Geo& g, const char* hex) { return s.addM(g, hexToPacked(hex), Mat4()); }
+// one finger as a curve of joint points: base knuckle -> PIP -> DIP -> tip. The pad, nail and knuckle shading ride on it.
+void finger(Shape& s, const V* J, float r, const char* skin, const char* knuckle, const char* nail, V back) {
+  r *= 1.2f;  // sturdier, working hands
+  std::vector<V> P;
+  std::vector<float> R;
+  float rr[4] = {r * 1.08f, r * 0.98f, r * 0.9f, r * 0.8f};
+  for (int i = 0; i < 3; i++)
+    for (int k = 0; k < 4; k++) {  // subdivide each phalanx, slightly fuller mid-bone (soft flesh), narrower at joints
+      float t = k / 4.0f;
+      P.push_back(J[i] + (J[i + 1] - J[i]) * t);
+      R.push_back((rr[i] + (rr[i + 1] - rr[i]) * t) * (1.0f + 0.05f * std::sin(t * PI)));
+    }
+  P.push_back(J[3]); R.push_back(rr[3]);
+  addGeo(s, sweep(P, R, 20, 0.86f, back), skin);
+  (void)knuckle;
+  // nail on the back of the last bone
+  V d = (J[3] - J[2]).normalized();
+  V c = J[2] + (J[3] - J[2]) * 0.62f + back * (rr[3] * 0.72f);
+  Quat q = Quat::fromUnitVectors({0, 1, 0}, d);
+  s.addM(sphereGeo(1, 10, 6), hexToPacked(nail), Mat4::compose(c, q, {r * 0.62f, r * 0.62f * 1.25f, r * 0.28f}));
+}
+// palm built like a real one: a broad flattened bone from the wrist to each knuckle (metacarpal), side by side, so
+// the fingers grow out of one continuous palm instead of sitting on a ball
+void palmBone(Shape& s, V W, V K, float rw, float rk, V back, const char* skin) {
+  V m = W + (K - W) * 0.55f + back * (rk * 0.25f);
+  std::vector<V> P = densify(std::vector<V>{W, m, K});
+  std::vector<float> R = densify(std::vector<float>{rw, (rw + rk) * 0.55f, rk});
+  addGeo(s, sweep(P, R, 24, 0.55f, back), skin);
+}
+V onArc(float rad, float ang, float y) { return {-rad * std::cos(ang), y, -rad * std::sin(ang)}; }
+const char *H_SKIN = "#b98463", *H_KNUCK = "#ad7559", *H_PALM = "#c99474", *H_NAIL = "#d8b7a6", *H_SLEEVE = "#5a4d3b", *H_SLEEVE2 = "#4a3f30";
+const char *H_LEATHER = "#3f2c1e", *H_GLOVE = "#5a3f29", *H_GLOVE2 = "#4e3622";
+void tagHands(Shape& h) {
+  for (const char* c : {H_SKIN, H_KNUCK, H_PALM}) tagMat(h, c, 250);
+  tagMat(h, H_NAIL, 200);
+  for (const char* c : {H_LEATHER, H_GLOVE, H_GLOVE2, "#4a2f1a"}) tagMat(h, c, 150);
+  for (const char* c : {H_SLEEVE, H_SLEEVE2}) tagMat(h, c, 100);
+}
+// a cloth sleeve: tapered, a few soft folds, closed far end, then a cuff with trims
+void sleeve(Shape& s, V a, V b, float r0, float r1, const char* trim, const char* band, Vec3 cuffRot) {
+  std::vector<V> P;
+  std::vector<float> R;
+  for (int i = 0; i <= 24; i++) {
+    float t = i / 24.0f;
+    P.push_back(a + (b - a) * t);
+    R.push_back((r0 + (r1 - r0) * t) * (1.0f + 0.06f * std::sin(t * 23.0f) * t));  // folds bunch further up the arm
+  }
+  R[0] *= 1.08f;  // open, slightly flared cuff (no closed end facing the camera)
+  addGeo(s, sweep(P, R, 40, 0.92f, {0, 0, 0}, false), H_SLEEVE);
+  (void)cuffRot;
+  V d = (b - a).normalized();
+  Quat q = Quat::fromUnitVectors({0, 0, 1}, d);
+  (void)trim; (void)band;  // plain homespun cuff: a turned-back hem in the same wool, no bright trims
+  s.addM(torusGeo(r0 * 1.05f, r0 * 0.09f, 10, 48), hexToPacked(H_SLEEVE2), Mat4::compose(a + d * 0.01f, q, {1, 0.92f, 1}));
+}
+}  // namespace
+
+namespace models {
+// ---- real hands: the WebXR generic hand mesh (MIT, Amazon), posed offline by tools/pose_hand.py into a bow grip and
+// a string draw (assets/models/fp_hand_*.bin). The forearm, bracer and sleeve grow from its wrist.
+bool loadPosedHand(const char* rel, Shape& h, V& wrist, V& fdir) {
+  // built into the executable (an older assets folder without these files silently brought back the code-built hands);
+  // a file in assets/models still overrides it, for re-posing with tools/pose_hand.py
+  std::vector<uint8_t> b;
+  if (!platform::readFile(platform::assetPath(rel), b) || b.size() < 8) {
+    bool grip = std::strstr(rel, "grip") != nullptr;
+    const uint8_t* src = grip ? FP_HAND_GRIP : FP_HAND_DRAW;
+    size_t n = grip ? sizeof(FP_HAND_GRIP) : sizeof(FP_HAND_DRAW);
+    b.assign(src, src + n);
+  }
+  uint32_t nv, ni;
+  std::memcpy(&nv, b.data(), 4); std::memcpy(&ni, b.data() + 4, 4);
+  size_t need = 8 + (size_t)nv * 24 + (size_t)ni * 4 + 24;
+  if (b.size() < need) return false;
+  const float* v = (const float*)(b.data() + 8);
+  const uint32_t* id = (const uint32_t*)(b.data() + 8 + (size_t)nv * 24);
+  const float* w = (const float*)(b.data() + 8 + (size_t)nv * 24 + (size_t)ni * 4);
+  uint32_t col = hexToPacked(H_SKIN);
+  for (uint32_t k = 0; k < ni; k++) {
+    const float* q = v + (size_t)id[k] * 6;
+    Shape::V o;
+    o.p = {q[0], q[1], q[2]};
+    o.n = V(q[3], q[4], q[5]).normalized();
+    o.c = col;
+    h.verts.push_back(o);
+  }
+  wrist = {w[0], w[1], w[2]};
+  fdir = V(w[3], w[4], w[5]).normalized();
+  return true;
+}
+// forearm from the wrist along `d`, bent toward `down` so the sleeve leaves the bottom of the screen
+// forearm from the wrist: one straight, evenly thick limb (both arms built identically), then the sleeve
+void armFrom(Shape& h, V W, V d, V away, float rw, bool bracer, float sleeveR) {
+  (void)bracer;
+  V D = (d * 0.7f + away * 0.3f).normalized();
+  std::vector<V> P = {W - d * 0.015f, W + D * 0.04f, W + D * 0.12f, W + D * 0.22f};
+  std::vector<float> R = {rw * 0.95f, rw, rw * 1.08f, rw * 1.15f};
+  addGeo(h, sweep(densify(P), densify(R), 32, 0.84f), H_SKIN);
+  V s0 = W + D * 0.16f;
+  sleeve(h, s0, s0 + D * 0.7f, sleeveR, sleeveR * 1.2f, "", "", {0, 0, 0});
+}
 const Mesh& bowHand() {
-  return cached("bowhand", [] {
-    const char *SKIN = "#c48a62", *KNUCK = "#b07450", *NAIL = "#e6c2aa", *BRACER = "#5a3a22", *LACE = "#d6c49a", *SLEEVE = "#1f4a2c", *TRIM = "#efe6d2", *BAND = "#b91c1c", *GOLD2 = "#facc15";
+  return cached("bowhand4", [] {
     Shape h;
-    h.ball(SKIN, {-0.05f, 0.0f, 0.004f}, {0.04f, 0.064f, 0.042f}, Z0, 2)
-        .ball(SKIN, {-0.03f, -0.045f, 0.03f}, {0.036f, 0.034f, 0.034f}, Z0, 2);
+    V W, d;
+    if (!std::getenv("HW_PROCHAND") && loadPosedHand("models/fp_hand_grip.bin", h, W, d)) {
+      armFrom(h, W, d, V(-0.25f, -0.85f, 0.45f).normalized(), 0.04f, false, 0.056f);
+      tagHands(h);
+      return h.build(true);
+    }
+    h = Shape();
+    // fingers wrap the leather grip (radius ~0.031 at the origin, along y), knuckles toward the target (-z)
+    const float Rg = 0.031f;
+    const float ys[4] = {0.047f, 0.017f, -0.013f, -0.041f}, lens[4] = {1.0f, 1.07f, 1.0f, 0.82f}, rads[4] = {0.0142f, 0.0148f, 0.014f, 0.0122f};
+    V back(0, 0, 0);
     for (int f = 0; f < 4; f++) {
-      float y = 0.044f - f * 0.029f;
-      float len = f == 3 ? 0.82f : f == 0 ? 0.96f : 1;
-      float r = f == 3 ? 0.0125f : 0.0148f;
-      V a{-0.046f, y, -0.026f}, m{0.004f, y, -0.05f * len}, e{0.04f * len, y - 0.002f, -0.02f}, tp{0.043f * len, y - 0.004f, 0.014f};
-      h.rod(SKIN, a, m, r * 1.05f, r, 8).ball(KNUCK, m, {r * 1.08f, r * 1.08f, r * 1.08f}, Z0, 1)
-          .rod(SKIN, m, e, r, r * 0.92f, 8).ball(SKIN, e, {r * 0.92f, r * 0.92f, r * 0.92f}, Z0, 1)
-          .rod(SKIN, e, tp, r * 0.92f, r * 0.8f, 8).ball(SKIN, tp, {r * 0.8f, r * 0.8f, r * 0.8f}, Z0, 1)
-          .box(NAIL, {tp.x + 0.006f, tp.y, tp.z + 0.003f}, {0.007f, r * 1.1f, r * 1.1f});
+      float r = rads[f], Rw = Rg + r + 0.002f, L = lens[f];
+      V J[4] = {V(-0.07f, ys[f] + 0.002f, -0.036f + 0.004f * f), onArc(Rw, 1.62f, ys[f]), onArc(Rw, 1.62f + 1.05f * L, ys[f] - 0.002f), onArc(Rw * 0.98f, 1.62f + 1.82f * L, ys[f] - 0.004f)};
+      V bk = (J[1] - V(0, J[1].y, 0)).normalized();  // back of the finger faces away from the grip
+      finger(h, J, r, H_SKIN, H_KNUCK, H_NAIL, bk);
     }
-    h.rod(SKIN, {-0.068f, 0.035f, 0.032f}, {-0.018f, 0.068f, 0.05f}, 0.019f, 0.016f, 8).ball(SKIN, {-0.018f, 0.068f, 0.05f}, {0.016f, 0.016f, 0.016f}, Z0, 1)
-        .rod(SKIN, {-0.018f, 0.068f, 0.05f}, {0.028f, 0.066f, 0.046f}, 0.016f, 0.012f, 8).ball(SKIN, {0.028f, 0.066f, 0.046f}, {0.012f, 0.012f, 0.012f}, Z0, 1);
-    h.rod(SKIN, {-0.06f, -0.05f, 0.035f}, {-0.085f, -0.12f, 0.1f}, 0.042f, 0.046f, 12)
-        .ball(SKIN, {-0.085f, -0.12f, 0.1f}, {0.046f, 0.046f, 0.046f}, Z0, 1);
-    h.rod(BRACER, {-0.082f, -0.115f, 0.095f}, {-0.125f, -0.25f, 0.27f}, 0.052f, 0.058f, 14);
-    for (int k = 0; k < 5; k++) {
-      float t = 0.12f + k * 0.18f;
-      V p{-0.082f + (-0.043f) * t, -0.115f - 0.135f * t, 0.095f + 0.175f * t};
-      h.add(torusGeo(0.054f + t * 0.005f, 0.0034f, 4, 16), LACE, p, {0.9f, 0, 0.25f});
+    {
+      V W(-0.092f, -0.03f, 0.035f), bk = V(-1, 0, 0.35f).normalized();
+      for (int f = 0; f < 4; f++) {
+        V K(-0.07f, ys[f] + 0.002f, -0.036f + 0.004f * f);
+        V Wf = W + V(0, (1.5f - f) * 0.011f, 0);
+        palmBone(h, Wf, K, 0.026f, rads[f] * 1.2f * 1.12f, bk, H_SKIN);
+      }
     }
-    h.rod(SLEEVE, {-0.12f, -0.235f, 0.25f}, {-0.19f, -0.46f, 0.56f}, 0.062f, 0.07f, 14);
-    h.add(torusGeo(0.063f, 0.009f, 6, 16), TRIM, {-0.123f, -0.245f, 0.262f}, {0.9f, 0, 0.25f});
-    h.add(torusGeo(0.064f, 0.006f, 4, 16), BAND, {-0.128f, -0.262f, 0.284f}, {0.9f, 0, 0.25f});
-    h.add(torusGeo(0.065f, 0.004f, 4, 16), GOLD2, {-0.133f, -0.278f, 0.304f}, {0.9f, 0, 0.25f});
+    // thumb: from the thenar mound over the top of the grip, tip resting on the index finger
+    {
+      V J[4] = {V(-0.055f, 0.045f, 0.034f), V(-0.026f, 0.066f, 0.04f), V(0.004f, 0.07f, 0.03f), V(0.027f, 0.064f, 0.016f)};
+      palmBone(h, V(-0.086f, -0.012f, 0.045f), J[0], 0.028f, 0.0142f * 1.2f * 1.15f, V(-0.4f, 0.3f, 1).normalized(), H_SKIN);  // thenar: thumb grows from the heel of the hand
+      finger(h, J, 0.0142f, H_SKIN, H_KNUCK, H_NAIL, V(0, 1, 0.2f).normalized());
+    }
+    // wrist and forearm: narrow at the wrist, swelling toward the elbow
+    {
+      std::vector<V> P = {V(-0.09f, -0.035f, 0.03f), V(-0.1f, -0.09f, 0.08f), V(-0.11f, -0.15f, 0.15f), V(-0.125f, -0.22f, 0.24f)};
+      std::vector<float> R = {0.046f, 0.045f, 0.05f, 0.056f};  // thick wrist and forearm
+      addGeo(h, sweep(densify(P), densify(R), 32, 0.82f), H_SKIN);
+    }
+    // leather bracer laced over the forearm, then the sleeve
+    {
+      std::vector<V> P = {V(-0.105f, -0.12f, 0.12f), V(-0.112f, -0.16f, 0.17f), V(-0.12f, -0.2f, 0.22f)};
+      std::vector<float> R = {0.053f, 0.057f, 0.06f};
+      addGeo(h, sweep(densify(P), densify(R), 32, 0.84f), H_LEATHER);
+      Quat q = Quat::fromUnitVectors({0, 0, 1}, (P[2] - P[0]).normalized());
+      for (int k = 0; k < 3; k++) { float t = 0.2f + k * 0.3f; h.addM(torusGeo(0.056f + t * 0.005f, 0.0022f, 4, 18), hexToPacked(H_GLOVE2), Mat4::compose(P[0] + (P[2] - P[0]) * t, q, {1, 0.86f, 1})); }  // thongs, same leather
+    }
+    sleeve(h, V(-0.122f, -0.215f, 0.235f), V(-0.24f, -0.62f, 0.78f), 0.068f, 0.085f, "#efe6d2", "#b91c1c", {0.9f, 0, 0.25f});
+    tagHands(h);
     return h.build(true);
   });
 }
 
 const Mesh& drawHand() {
-  return cached("drawhand", [] {
-    const char *SKIN = "#c48a62", *GLOVE = "#6b4423", *TAB = "#4a2f1a", *SLEEVE = "#1f4a2c", *TRIM = "#efe6d2", *BAND = "#b91c1c";
+  return cached("drawhand4", [] {
     Shape h;
-    h.ball(SKIN, {0.024f, -0.014f, 0.058f}, {0.04f, 0.048f, 0.056f}, Z0, 2);
-    for (int f = 0; f < 3; f++) {
-      float y = 0.018f - f * 0.026f;
-      float r = 0.0138f;
-      h.rod(GLOVE, {0.016f, y, 0.034f}, {0.004f, y, -0.008f}, r, r * 0.95f, 8).ball(GLOVE, {0.004f, y, -0.008f}, {r, r, r}, Z0, 1)
-          .rod(GLOVE, {0.004f, y, -0.008f}, {-0.018f, y - 0.003f, 0.006f}, r * 0.95f, r * 0.85f, 8).ball(GLOVE, {-0.018f, y - 0.003f, 0.006f}, {r * 0.85f, r * 0.85f, r * 0.85f}, Z0, 1);
+    V W, d;
+    if (!std::getenv("HW_PROCHAND") && loadPosedHand("models/fp_hand_draw.bin", h, W, d)) {
+      armFrom(h, W, d, V(0.35f, -0.85f, 0.4f).normalized(), 0.04f, false, 0.056f);
+      tagHands(h);
+      return h.build(true);
     }
-    h.box(TAB, {0.0f, -0.006f, 0.0f}, {0.012f, 0.07f, 0.03f});
-    h.rod(SKIN, {0.04f, -0.08f, 0.05f}, {0.016f, -0.088f, 0.022f}, 0.013f, 0.011f, 8).ball(SKIN, {0.016f, -0.088f, 0.022f}, {0.011f, 0.011f, 0.011f}, Z0, 1);
-    h.rod(SKIN, {0.045f, 0.026f, 0.07f}, {0.012f, 0.04f, 0.04f}, 0.016f, 0.013f, 8).ball(SKIN, {0.012f, 0.04f, 0.04f}, {0.013f, 0.013f, 0.013f}, Z0, 1);
-    h.rod(SKIN, {0.035f, -0.025f, 0.095f}, {0.07f, -0.06f, 0.2f}, 0.038f, 0.044f, 12).ball(SKIN, {0.07f, -0.06f, 0.2f}, {0.044f, 0.044f, 0.044f}, Z0, 1);
-    h.rod(SLEEVE, {0.065f, -0.055f, 0.185f}, {0.13f, -0.12f, 0.42f}, 0.056f, 0.064f, 14);
-    h.add(torusGeo(0.057f, 0.008f, 6, 16), TRIM, {0.068f, -0.058f, 0.192f}, {1.2f, 0, -0.3f});
-    h.add(torusGeo(0.058f, 0.005f, 4, 16), BAND, {0.072f, -0.062f, 0.206f}, {1.2f, 0, -0.3f});
+    // Mediterranean draw: index above the arrow, middle and ring below, hooked round the string at the first joint;
+    // the back of the hand faces out (+x), thumb and little finger tucked in
+    const float ys[3] = {0.02f, -0.008f, -0.035f}, rads[3] = {0.0138f, 0.0144f, 0.0136f};
+    for (int f = 0; f < 3; f++) {
+      float r = rads[f], y = ys[f];
+      V J[4] = {V(0.03f, y + 0.002f, 0.05f), V(0.008f, y, 0.006f), V(-0.016f, y - 0.002f, -0.006f), V(-0.026f, y - 0.004f, 0.016f)};
+      finger(h, J, r, H_GLOVE, H_GLOVE2, H_GLOVE2, V(1, 0, 0));  // leather shooting glove on the drawing fingers
+    }
+    {  // little finger curled into the palm
+      V J[4] = {V(0.034f, -0.058f, 0.05f), V(0.012f, -0.062f, 0.03f), V(0.004f, -0.062f, 0.045f), V(0.012f, -0.06f, 0.058f)};
+      finger(h, J, 0.0118f, H_SKIN, H_KNUCK, H_NAIL, V(1, 0, 0));
+    }
+    {  // thumb tucked along the side of the index, under the jaw when at full draw
+      V J[4] = {V(0.03f, 0.03f, 0.075f), V(0.012f, 0.045f, 0.055f), V(0.0f, 0.048f, 0.04f), V(-0.006f, 0.044f, 0.028f)};
+      finger(h, J, 0.0158f, H_SKIN, H_KNUCK, H_NAIL, V(0, 1, 0));
+    }
+    {
+      V W(0.05f, -0.022f, 0.104f), bk(1, 0, 0);
+      for (int f = 0; f < 3; f++) palmBone(h, W + V(0, (1 - f) * 0.012f, 0), V(0.03f, ys[f] + 0.002f, 0.05f), 0.025f, rads[f] * 1.2f * 1.12f, bk, H_SKIN);
+      palmBone(h, W + V(0, -0.022f, 0), V(0.034f, -0.058f, 0.05f), 0.023f, 0.0118f * 1.2f * 1.1f, bk, H_SKIN);
+      palmBone(h, W + V(-0.004f, 0.018f, 0.004f), V(0.03f, 0.03f, 0.075f), 0.024f, 0.0158f * 1.2f * 1.1f, V(0.6f, 0.8f, 0).normalized(), H_SKIN);
+    }
+    h.box("#4a2f1a", {0.002f, -0.006f, 0.008f}, {0.006f, 0.068f, 0.024f});  // leather finger tab
+    {
+      // the forearm runs into the sleeve along the sleeve's own axis (it used to angle off and poke out of its side)
+      V S0(0.078f, -0.053f, 0.18f), dn = (V(0.27f, -0.62f, 0.62f) - S0).normalized();
+      std::vector<V> P = {V(0.05f, -0.02f, 0.1f), V(0.064f, -0.036f, 0.14f), S0 + dn * 0.04f, S0 + dn * 0.13f};
+      std::vector<float> R = {0.043f, 0.044f, 0.048f, 0.052f};
+      addGeo(h, sweep(densify(P), densify(R), 32, 0.82f), H_SKIN);
+    }
+    sleeve(h, V(0.078f, -0.053f, 0.18f), V(0.27f, -0.62f, 0.62f), 0.06f, 0.085f, "#efe6d2", "#b91c1c", {1.2f, 0, -0.3f});
+    tagHands(h);
     return h.build(true);
   });
 }

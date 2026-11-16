@@ -8,6 +8,8 @@ App A;
 namespace {
 struct ItemDef { const char *id, *name, *label, *desc, *icon; };
 const ItemDef ITEMS[] = {
+    {"renown", "Renown", "Renown", "Your standing in the valley.", "box"},
+    {"skill_point", "Skill Point", "Skill Point", "Spend it in the Skills tab [K].", "box"},
     {"bow", "Mountain Yew Bow", "Bow", "Hold left mouse to draw, release to loose. Hold right mouse to aim.", "bow"},
     {"arrow", "Flint Arrows", "Arrows", "Craft 10 from a single timber log.", "arrow"},
     {"wood", "Timber", "Timber", "Fallen deodar logs from the pine woods.", "wood"},

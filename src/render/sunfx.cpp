@@ -1,4 +1,5 @@
 #include "sunfx.h"
+#include "../platform/platform.h"
 #include "render.h"
 #include "sky.h"
 #include "../game/engine.h"
@@ -34,19 +35,27 @@ const char* SHAFT_FS = R"(in vec2 v_uv;
 uniform sampler2D u_depth;
 uniform vec2 u_sun;
 uniform float u_aspect;
+uniform int u_n;        // samples: 20 normal, 48 volumetric
+uniform float u_shaftFall;
 out vec4 o;
 void main(){
-  vec2 d = (u_sun - v_uv) / 20.0;
-  vec2 uv = v_uv;
-  float acc = 0.0, w = 1.0;
-  for (int i = 0; i < 20; i++) {
+  vec2 d = (u_sun - v_uv) / float(u_n);
+  vec2 uv = v_uv + d * fract(sin(dot(v_uv, vec2(12.9898, 78.233))) * 43758.5);   // jittered start: no banding
+  float acc = 0.0;
+  float w = 1.0;
+  float dcy = 0.94;
+  if (u_n > 20) dcy = 0.972;
+  float wsum = 0.0;
+  for (int i = 0; i < 64; i++) {
+    if (i >= u_n) break;
     acc += step(0.99999, texture(u_depth, uv).r) * w;
-    w *= 0.94;
+    wsum += w;
+    w *= dcy;
     uv += d;
   }
   vec2 dd = (v_uv - u_sun) * vec2(u_aspect, 1.0);
-  float fall = exp(-length(dd) * 2.4);
-  o = vec4(acc / 12.5 * fall);
+  float fall = exp(-length(dd) * u_shaftFall);
+  o = vec4(acc / wsum * 1.6 * fall);
 }
 )";
 
@@ -72,7 +81,9 @@ void main(){
   float glare = (core + rays) * vis;
   float wash = vis * u_look * (exp(-r * 4.5) * 0.24 + 0.03);
   float shaft = texture(u_shaft, v_uv).r * u_shaftK;
-  vec3 c = u_col * (glare + wash + shaft) * u_k;
+  shaft *= 1.0 - 0.65 * smoothstep(0.45, 1.0, v_uv.y);   // beams fade as they climb into the sky (v0.9.77)
+  vec3 scol = mix(u_col, vec3(dot(u_col, vec3(0.299, 0.587, 0.114))), 0.55);   // shafts much less saturated than the sun glare
+  vec3 c = (u_col * (glare + wash) + scol * shaft) * u_k;
   o = vec4(c, 1.0);
 }
 )";
@@ -110,6 +121,7 @@ RT g_occ, g_shaft;
 float g_sx = 0, g_sy = 0, g_k = 0, g_look = 0, g_aspect = 1, g_shaftK = 0.22f;
 bool g_on = false;
 
+bool volOn() { static const bool env = std::getenv("HW_VOL") != nullptr; return g_settings.volumetric || env; }
 float sstep(float x, float a, float b) {
   float t = std::min(1.0f, std::max(0.0f, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
@@ -142,6 +154,7 @@ void computeState() {
   if ((tick++ % 30) == 0) { near.clear(); forest::nearTrees(cam.pos.x, cam.pos.z, 16, near, 24); canopy = std::min(1.0f, (near.size() / 4) / 10.0f); }
   float low = 1.0f - sstep(sun.y, 0.15f, 0.6f);
   g_shaftK = 0.22f + 0.55f * canopy * (0.4f + 0.6f * low);
+  if (volOn()) g_shaftK = 0.6f * (0.45f + 0.5f * canopy) * (0.55f + 0.75f * low);   // v0.9.77: 40% weaker   // beams in the open too, strongest at dawn / dusk
 }
 
 }  // namespace
@@ -179,13 +192,16 @@ void occlusion(GLuint depthTex, int w, int h) {
   render::drawFullscreen();
   glDisable(GL_BLEND);
 
-  g_shaft.ensure(std::max(1, w / 8), std::max(1, h / 8));  // shafts are soft: 1/8 res is plenty
+  const int sd = volOn() ? 4 : 8;
+  g_shaft.ensure(std::max(1, w / sd), std::max(1, h / sd));  // shafts are soft: 1/8 res is plenty (volumetric: 1/4)
   glBindFramebuffer(GL_FRAMEBUFFER, g_shaft.fbo);
   glViewport(0, 0, g_shaft.w, g_shaft.h);
   Shader& sh = render::program("sunshaft", FS_VS, SHAFT_FS);
   sh.set1i("u_depth", 0);
   sh.set2f("u_sun", g_sx, g_sy);
   sh.set1f("u_aspect", g_aspect);
+  sh.set1i("u_n", volOn() ? 48 : 20);
+  sh.set1f("u_shaftFall", volOn() ? 1.3f : 2.4f);
   render::drawFullscreen();
 
   glBindFramebuffer(GL_FRAMEBUFFER, prevFbo);

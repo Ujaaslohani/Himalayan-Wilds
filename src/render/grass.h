@@ -3,6 +3,7 @@
 namespace grass {
 void init();
 void draw();
+unsigned litterMaskTexture();   // R8 over the terrain grid: 1 where fallen leaves may lie
 void setPreload(bool on);
 int bladeCount();
 // spring wildflowers: up to 4 flower fields (x, z, radius, 0) found once on open meadows, and the bloom

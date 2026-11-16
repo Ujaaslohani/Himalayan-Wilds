@@ -25,7 +25,7 @@ bool walkable(float x0, float z0, float x1, float z1) {
   for (int i = 0; i <= n; i++) {
     float t = (float)i / n, x = x0 + (x1 - x0) * t, z = z0 + (z1 - z0) * t;
     if (world::localSlope(x, z) > 0.9f) return false;
-    if (std::fabs(x) > MAP_HALF - 25 || std::fabs(z) > MAP_HALF - 25) return false;
+    if (std::fabs(x) > CORE_HALF - 25 || std::fabs(z) > CORE_HALF - 25) return false;
   }
   return true;
 }
@@ -54,7 +54,7 @@ void place() {
     }
   }
   // 2. on the bed of each lake (wade in to reach it)
-  for (auto& L : world::LAKES) add(L.x + L.r * 0.15f, L.z - L.r * 0.1f, "on the bed of " + L.name);
+  for (int li = 0; li < CORE_LAKES; li++) { auto& L = world::LAKES[li]; add(L.x + L.r * 0.15f, L.z - L.r * 0.1f, "on the bed of " + L.name); }
   // 3. behind each trail mountain: off the trail near the top, on ground you can still walk to
   for (auto& R : world::ROUTES) {
     if (R.pts.size() < 4) continue;
@@ -82,15 +82,70 @@ void place() {
   auto rnd = [&]() { seed = seed * 1664525u + 1013904223u; return (seed >> 8) / 16777216.0f; };
   int want = 12, tries = 0;
   while ((int)g_list.size() < want && tries++ < 4000) {
-    float a = rnd() * TAU, r = 150 + rnd() * (MAP_HALF - 190);
+    float a = rnd() * TAU, r = 150 + rnd() * (CORE_HALF - 190);
     float x = std::cos(a) * r, z = std::sin(a) * r;
-    if (world::pathDistance(x, z) < 40 || world::nearRoute(x, z) < 30) continue;
+    if (world::corePathDistance(x, z) < 40 || world::nearRoute(x, z) < 30) continue;   // judged against the first map's roads, so these twelve never move
     if (world::riverMask(x, z) > 0.02f || world::lakeAt(x, z, 4) >= 0) continue;
     if (world::localSlope(x, z) > 0.6f) continue;
     float n = 1e9f, nx = 0, nz = 0;  // must be walkable from the nearest road
-    for (auto& R : world::ROADS) for (auto& p : R.pts) { float d = hypot2(p[0] - x, p[1] - z); if (d < n) { n = d; nx = p[0]; nz = p[1]; } }
+    for (int ri = 0; ri < CORE_ROADS; ri++) for (auto& p : world::ROADS[ri].pts) { float d = hypot2(p[0] - x, p[1] - z); if (d < n) { n = d; nx = p[0]; nz = p[1]; } }
     if (n > 140 || !walkable(nx, nz, x, z)) continue;
     add(x, z, world::forestDensity(x, z) > 0.4f ? "deep in the forest" : "in a quiet corner of the valley");
+  }
+  // The first twelve wheels are pinned to where they were on the first map, so a saved "found" flag still means the
+  // same wheel. The two that sat behind trail mountains move with their mountain (the wall moved out to the map's edge).
+  {
+    struct Old { float x, z; int summit; const char* where; };
+    static const Old OLD[12] = {
+        {-52.99f, -432.5f, -1, nullptr}, {182.5f, 129.0f, -1, nullptr}, {-182.55f, -114.3f, -1, nullptr},
+        {318.7f, 180.93f, 1, "behind a trail mountain"}, {-296.26f, 298.43f, 2, "behind a trail mountain"},
+        {-289.3f, 51.06f, -1, nullptr}, {56.06f, -197.29f, -1, nullptr}, {169.47f, -211.15f, -1, nullptr}, {-147.26f, -234.57f, -1, nullptr},
+        {-219.74f, -175.69f, -1, nullptr}, {277.65f, 95.06f, -1, nullptr}, {-48.98f, -276.88f, -1, nullptr}};
+    static const float OLD_SUMMIT[5][2] = {{362.74f, -161.99f}, {322.11f, 229.96f}, {-337.03f, 279.06f}, {-370.45f, -160.31f}, {-296.58f, -300.28f}};
+    std::vector<Relic> pinned;
+    for (int i = 0; i < 12; i++) {
+      float x = OLD[i].x, z = OLD[i].z;
+      if (OLD[i].summit >= 0 && OLD[i].summit < (int)world::SUMMITS.size()) {
+        const Summit& sm = world::SUMMITS[OLD[i].summit];
+        x += sm.x - OLD_SUMMIT[OLD[i].summit][0];
+        z += sm.z - OLD_SUMMIT[OLD[i].summit][1];
+      }
+      std::string where = OLD[i].where ? OLD[i].where : i < (int)g_list.size() ? g_list[i].where : "in a quiet corner of the valley";
+      if (i == 0) where = "at the top of the waterfall";
+      else if (i <= 2) where = "on the bed of " + world::LAKES[i - 1].name;
+      else if (!OLD[i].where) where = world::forestDensity(x, z) > 0.4f ? "deep in the forest" : "in a quiet corner of the valley";
+      pinned.push_back({x, world::getTerrainHeight(x, z), z, where});
+    }
+    g_list = pinned;
+  }
+  // 5. the outer lands (added after the first twelve, so saved wheel numbers still point at the same wheels)
+  for (size_t li = CORE_LAKES; li < world::LAKES.size(); li++) { auto& L = world::LAKES[li]; add(L.x + L.r * 0.15f, L.z - L.r * 0.1f, "on the bed of " + L.name); }
+  {
+    static const char* WHERE[B_COUNT] = {"among the deodars of the vale", "on a ledge in the crags", "out on the snowfields", "deep in the fern forest", "in the lupin meadows"};
+    uint32_t sd = 4177;
+    auto rn = [&]() { sd = sd * 1664525u + 1013904223u; return (sd >> 8) / 16777216.0f; };
+    int perBiome[B_COUNT] = {0, 0, 0, 0, 0}, tries2 = 0;
+    size_t want2 = g_list.size() + 10;
+    while (g_list.size() < want2 && tries2++ < 6000) {
+      P2 g = world::outerPoint(rn() * TAU, 30 + rn() * 190);
+      float x = g[0], z = g[1];
+      float bw[B_COUNT];
+      world::biomeWeights(x, z, bw);
+      int b = 0;
+      for (int i = 1; i < B_COUNT; i++) if (bw[i] > bw[b]) b = i;
+      if (perBiome[b] >= 2) continue;
+      if (world::pathDistance(x, z) < 45 || world::riverMask(x, z) > 0.02f || world::lakeAt(x, z, 4) >= 0 || world::localSlope(x, z) > 0.5f) continue;
+      float n = 1e9f, nx = 0, nz = 0;
+      for (size_t ri = CORE_ROADS; ri < world::ROADS.size(); ri++) for (auto& p : world::ROADS[ri].pts) { float d = hypot2(p[0] - x, p[1] - z); if (d < n) { n = d; nx = p[0]; nz = p[1]; } }
+      if (n > 130) continue;
+      bool ok = true;   // an easy walk in from the road
+      int steps = std::max(2, (int)(n / 1.5f));
+      for (int i = 0; i <= steps && ok; i++) { float t = (float)i / steps; if (world::localSlope(nx + (x - nx) * t, nz + (z - nz) * t) > 0.9f) ok = false; }
+      if (!ok) continue;
+      size_t before = g_list.size();
+      add(x, z, WHERE[b]);
+      if (g_list.size() > before) perBiome[b]++;
+    }
   }
   testOverride();
 }
@@ -118,7 +173,7 @@ void buildMesh() {
   for (int i = 0; i < 6; i++) b.box("#ef4444", {std::cos(i * 1.047f) * 0.46f, 0.22f, std::sin(i * 1.047f) * 0.46f}, {0.06f, 0.06f, 0.06f});  // painted mani marks
   g_base = uploadMesh(b.build(true));
 }
-// ---- secret: the Migoi's footprints. Deep in the narrow river gorge north of the valley (~ -62, 593) a line of
+// ---- secret: the Migoi's footprints. Deep in the river gorge where it cuts into the far mountains a line of
 // giant bare footprints climbs out of the water to a carved stone head of the yeti with ice-blue eyes. No marker,
 // no compass entry, no map icon: it only shows within ~40 m. Touch the stone once for the reward (saved as a stat).
 struct Egg { bool placed = false; float x = 0, y = 0, z = 0, yaw = 0; std::vector<Vec3> prints; bool howled = false; };
@@ -126,7 +181,8 @@ Egg g_egg;
 Mesh g_eggHead, g_eggPrint;
 void placeEgg() {
   g_egg.placed = true;
-  const float ex = -62.4f, ez = 592.9f;
+  // where the player asked for it: by the river below the south gate
+  float ex = -62.4f, ez = 654.5f;
   float bx = ex, bz = ez, best = 1e9f;
   for (float rr = 2; rr <= 16; rr += 1)
     for (int k = 0; k < 32; k++) {

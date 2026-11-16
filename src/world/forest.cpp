@@ -63,6 +63,7 @@ struct CellHash {
 };
 struct CellEntry {
   std::vector<Item> items;
+  bool masked = false;   // grass cell built after the rock mask was ready
   std::list<CellKey>::iterator lru;
 };
 struct CellCache {
@@ -83,11 +84,94 @@ bool blocked(float x, float z, const std::vector<Blocker>& list = g_blockers) {
   return false;
 }
 
+// Outer-land flora: each country beyond the old wall grows its own mix. Rows are biomes (vale, crags, snowfields,
+// fern forest, meadows); columns follow the order of each layer's file list. Inside the first valley none of this applies.
+const float TREE_W[B_COUNT][8] = {      // oak, maple, birch, cedar, rhododendron, tall oak, tall cedar, tall maple
+    {0.12f, 0.10f, 0, 0.12f, 0.08f, 0.24f, 0.10f, 0.24f},      // vale: tall oak + maple lead
+    {0.12f, 0.10f, 0.04f, 0.10f, 0.06f, 0.22f, 0.14f, 0.22f},  // crag
+    {0.06f, 0.05f, 0.30f, 0.10f, 0, 0.12f, 0.27f, 0.10f},      // snow line: birch and (tall) cedar, some hardy oak/maple
+    {0.14f, 0.10f, 0, 0, 0.10f, 0.34f, 0, 0.32f},              // fern forest: tall oak and maple dominate
+    {0.16f, 0.12f, 0.06f, 0, 0.10f, 0.30f, 0, 0.26f}};         // meadow copses
+const float UNDER_W[B_COUNT][10] = {    // fern, bush (cliff shrub), flowering bush, daisies, violets, poppy, lupin, nettle leaves, jalapeno, blueberry
+    {0.25f, 0.20f, 0, 0.025f, 0.025f, 0.05f, 0, 0.20f, 0.10f, 0.15f},   // v0.9.77: ferns 0.45 -> 0.25
+    {0, 0.50f, 0, 0.10f, 0.10f, 0.20f, 0, 0.05f, 0, 0.05f},
+    {0, 0.90f, 0, 0, 0, 0, 0, 0.10f, 0, 0},
+    {0.32f, 0, 0, 0, 0, 0, 0.08f, 0.30f, 0.12f, 0.18f},
+    {0, 0, 0.10f, 0.12f, 0.12f, 0.08f, 0.50f, 0, 0.03f, 0.05f}};        // daisies = violets
+const float ROCK_W[B_COUNT][7] = {      // medium, slab, jagged, boulder, stump, broken stump, log
+    {0.28f, 0.11f, 0.06f, 0.43f, 0.03f, 0.03f, 0.06f},
+    {0.20f, 0.35f, 0.35f, 0.10f, 0, 0, 0},
+    {0.40f, 0.20f, 0.20f, 0.20f, 0, 0, 0},
+    {0.22f, 0.08f, 0, 0.30f, 0.10f, 0.10f, 0.20f},
+    {0.50f, 0.10f, 0, 0.40f, 0, 0, 0}};
+const float BIOME_MUL[4][B_COUNT] = {
+    {0.75f, 0.6f, 0.3f, 0.8f, 1.0f},     // grass
+    {0.8f, 0.5f, 0.25f, 1.0f, 1.1f},     // undergrowth
+    {1.0f, 1.5f, 0.6f, 0.8f, 0.35f},     // rocks
+    {0.55f, 0.45f, 0.7f, 0.7f, 0.14f}};  // trees (kept near the first valley's density: thicker forest cost ~300k triangles and 5 ms)
+// density multiplier for a layer at (x, z), and which biome's mix to draw from (-1 = the first valley's)
+float biomeFlora(int layer, float x, float z, int& biome) {
+  biome = -1;
+  if (world::outerWeight(x, z) <= 0) return 1;
+  float bw[B_COUNT], ow = 0, mul = 0;
+  world::biomeWeights(x, z, bw);
+  for (int i = 0; i < B_COUNT; i++) { ow += bw[i]; mul += bw[i] * BIOME_MUL[layer][i]; }
+  mul += 1 - ow;
+  float hb = hash2((int)std::floor(x * 3.1f), (int)std::floor(z * 3.1f), 977), acc = 0;
+  for (int i = 0; i < B_COUNT; i++) { acc += bw[i]; if (hb < acc) { biome = i; break; } }
+  if (layer == L_TREE && bw[B_MEADOW] > 0) mul += bw[B_MEADOW] * 0.9f * sstep(fbm(x * 0.012f + 3, z * 0.012f - 7, 2, 981), 0.28f, 0.5f);   // copses on the open meadow
+  if (layer == L_ROCK && bw[B_VALE] > 0) { float d = world::riverQuery(x, z).d; if (d < 60) mul += bw[B_VALE] * 1.2f * (1 - sstep(d, 14.0f, 60.0f)); }   // boulders along the stream
+  if (layer == L_UNDER && bw[B_MEADOW] > 0) mul *= lerpf(1.0f, 0.35f + 1.3f * sstep(fbm(x * 0.02f + 7, z * 0.02f - 3, 2, 403), -0.05f, 0.4f), bw[B_MEADOW]);   // lupins in drifts (same field as the ground tint)
+  return mul;
+}
+
+// Tree height mix: tall (18 m+) 45%, medium (12-18 m) 35%, short (under 12 m) 20%. The natural mix of species and
+// sizes came out 30 / 40 / 30, so each tree's height is moved along that distribution's own curve (its rank among all
+// trees is kept, the tallest stay tallest): HQ is the height at every 2.5% of the old mix, measured over the whole map.
+float treeHeightShift(const std::string& file, float scl) {
+  static const float HQ[41] = {6.47f, 7.54f, 8.34f, 8.82f, 9.16f, 9.55f, 9.98f, 10.35f, 10.77f, 11.06f, 11.36f, 11.70f, 12.00f, 12.37f, 12.70f, 13.03f, 13.37f,
+                               13.71f, 14.05f, 14.37f, 14.79f, 15.17f, 15.49f, 15.90f, 16.26f, 16.68f, 17.07f, 17.49f, 17.95f, 18.51f, 19.13f, 19.70f, 20.33f, 20.99f,
+                               21.68f, 22.41f, 23.28f, 24.44f, 26.44f, 28.48f, 39.77f};
+  static const std::pair<const char*, float> BASE[] = {{"ptree:oak-tall", 19.1f}, {"ptree:maple-tall", 21.0f}, {"ptree:Pine-cedar-tall", 26.2f}, {"ptree:oak", 12.2f},
+                                                       {"ptree:maple", 14.9f}, {"ptree:birch", 15.6f}, {"ptree:Pine-cedar", 19.4f}, {"ptree:rhodo", 11.6f}};
+  float base = 0;
+  for (auto& b : BASE) if (file == b.first) { base = b.second; break; }
+  if (base <= 0) return scl;
+  float h = base * scl;
+  // rank of this height in the old mix (0..1)
+  float p;
+  if (h <= HQ[0]) p = 0;
+  else if (h >= HQ[40]) p = 1;
+  else {
+    int i = 0;
+    while (i < 39 && HQ[i + 1] < h) i++;
+    p = (i + (h - HQ[i]) / std::max(1e-3f, HQ[i + 1] - HQ[i])) / 40.0f;
+  }
+  // the tree keeps its rank p but takes the old-mix height at rank g(p): ranks below 20% land under 12 m (old 30%
+  // point), ranks below 55% under 18 m (old 70% point), so the new shares are 20 / 35 / 45
+  float g = p < 0.2f ? p / 0.2f * 0.3f : p < 0.55f ? 0.3f + (p - 0.2f) / 0.35f * 0.4f : 0.7f + (p - 0.55f) / 0.45f * 0.3f;
+  float f = g * 40;
+  int k = std::min(39, (int)f);
+  float h2 = HQ[k] + (HQ[k + 1] - HQ[k]) * (f - k);
+  return scl * h2 / h;
+}
+
 uint32_t cellSeed(int cx, int cz, uint32_t seed) { return (uint32_t)std::floor(hash2(cx, cz, seed) * 4294967296.0); }
 
 // whole-map item tables for trees, rocks and undergrowth, generated once at load (grass stays lazy: millions of clumps)
 const int PRE_N = (int)(MAP_HALF / CELL) + 1;  // cells -PRE_N .. PRE_N-1 on each axis
 std::vector<std::vector<Item>> g_pre[4];
+std::vector<uint8_t> g_rockMask;
+std::atomic<bool> g_rockMaskReady{false};
+GLuint g_rockMaskTex = 0;
+const int RM_N = 3410;
+float rockMaskAt(float x, float z) {
+  if (!g_rockMaskReady.load(std::memory_order_acquire) || g_rockMask.empty()) return 0;
+  int px = (int)((x + 852.5f) / (1705.0f / RM_N)), pz = (int)((z + 852.5f) / (1705.0f / RM_N));
+  if (px < 0 || pz < 0 || px >= RM_N || pz >= RM_N) return 0;
+  return g_rockMask[(size_t)pz * RM_N + px] / 255.0f;
+}
+
 std::atomic<bool> g_preReady{false};
 inline const std::vector<Item>* preCell(int layer, int cx, int cz) {
   if (layer == L_GRASS || !g_preReady.load(std::memory_order_acquire)) return nullptr;
@@ -96,13 +180,24 @@ inline const std::vector<Item>* preCell(int layer, int cx, int cz) {
   return &g_pre[layer][(size_t)(cz + PRE_N) * (2 * PRE_N) + (cx + PRE_N)];
 }
 
+// the verge of a path or trail: loose stones collect along it (kicked aside, cleared off the tread)
+bool trailEdge(float x, float z) {
+  float pd = world::pathDistance(x, z), nr = world::nearRoute(x, z);
+  return (pd > 2.0f && pd < 3.3f) || (nr > 3.9f && nr < 5.3f && pd > 2.0f);
+}
+
 const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
   if (const std::vector<Item>* pre = preCell(layer, cx, cz)) return *pre;
   CellKey key{layer, cx, cz};
   auto it = C.cells.find(key);
   if (it != C.cells.end()) {
-    C.lru.splice(C.lru.end(), C.lru, it->second.lru);
-    return it->second.items;
+    if (layer == L_GRASS && !it->second.masked && g_rockMaskReady.load(std::memory_order_relaxed)) {
+      C.lru.erase(it->second.lru);   // grown before the stony-ground mask existed: grow it again
+      C.cells.erase(it);
+    } else {
+      C.lru.splice(C.lru.end(), C.lru, it->second.lru);
+      return it->second.items;
+    }
   }
   const LayerDef& L = LAYERS[layer];
   Rng rng(cellSeed(cx, cz, L.seed));
@@ -114,29 +209,96 @@ const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
   for (int sx = 0; sx < n; sx++)
     for (int sz = 0; sz < n; sz++) {
       float jx = rng.next(), jz = rng.next(), roll = rng.next(), pick = rng.next(), rot = rng.next(), sc = rng.next(), keep = rng.next();
+      if (layer == L_TREE) { jx = 0.3f + 0.4f * jx; jz = 0.3f + 0.4f * jz; }   // trees keep to the middle of their slot: >= 3.2 m between trunks
       float x = cx * CELL + (sx + jx) * slot;
       float z = cz * CELL + (sz + jz) * slot;
       if (std::fabs(x) > MAP_HALF - 3 || std::fabs(z) > MAP_HALF - 3) continue;
       float y = world::getTerrainHeight(x, z);
-      if (roll > L.chance(x, z, y)) continue;
+      int biome;
+      float bmul = biomeFlora(layer, x, z, biome);
+      float ch = L.chance(x, z, y) * bmul;
+      if (layer == L_UNDER && ch > 0) {
+        // undergrowth grows in clumps and drifts, thickest along stream banks, never as an even sprinkle
+        float clump = 0.3f + 1.5f * sstep(fbm(x * 0.045f + 11, z * 0.045f - 5, 2, 517), -0.12f, 0.32f);
+        float rd = world::riverQuery(x, z).d;
+        if (rd < 16) clump += 0.9f * (1 - sstep(rd, 6.0f, 16.0f));
+        ch *= clump;
+      }
+      static const bool noMid = true;   // young trees and giant shrubs removed: up close their flat leaf cards looked broken   // profiling: the v0.9.39 forest
+      bool spare = false;   // a slot the usual mix leaves empty can still take a sapling (forest) or deadwood
+      if (roll > ch) {
+        if (ch <= 0 || layer == L_GRASS || layer == L_UNDER) continue;
+        float fd = world::forestDensity(x, z);
+        if (layer == L_TREE && !noMid && fd > 0.3f && keep < 0.7f && roll < ch + 0.035f * fd) spare = true;
+        else if (layer == L_ROCK && fd > 0.35f && world::slopeAt(x, z) < 0.6f && roll < ch + 0.05f * fd) spare = true;   // deadwood slots (was 0.12: halved again in v0.9.76)
+        else continue;
+      }
       float acc = 0;
       size_t fi = 0;
-      float target = pick * totalW;
-      for (; fi < L.files.size() - 1; fi++) {
-        acc += L.files[fi].second;
-        if (target < acc) break;
+      if (biome >= 0 && layer != L_GRASS) {
+        const float* W = layer == L_TREE ? TREE_W[biome] : layer == L_UNDER ? UNDER_W[biome] : ROCK_W[biome];
+        for (; fi < L.files.size() - 1; fi++) {   // rows sum to 1
+          acc += W[fi];
+          if (pick < acc) break;
+        }
+      } else {
+        float target = pick * totalW;
+        for (; fi < L.files.size() - 1; fi++) {
+          acc += L.files[fi].second;
+          if (target < acc) break;
+        }
       }
       float scl = L.scaleLo + sc * (L.scaleHi - L.scaleLo);
+      if (layer == L_ROCK && L.files[fi].first.rfind("Rock", 0) != 0 && std::fmod(pick * 7.31f, 1.0f) < 0.5f) continue;   // half the stumps and logs again (v0.9.76)
       if (layer == L_ROCK && L.files[fi].first.rfind("Rock", 0) != 0) {  // stumps and logs only where trees grow
         if (world::forestDensity(x, z) < 0.3f || world::slopeAt(x, z) > 0.6f) fi = (size_t)(pick * 4) % 4;
         else scl = 0.75f + sc * 0.5f;
       }
-      if (layer == L_TREE) scl *= 0.9f + 0.25f * (sc * sc);  // a few giants among the ordinary trees
+      if (layer == L_ROCK && L.files[fi].first.rfind("Rock", 0) == 0) {
+        // outcrops: on steep ground the rock breaks through the slope as big slabs and crags, bedded into the hillside
+        float sl = world::slopeAt(x, z);
+        if (sl > 0.42f && keep > 0.35f && y < 90.0f) {           // not on the high mountain faces: there they just jut out
+          float k = std::min(1.0f, (sl - 0.42f) * 2.5f);
+          if (pick > 0.4f) fi = 1 + (size_t)(rot * 2) % 2;      // mostly slabs and jagged rock
+          scl *= 1.0f + k * (0.5f + 0.8f * sc);
+        }
+        // bed every rock into the ground, deeper the steeper the slope, so the downhill side does not hang in the air
+        y -= scl * (0.12f + 0.5f * std::min(sl, 1.1f));
+      }
+      if (layer == L_TREE && spare) {
+        scl = 0.28f + 0.2f * sc;          // saplings and young trees (4-8 m): the forest's middle storey
+        if (pick < 0.6f) fi = 4;          // mostly bushy rhododendron: young broadleaves read as sticks at this size
+        else if (L.files[fi].first.find("Pine") != std::string::npos) fi = 2;   // no pine saplings: they render as dark cones
+      } else if (layer == L_TREE) {
+        scl *= 0.9f + 0.25f * (sc * sc);  // a few giants among the ordinary trees
+        scl = treeHeightShift(L.files[fi].first, scl);
+      }
+      if (layer == L_ROCK && !spare && trailEdge(x, z)) {   // edge stones: small, half sunk, flat-lying
+        fi = pick < 0.6f ? 0 : 1;
+        scl = 0.1f + 0.22f * sc * sc;
+        y = world::getTerrainHeight(x, z) - scl * 0.35f;
+      }
+      if (layer == L_ROCK && spare) {     // deadwood on the forest floor: stumps, broken stumps, fallen logs
+        fi = 4 + (size_t)(pick * 2.999f);
+        scl = 0.75f + 0.55f * sc;
+        y = world::getTerrainHeight(x, z);
+      }
+      if (layer == L_UNDER && L.files[fi].first.rfind("Flower", 0) == 0) scl *= 1.6f;
+      if (layer == L_UNDER && (L.files[fi].first.rfind("Nettle", 0) == 0 || L.files[fi].first.rfind("Jalapeno", 0) == 0 || L.files[fi].first.rfind("Blueberry", 0) == 0)) scl = 0.92f + 0.16f * sc;   // nettle 0.9 m, jalapeno 1.6 m, blueberry 1.2 m: kept above the grass   // flower clumps: big enough to read in the grass
+      if (layer == L_UNDER) {
+        // in the woods, bushes and big plants grow into a 1.5-3 m shrub layer (the gap between grass and canopy)
+        const std::string& f = L.files[fi].first;
+        if ((f.rfind("Bush", 0) == 0 || f.rfind("Plant Big", 0) == 0) && keep < 0.6f && !noMid) {
+          float fd = world::forestDensity(x, z);
+          if (fd > 0.3f) scl *= 1.3f + 0.9f * sc * std::min(1.0f, (fd - 0.3f) * 2.5f);
+        }
+      }
       items.push_back({x, y, z, rot * TAU, scl, keep, (uint16_t)fi});
     }
   items.shrink_to_fit();
   C.lru.push_back(key);
   CellEntry e;
+  e.masked = g_rockMaskReady.load(std::memory_order_relaxed);
   e.items = std::move(items);
   e.lru = std::prev(C.lru.end());
   auto res = C.cells.emplace(key, std::move(e));
@@ -157,6 +319,7 @@ struct PartSlot {
   InstBatch batch;
   InstBatch shadowBatch;
   InstBatch lodBatch;
+  bool cardLod = false;
 };
 
 struct FileSlot {
@@ -171,6 +334,7 @@ struct FileSlot {
   std::vector<InstLite> visible;
   int imp = -1;
   float impW = 1, impBase = 0;
+  float cropX = 1, cropY = 1;   // share of the square-ish impostor card the tree actually fills (narrow crowns leave empty sides)
   float octCy = 0, octR = 1;  // octahedral impostor: sphere centre above the base and radius (model units)
   std::vector<InstLite> farItems, farVisible, midItems, midVisible;
   std::vector<Range> farRanges, midRanges;
@@ -294,30 +458,36 @@ void defineLayers() {
                       if (h < -0.7f || h > 96 || world::slopeAt(x, z) > 0.9f || world::nearRoute(x, z) < 3.4f) return 0;
                       if (world::riverMask(x, z) > 0.6f || world::lakeAt(x, z) >= 0) return 0;
                       float village = clampf((hypot2(x, z) - 6) / 6, 0, 1);
-                      return (1 - world::pathMask(x, z)) * village;
+                      float stony = 1 - 0.85f * sstep(rockMaskAt(x, z), 0.25f, 0.7f);   // grit and stones round the rocks: tufts only
+                      return (1 - world::pathMask(x, z)) * village * stony;
                     },
                     0.75f, 1.2f, [] { return g_settings.fullMap ? 140.0f : g_settings.grassRadius; }, 12, 0.2f, 0.45f});
   LAYERS.push_back({L_UNDER, 202,
-                    {{"Fern.glb", 0.22f}, {"Plant.glb", 0.14f}, {"Plant Big.glb", 0.1f}, {"Plant-xH5gNlQxAZ.glb", 0.06f}, {"Bush.glb", 0.1f}, {"Bush with Flowers.glb", 0.08f},
-                     {"Flower Group.glb", 0.1f}, {"Flower Group-LqTljN6Wg2.glb", 0.05f}, {"Flower Single.glb", 0.07f}},
+                    {{"Fern.glb", 0.12f}, {"Bush.glb", 0.1f}, {"Bush with Flowers.glb", 0.08f},
+                     {"Flower Group.glb", 0.1f}, {"Flower Group-LqTljN6Wg2.glb", 0.05f}, {"Flower Single.glb", 0.07f},
+                     {"Lupin.glb", 0.0f}, {"Nettle Leaves.glb", 0.12f}, {"Jalapeno.glb", 0.07f}, {"Blueberry.glb", 0.09f}},   // weight 0: only the outer meadows grow it (keeps every plant of the first valley where it was)
                     5,
                     [](float x, float z, float h) -> float {
                       if (h < -0.5f || h > 88 || world::pathDistance(x, z) < 2 || world::nearRoute(x, z) < 3.6f || hypot2(x, z) < SETTLEMENT_RADIUS || world::slopeAt(x, z) > 0.8f) return 0;
                       if (world::riverMask(x, z) > 0.3f || world::lakeAt(x, z, 1) >= 0) return 0;
-                      return 0.35f + 0.5f * world::forestDensity(x, z);
+                      return 0.3f + 0.85f * world::forestDensity(x, z);
                     },
                     0.45f, 0.9f, [] { return g_settings.fullMap ? 260.0f : g_settings.undergrowthRadius; }, 32, 0.3f, 0.6f});
-  LAYERS.push_back({L_ROCK, 303, {{"Rock Medium.glb", 0.3f}, {"Rock Slab.glb", 0.18f}, {"Rock Jagged.glb", 0.14f}, {"Rock Boulder.glb", 0.18f}, {"Stump.glb", 0.08f}, {"Stump Broken.glb", 0.06f}, {"Log Fallen.glb", 0.06f}}, 3,
+  LAYERS.push_back({L_ROCK, 303, {{"Rock Medium.glb", 0.3f}, {"Rock Slab.glb", 0.18f}, {"Rock Jagged.glb", 0.14f}, {"Rock Boulder.glb", 0.18f}, {"Stump.glb", 0.08f}, {"Stump Broken.glb", 0.07f}, {"Log Fallen.glb", 0.12f}}, 3,
                     [](float x, float z, float h) -> float {
-                      if (h < -0.8f || world::pathDistance(x, z) < 3.5f || hypot2(x, z) < 14) return 0;
-                      if (world::nearRoute(x, z) < 5.5f) return 0;
+                      if (h < -0.8f || hypot2(x, z) < 14) return 0;
+                      float pd = world::pathDistance(x, z), nr = world::nearRoute(x, z);
+                      if (pd < 3.5f || nr < 5.5f) return trailEdge(x, z) ? 0.75f : 0.0f;   // small stones lining paths
                       for (const Shrine& sh : world::SHRINES) if (hypot2(x - sh.x, z - sh.z) < COURT + 10) return 0;
                       if (world::lakeAt(x, z, 1) >= 0) return 0;
-                      return (world::pathDistance(x, z) < 6 ? 0.45f : 0.22f) + std::min(0.45f, world::slopeAt(x, z) * 0.35f);
+                      float sl = world::slopeAt(x, z);
+                      if (sl > 1.0f) return 0;   // cliffs are bedrock now (terrain material): no boulders glued to the face
+                      return ((world::pathDistance(x, z) < 6 ? 0.3f : 0.13f) + std::min(0.22f, sl * 0.22f)) * (1.0f - 0.7f * world::forestDensity(x, z));   // far fewer stones/deadwood, fewest in forest: room for trees
                     },
-                    0.25f, 1.45f, [] { return std::min(HAZE_CULL, g_settings.rockRadius * g_settings.drawDist()); }, 70, 0.6f, -1});
+                    0.25f, 1.9f, [] { return std::min(HAZE_CULL, g_settings.rockRadius * g_settings.drawDist()); }, 70, 0.6f, -1});
   LAYERS.push_back({L_TREE, 404,
-                    {{"ptree:oak", 0.24f}, {"ptree:maple", 0.2f}, {"ptree:birch", 0.16f}, {"ptree:Pine-cedar", 0.28f}, {"ptree:rhodo", 0.12f}},
+                    {{"ptree:oak", 0.12f}, {"ptree:maple", 0.10f}, {"ptree:birch", 0.10f}, {"ptree:Pine-cedar", 0.12f}, {"ptree:rhodo", 0.08f},
+                     {"ptree:oak-tall", 0.18f}, {"ptree:Pine-cedar-tall", 0.12f}, {"ptree:maple-tall", 0.18f}},  // tall variants stand among the usual heights
                     3,
                     [](float x, float z, float h) -> float {
                       if (h < -0.3f || h > 84 || world::slopeAt(x, z) > 0.85f || world::nearRoute(x, z) < 4.5f) return 0;
@@ -325,9 +495,26 @@ void defineLayers() {
                       if (world::riverMask(x, z) > 0.05f) return 0;
                       if (world::lakeAt(x, z, 3) >= 0) return 0;
                       if (hypot2(x, z) < SETTLEMENT_RADIUS + 6) return 0;
-                      return 0.05f + world::forestDensity(x, z) * 0.3f;
+                      if (hypot2(x - 114, z + 51) < 24) return 0;   // Nanda Overlook: keep the view over the valley open
+                      return 0.05f + world::forestDensity(x, z) * 0.36f;   // +20% in forest (room taken from rocks/deadwood); meadows unchanged
                     },
                     0.62f, 1.32f, [] { return std::min(HAZE_CULL, g_settings.treeRadius * g_settings.drawDist()); }, 55, 0.55f, -1});
+}
+
+unsigned rockMaskTex() {
+  if (g_rockMaskTex) return g_rockMaskTex;
+  if (!g_rockMaskReady.load(std::memory_order_acquire)) return 0;
+  glGenTextures(1, &g_rockMaskTex);
+  glBindTexture(GL_TEXTURE_2D, g_rockMaskTex);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, RM_N, RM_N, 0, GL_RED, GL_UNSIGNED_BYTE, g_rockMask.data());
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  if (std::getenv("HW_ROCKLIST")) std::printf("ROCKMASK uploaded %u\n", g_rockMaskTex);
+  return g_rockMaskTex;
 }
 
 const char* LAYER_NAMES[4] = {"grass", "under", "rock", "tree"};
@@ -369,11 +556,17 @@ void gardenSpots(std::vector<std::array<float, 6>>& out) {
 }
 
 std::atomic<bool> g_impReady{false};
-float g_treeBand = 16;  // 3D tree <-> impostor cross-fade for trees; 10 m once the octahedral impostors are ready
+float g_treeBand = 8;  // 3D tree <-> impostor cross-fade for trees; 10 m once the octahedral impostors are ready
 // (they match the 3D tree from every angle). Small plants and rocks keep the long 16 m hand-over: as pictures
 // they lose their shape against the grass, and they cost little as 3D anyway.
 inline float impBand(int layer) { return layer == 3 /*L_TREE*/ ? g_treeBand : 16.0f; }
-const float MID_BAND = 4.0f, CANOPY_BAND = 30;  // shorter crossfade: near and mid versions overlap less
+// The dissolve between tree versions only runs while you move: standing still, the hand-over zone closes up within
+// half a second, so no tree is ever left parked half-dissolved (the static dot pattern). 1 = full zone, ~0.1 = shut.
+float g_bandK = 1.0f;
+// how dense the stand around the player is (0 open .. 1 thick forest), from the triangle-budget walk; and the part
+// of it that applies right now (only while moving: standing still, everything returns to full detail)
+float g_denseK = 0.0f, g_denseMove = 0.0f;
+const float MID_BAND = 3.0f, CANOPY_BAND = 30;  // shorter crossfade: near and mid versions overlap less
 std::atomic<float> g_budgetScale{1.0f};
 float effScale() { return std::min(g_settings.detailScale, g_budgetScale.load()); }
 float midNearS(float ds) {
@@ -386,11 +579,13 @@ float midNearS(float ds) {
 float impostorNearS(float ds) {
   static const float force = std::getenv("HW_IMPNEAR") ? (float)std::atof(std::getenv("HW_IMPNEAR")) : 0.0f;  // A/B test
   if (force > 0) return force;
-  return clampf(16 * g_settings.drawDist(), 28, 90) * (0.85f + 0.15f * ds) * 0.85f;
+  // trees stay real geometry (the light mid version, ~2-3k triangles) out to ~40-45 m; pictures only take over
+  // once a tree is small on screen, where the difference no longer reads. (Was ~24 m: a 250 px tall tree swapped.)
+  return clampf(35 * g_settings.drawDist(), 70.6f, 120) * (0.85f + 0.15f * ds) * 0.78f;   // ~55 m (0.9.59: was ~60, ~15% fewer 3D trees)
 }
 float midNear() { return midNearS(effScale()); }
 float impostorNear() { return impostorNearS(effScale()); }
-float canopyNear() { return std::min(HAZE_CULL - CANOPY_BAND, clampf(140 * g_settings.drawDist(), 200, 420)) * (1.0f - 0.25f * sky::rainAmount()); }  // rain: far canopy ends sooner (hidden in the fog)
+float canopyNear() { return std::min(HAZE_CULL - CANOPY_BAND, clampf(60 * g_settings.drawDist(), 110, 180)) * (1.0f - 0.25f * sky::rainAmount()); }  // 0.9.54: merged crowns take over at ~120 m (were ~280 m), billboards only 60-120 m  // rain: far canopy ends sooner (hidden in the fog)
 float impostorOuter() { return canopyNear() + CANOPY_BAND; }
 
 struct LodCfg { float mid, imp, outer; bool canopy; };
@@ -501,14 +696,17 @@ void compute(BuildJob& J) {
             if (slot->hasLod) {
               if (d > midD - M && d < nearD + impBand(layer.id) + M) J.mid[si].push_back(inst);
               if (d > midD + MID_BAND + M) {
-                if (caster && d < 46 && (layer.id == L_TREE || inst.s > 0.55f || d < 18)) J.shadow[si].push_back(inst);
+                if (caster && d < 46 && !(layer.id == L_ROCK && world::getTerrainHeight(it.x, it.z) - it.y > it.scale * 0.25f) && (layer.id == L_TREE || (inst.s > 0.9f) || (inst.s > 0.55f && d < 30) || d < 12)) J.shadow[si].push_back(inst);
                 continue;
               }
             } else if (d > nearD + impBand(layer.id) + M) continue;
           }
           // tiny rocks far off cover a few shadow-map texels at most: skip them as casters
-          if (caster && d < 46 && (layer.id == L_TREE || inst.s > 0.55f || d < 18)) J.shadow[si].push_back(inst);
-          if (caster && d < 85 && J.casts.size() < 700) {
+          // rocks set into a hillside (outcrops, bedded on slopes) are part of the hill: no shadow of their own, it
+          // would float on the slope below them
+          bool embedded = layer.id == L_ROCK && world::getTerrainHeight(it.x, it.z) - it.y > it.scale * 0.25f;
+          if (caster && !embedded && d < 46 && (layer.id == L_TREE || (inst.s > 0.9f) || (inst.s > 0.55f && d < 30) || d < 12)) J.shadow[si].push_back(inst);
+          if (caster && !embedded && d < 85 && J.casts.size() < 700) {
             bool tree = layer.id == L_TREE;
             J.casts.push_back(castInstance(it.x, it.y, it.z, tree ? 2.3f * inst.s : 1.0f * inst.s, tree ? 8 * inst.s : 0.8f * inst.s));
           }
@@ -700,7 +898,11 @@ bool gatherVisible(const std::vector<InstLite>& items, const std::vector<FileSlo
     if (minD > 0 && fx * fx + fz * fz < minD * minD) continue;
     if (chunkVisible(r)) { h = (h ^ (i + 1)) * 1099511628211ull; vis.push_back((uint32_t)i); }
   }
-  int qx = (int)std::floor(cp.x * 2), qz = (int)std::floor(cp.z * 2);
+  // lists are rebuilt per 1.5 m of travel (was 0.5 m: three times the sorting and uploading while walking); the
+  // distance filter below keeps 2.6 m of slack, so nothing that should draw is ever missing in between
+  // (tried 3 m / 4.4 m slack for these: the wider slack put trees in two LOD lists at once and drew them twice)
+  const float quant = 1.5f, slack = 2.6f;
+  int qx = (int)std::floor(cp.x / quant), qz = (int)std::floor(cp.z / quant);
   h = (h ^ ((uint64_t)(uint32_t)qx * 73856093ull)) * 1099511628211ull;
   h = (h ^ ((uint64_t)(uint32_t)qz * 19349663ull)) * 1099511628211ull;
   h = (h ^ (uint64_t)(uint32_t)(int)(minD * 4)) * 1099511628211ull;
@@ -715,7 +917,7 @@ bool gatherVisible(const std::vector<InstLite>& items, const std::vector<FileSlo
     float ax = (A.mn.x + A.mx.x) * 0.5f - cp.x, az = (A.mn.z + A.mx.z) * 0.5f - cp.z, bx = (B.mn.x + B.mx.x) * 0.5f - cp.x, bz = (B.mn.z + B.mx.z) * 0.5f - cp.z;
     return ax * ax + az * az < bx * bx + bz * bz;
   });
-  float lo2 = minD > 2 ? (minD - 2) * (minD - 2) : 0, hi2 = maxD < 1e8f ? (maxD + 2) * (maxD + 2) : 1e18f;
+  float lo2 = minD > slack ? (minD - slack) * (minD - slack) : 0, hi2 = maxD < 1e8f ? (maxD + slack) * (maxD + slack) : 1e18f;
   for (uint32_t i : vis)
     for (size_t k = ranges[i].start; k < ranges[i].start + ranges[i].count; k++) {
       const InstLite& it = items[k];
@@ -739,6 +941,19 @@ extern Mesh g_impQuad;
 void rebuildImpostorMerge(int layer);
 void cullVisible() {
   const Vec3& cp = render::cam.pos;
+  {
+    static Vec3 lastP = cp;
+    static auto lastT = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    float dt = std::min(0.25f, std::max(1e-3f, std::chrono::duration<float>(now - lastT).count()));
+    float sp = (cp - lastP).length() / dt;
+    lastT = now; lastP = cp;
+    float target = clampf(sp / 1.2f, 0.1f, 1.0f);
+    g_bandK += (target - g_bandK) * std::min(1.0f, dt * 4.0f);
+    static const bool noDense = std::getenv("HW_NODENSE") != nullptr;
+    float mv = noDense ? 0.0f : clampf((sp - 0.8f) / 1.5f, 0.0f, 1.0f) * g_denseK;
+    g_denseMove += (mv - g_denseMove) * std::min(1.0f, dt * (mv > g_denseMove ? 3.0f : 0.7f));   // quick in, slow back to full detail
+  }
   if (++g_occAge > 20 || hypot2(cp.x - g_occPos.x, cp.z - g_occPos.z) > 3 || std::fabs(cp.y - g_occPos.y) > 2) {
     g_occ.clear();
     g_occBox.clear();
@@ -767,25 +982,54 @@ void cullVisible() {
     for (int L = 0; L < 4; L++) if (impDirty[L] && L != L_GRASS) rebuildImpostorMerge(L);
   int budget = g_settings.triBudget;
   if (budget <= 0 || !g_impReady) { g_budgetScale = 1.0f; return; }
-  static unsigned s_bf = 0;
-  if ((s_bf++ & 7) != 0) return;  // triangle budget: walks every visible tree, so only every 8th frame
+  // The walk over every tree around the player used to run in one go every 8th frame (2-3 ms spikes in dense
+  // forest). It now runs a slice of ~5000 trees per frame and finishes the count over a few frames; all of it
+  // measured from where the camera stood when the pass began.
   const int NB = 200;
   static std::vector<double> full, lod;
-  full.assign(4 * NB, 0); lod.assign(4 * NB, 0);
-  const Vec3& cp2 = render::cam.pos;
-  const float hfov = 2.0f * std::atan(std::tan(render::cam.fov * 0.5f * PI / 180.0f) * render::cam.aspect);
-  const double viewShare = clampf(hfov / TAU * 1.15f, 0.2f, 1.0f);
-  for (auto& s : g_slots) {
-    if (s->layer == L_GRASS) continue;
-    double ft = 0, lt = 0;
-    for (auto& p : s->parts) { ft += p.mesh->count / 3 * (p.mat.cutout && !p.proc ? 2 : 1); lt += (p.lod ? p.lod->count : p.mesh->count) / 3; }
-    int L = s->layer;
+  static size_t s_slot = 0, s_item = 0;
+  static int s_phase = 0;   // 0 = near items, 1 = mid items
+  static Vec3 cp2;
+  static double viewShare = 1;
+  static int s_trees = 0;
+  if (s_slot == 0 && s_item == 0 && s_phase == 0) {
+    full.assign(4 * NB, 0); lod.assign(4 * NB, 0);
+    cp2 = render::cam.pos;
+    s_trees = 0;
+    const float hfov = 2.0f * std::atan(std::tan(render::cam.fov * 0.5f * PI / 180.0f) * render::cam.aspect);
+    viewShare = clampf(hfov / TAU * 1.15f, 0.2f, 1.0f);
+  }
+  int work = 5000;
+  while (work > 0 && s_slot < g_slots.size()) {
+    auto& s = g_slots[s_slot];
+    if (s->layer == L_GRASS || (s_phase == 1 && !s->hasLod)) { s_slot++; s_item = 0; s_phase = 0; continue; }
     // every tree around the player, not only those in view, scaled by the share of the circle the view covers: the
     // result then depends on where you stand, never on where you look, so turning the camera can't move the LOD
     // distances (it did: facing a dense forest pulled the 3D/picture switch closer and trees changed while turning)
-    for (auto& it : s->items) { int k = std::min(NB - 1, (int)hypot2(it.x - cp2.x, it.z - cp2.z)); full[L * NB + k] += ft * viewShare; }
-    if (s->hasLod) for (auto& it : s->midItems) { int k = std::min(NB - 1, (int)hypot2(it.x - cp2.x, it.z - cp2.z)); lod[L * NB + k] += lt * viewShare; }
+    double ft = 0, lt = 0;
+    for (auto& pp : s->parts) { ft += pp.mesh->count / 3 * (pp.mat.cutout && !pp.proc ? 2 : 1); lt += (pp.cardLod ? pp.mesh->count * 6 / 10 : pp.lod ? pp.lod->count : pp.mesh->count) / 3; }
+    int L = s->layer;
+    const auto& items = s_phase == 0 ? s->items : s->midItems;
+    double add = (s_phase == 0 ? ft : lt) * viewShare;
+    std::vector<double>& H = s_phase == 0 ? full : lod;
+    if (s_item > items.size()) s_item = items.size();   // the list was rebuilt under us: count what is there
+    size_t end = std::min(items.size(), s_item + (size_t)work);
+    for (size_t k = s_item; k < end; k++) {
+      int bin = std::min(NB - 1, (int)hypot2(items[k].x - cp2.x, items[k].z - cp2.z));
+      H[L * NB + bin] += add;
+      if (L == L_TREE && s_phase == 0 && bin < 35) s_trees++;
+    }
+    work -= (int)(end - s_item) + 8;
+    s_item = end;
+    if (s_item >= items.size()) {
+      s_item = 0;
+      if (s_phase == 0 && s->hasLod) s_phase = 1;
+      else { s_phase = 0; s_slot++; }
+    }
   }
+  if (s_slot < g_slots.size()) return;   // not finished: carry on next frame
+  s_slot = 0; s_item = 0; s_phase = 0;
+  (void)s_trees;
   float cap = std::min(1.0f, g_settings.detailScale), pick = 0.3f;
   for (float sc = cap; sc >= 0.3f; sc -= 0.05f) {
     double T = 0;
@@ -798,11 +1042,14 @@ void cullVisible() {
       }
     }
     if (std::getenv("HW_BUDGET") && sc == cap) std::printf("budget T(%.2f)=%.0f\n", sc, T);
-    if (T <= budget) { pick = sc; if (std::getenv("HW_BUDGET")) std::printf("budget pick %.2f T=%.0f\n", sc, T); break; }
+    // density from the load itself (trees, rocks and undergrowth at full detail against the budget): heavy stands
+    // are where frames drop, whatever makes them heavy
+    if (sc == cap) g_denseK = clampf(((float)T - 110000.0f) / 120000.0f, 0.0f, 1.0f);   // ~100K in open country, 150K+ in thick stands
+    if (T <= budget * (1.0 - 0.3 * g_denseMove)) { pick = sc; if (std::getenv("HW_BUDGET")) std::printf("budget pick %.2f T=%.0f\n", sc, T); break; }
   }
   float cur = g_budgetScale.load();
   if (std::fabs(pick - cur) < 0.06f) pick = cur;  // dead zone: small swings in the count never move the LOD rings
-  float next = pick < cur ? std::max(pick, cur - 0.02f) : std::min(pick, cur + 0.01f);
+  float next = pick < cur ? std::max(pick, cur - 0.06f) : std::min(pick, cur + 0.01f);   // cut fast when a dense stand comes into range, restore slowly
   if (std::fabs(next - cur) > 0.001f) {
     g_budgetScale = next;
     static float lastBuilt = 1.0f;
@@ -811,9 +1058,14 @@ void cullVisible() {
 }
 
 
-const int IMP_CELL_W = 128, IMP_CELL_H = 256, IMP_VIEWS = 16,  // distant-tree images: they now take over from ~22-26 m, where a 192 px cell was visibly upscaled
+const int IMP_CELL_W = 192, IMP_CELL_H = 384, IMP_VIEWS = 16,  // distant-tree images: they now take over from ~22-26 m, where a 192 px cell was visibly upscaled
  IMP_ATLAS = IMP_CELL_W * IMP_VIEWS;
-int IMP_ATLAS_H = 256, g_impRows = 1;
+int IMP_ATLAS_H = 384, g_impRows = 1;
+// With texture compression the capture target is a single row tall: each tree type is drawn into it, compressed into
+// its row of the atlas the game samples, and the target reused for the next type. (It used to be the whole atlas in
+// RGBA8 with mips and a depth buffer, ~180 MB of video memory that was only ever read back.)
+bool g_impRowRT = false;
+inline int impRtY(int row) { return g_impRowRT ? 0 : row * IMP_CELL_H; }
 GLuint g_impFbo = 0, g_impTex = 0, g_impDepth = 0, g_impNrm = 0;
 // compressed copies of the distant-tree atlases (DXT1: 1/8 the memory traffic of RGBA8 when thousands of
 // far trees are drawn); refreshed row by row after each capture, sampled instead of the render targets
@@ -869,7 +1121,7 @@ void compressImpRow(int row, bool async = false) {
     px[a].resize((size_t)IMP_ATLAS * IMP_CELL_H * 4);
     glReadBuffer(a == 0 ? GL_COLOR_ATTACHMENT0 : GL_COLOR_ATTACHMENT1);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(0, row * IMP_CELL_H, IMP_ATLAS, IMP_CELL_H, GL_RGBA, GL_UNSIGNED_BYTE, px[a].data());
+    glReadPixels(0, impRtY(row), IMP_ATLAS, IMP_CELL_H, GL_RGBA, GL_UNSIGNED_BYTE, px[a].data());
   }
   glReadBuffer(GL_COLOR_ATTACHMENT0);
   glBindFramebuffer(GL_READ_FRAMEBUFFER, prevRead);
@@ -890,7 +1142,7 @@ void compressImpRow(int row, bool async = false) {
 // hemisphere (hemi-octahedral layout), colour + packed normal + depth, one texture-array layer per type. The
 // shader blends the 3 captured views nearest to the real viewing direction, so the picture matches the 3D model
 // from any angle (also from above, on a hillside) and the hand-over from 3D tree to picture can be short.
-const int OCT_K = 8, OCT_C = 160, OCT_S = OCT_K * OCT_C, OCT_LV = 5;
+const int OCT_K = 8, OCT_C = 192, OCT_S = OCT_K * OCT_C, OCT_LV = 5;
 GLuint g_octFbo = 0, g_octTex = 0, g_octNrm = 0, g_octDepth = 0, g_octTexC = 0, g_octNrmC = 0;
 int g_octLayers = 0;
 bool g_octReady = false;
@@ -964,6 +1216,7 @@ layout(location=6) in vec4 a_i0;
 layout(location=7) in float a_i1;
 uniform vec4 u_cell;
 uniform vec4 u_range;
+uniform vec2 u_crop[32];   // per tree type: card trimmed to the part the picture fills (fewer empty pixels shaded)
 out vec2 v_uv0;
 out vec2 v_uv1;
 out float v_blend;
@@ -972,9 +1225,18 @@ out vec3 v_wpos;
 out float v_depth;
 out vec2 v_fade;
 out vec3 v_q;  // quad x (-0.5..0.5), height (0..1), per-tree variation
+flat out float v_bl;  // this tree type blossoms in spring (broadleaf)
+uniform float u_rowBloom[32];
+out float v_rad;  // crown radius in metres: lets the flat card be lit and shadowed as the rounded volume it stands for
 void main(){
+  float row0 = floor(a_i1 / 6.2831853);
+  vec2 cr = u_crop[int(clamp(row0, 0.0, 31.0))];
+  if (cr.x <= 0.0) cr = vec2(1.0);
+  vec3 ap = vec3(a_pos.x * cr.x, a_pos.y * cr.y, 0.0);
   vec3 base = a_i0.xyz;
-  v_q = vec3(a_pos.x, a_pos.y, fract(sin(dot(base.xz, vec2(12.9898, 78.233))) * 43758.5453));
+  v_rad = a_i0.w * 0.5;
+  v_q = vec3(ap.x, ap.y, fract(floor(base.x * 2.0) * 0.6180339 + floor(base.z * 2.0) * 0.7548777));
+  v_bl = u_rowBloom[int(row0)];
   float s = a_i0.w, yaw = mod(a_i1, 6.2831853);
   vec2 tc = u_camPos.xz - base.xz;
   float d = max(length(tc), 1e-3);
@@ -993,11 +1255,11 @@ void main(){
   float elev = clamp(atan(u_camPos.y - (base.y + W), d), 0.0, 0.9);
   float tl = elev * 0.5;
   vec3 upv = vec3(dir.x * sin(tl), cos(tl), dir.y * sin(tl));
-  vec3 p = base + right * (a_pos.x * W) + upv * (a_pos.y * 2.0 * W);
+  vec3 p = base + right * (ap.x * W) + upv * (ap.y * 2.0 * W);
   float row = floor(a_i1 / 6.2831853), rows = u_cell.w;
-  float vv = (row + a_pos.y) / rows;
-  v_uv0 = vec2((v0 + a_pos.x + 0.5) / 16.0, vv);
-  v_uv1 = vec2((v1 + a_pos.x + 0.5) / 16.0, vv);
+  float vv = (row + ap.y) / rows;
+  v_uv0 = vec2((v0 + ap.x + 0.5) / 16.0, vv);
+  v_uv1 = vec2((v1 + ap.x + 0.5) / 16.0, vv);
   v_rot = vec2(cy, sy);
   v_wpos = p;
   v_fade = vec2(1.0 - smoothstep(u_range.x, mix(u_range.x, u_range.y, 0.5), d), 1.0 - smoothstep(mix(u_range.z, u_range.w, 0.5), u_range.w, d));
@@ -1016,6 +1278,8 @@ in vec3 v_wpos;
 in float v_depth;
 in vec2 v_fade;
 in vec3 v_q;
+in float v_rad;
+flat in float v_bl;
 uniform vec3 u_impGain;
 uniform sampler2D u_atlas;
 uniform sampler2D u_nrm;
@@ -1029,15 +1293,26 @@ void main(){
   vec2 uvA = farI && v_blend > 0.5 ? v_uv1 : v_uv0;
   vec4 t0 = texture(u_atlas, uvA, -0.6), t1 = farI ? t0 : texture(u_atlas, v_uv1, -0.6);  // slight negative bias: crisper crowns
   vec4 t = farI ? t0 : mix(t0, t1, v_blend);
+  // leaf-scale breakup: the captured picture cannot hold single leaves, so up close its crown read as smooth blobs
+  // beside the 3D tree. Fine noise fixed to the card frays the outline and speckles the colour the way leaves do
+  float kLeaf = 1.0 - smoothstep(45.0, 95.0, v_depth);
+  vec2 dq = vec2(v_q.x, v_q.y * 2.0);
+  float leafy = kLeaf > 0.0 ? (vnoise(dq * 42.0 + v_q.z * 9.0) * 0.6 + vnoise(dq * 97.0 + 3.7) * 0.4 - 0.5) * kLeaf : 0.0;
+  t.a += leafy * 0.5 * step(0.12, t.a);
   if (t.a < 0.5) {
     // fill pinholes inside the crown from a blurrier mip so sky doesn't speckle through
     vec4 c = mix(texture(u_atlas, v_uv0, 2.0), texture(u_atlas, v_uv1, 2.0), v_blend);
-    if (c.a < 0.62) discard;
+    if (c.a + leafy * 0.35 < 0.62) discard;
     t = vec4((c.rgb - vec3(0.42, 0.38, 0.26) * (1.0 - c.a)) / c.a, 1.0);
   }
   if (u_dbg == 1) { fragColor = vec4(1.0, 0.0, 1.0, 1.0); return; }
   vec3 nl = (farI ? texture(u_nrm, uvA).xyz : mix(texture(u_nrm, v_uv0).xyz, texture(u_nrm, v_uv1).xyz, v_blend)) * 2.0 - 1.0;
-  float shT = farI ? envLight(v_wpos) : shadowAt(v_wpos, vec3(0.0, 1.0, 0.0));  // shadow map does not reach that far anyway
+  // depth the card does not have: push each pixel toward the camera by the bulge of a rounded crown, and take
+  // shadows there. Shade from other trees then wraps over the crown instead of cutting straight across a flat sheet
+  vec2 vc0 = normalize((u_camPos - v_wpos).xz + vec2(1e-4));
+  float bx = v_q.x * 2.0, by = (v_q.y - 0.62) / 0.5;
+  vec3 wpS = v_wpos + vec3(vc0.x, 0.0, vc0.y) * (v_rad * sqrt(max(0.0, 1.0 - bx * bx - by * by)));
+  float shT = farI ? envLight(wpS) : shadowAt(wpS, vec3(0.0, 1.0, 0.0));  // shadow map does not reach that far anyway
   vec3 n = normalize(vec3(v_rot.x * nl.x + v_rot.y * nl.z, nl.y, -v_rot.y * nl.x + v_rot.x * nl.z));
   // volume cue: a rounded crown normal from the pixel's place on the card (sun side lit, far side in shade), mixed
   // with the captured leaf normals, so the card shades like a 3D crown instead of a flat photo
@@ -1045,20 +1320,30 @@ void main(){
   vec3 rgt = vec3(vc.y, 0.0, -vc.x), fwd = vec3(vc.x, 0.0, vc.y);
   float sx = v_q.x * 2.0, sy = (v_q.y - 0.62) / 0.5;
   vec3 ns = normalize(rgt * sx + vec3(0.0, sy * 0.8 + 0.25, 0.0) + fwd * sqrt(max(0.05, 1.0 - sx * sx - sy * sy)));
-  n = normalize(mix(mix(n, ns, 0.55), vec3(0.0, 1.0, 0.0), 0.25));
-  vec3 alb = t.rgb * t.rgb;
+  n = normalize(mix(n, ns, 0.55));
+  // past the shadow map (32 m) nothing shades the card, so far trees stood flat and bright beside the 3D ones:
+  // darken the side of the crown turned away from the sun, as its own leaves would
+  shT *= mix(1.0, mix(0.4, 1.0, smoothstep(-0.3, 0.5, dot(n, u_sunDir.xyz))), smoothstep(22.0, 32.0, v_depth));
+  n = normalize(mix(n, vec3(0.0, 1.0, 0.0), 0.25));
+  vec3 alb = t.rgb * t.rgb * (1.0 + leafy * 0.45);
   // per-tree tint and brightness (no two cards print the same), darker toward the trunk and lower crown
   float var = v_q.z;
   alb *= mix(0.9, 1.1, var) * vec3(1.0 + 0.08 * (fract(var * 7.31) - 0.5), 1.0, 1.0 - 0.12 * (fract(var * 3.17) - 0.5));
   alb *= mix(0.8, 1.04, smoothstep(0.05, 0.75, v_q.y));
+  {  // spring blossom per tree, same trees and same pink as the 3D leaves (seasonColor) and the far crowns
+    float lSpr = clamp(u_spring * 1.5 - smoothstep(10.0, 160.0, v_wpos.y) * 0.5, 0.0, 1.0);
+    float bl = v_bl * step(0.72, v_q.z) * 0.8 * lSpr * smoothstep(0.25, 0.5, v_q.y);
+    float sL = clamp(dot(alb, vec3(0.3, 0.59, 0.11)) * 3.2, 0.35, 1.25);
+    alb = mix(alb, vec3(0.98, 0.55, 0.7) * vec3(0.98, 0.55, 0.7) * sL * 0.6, bl);
+  }
   alb *= u_impGain;  // measured against the 3D trees (same view, all-3D vs all-picture): no colour jump at the swap
-  float sh = mix(mix(0.42, 0.9, shT) * mix(0.75, 1.0, smoothstep(0.08, 0.45, u_sunDir.y)), 0.62, 0.45);
+  float sh = mix(mix(0.26, 0.95, shT) * mix(0.75, 1.0, smoothstep(0.08, 0.45, u_sunDir.y)), 0.62, 0.4);
   vec3 lit = lambert(alb, n, sh);
   {
     // distant trees glow at the edges when backlit, like the near leaves
     vec3 V = normalize(u_camPos - v_wpos);
     float through = pow(max(dot(-V, u_sunDir.xyz), 0.0), 4.0) * smoothstep(-0.02, 0.15, u_sunDir.y);
-    lit += alb * vec3(1.05, 1.15, 0.6) * u_sunCol.rgb * through * 0.35;
+    lit += alb * vec3(1.05, 1.15, 0.6) * u_sunCol.rgb * through * 0.5;
   }
   vec3 c = outColor(lit);
   c = mix(c, fogTint(v_wpos), mix(fogObject(v_wpos, v_depth), fogGround(v_wpos, v_depth), smoothstep(60.0, 160.0, v_depth)));
@@ -1158,15 +1443,24 @@ void main(){
   vec3 w = v_w;
   if (farI) w = w.x >= max(w.y, w.z) ? vec3(1.0, 0.0, 0.0) : w.y >= w.z ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
   w *= vec3(inCell(v_f0), inCell(v_f1), inCell(v_f2));
+  // lean on the nearest captured view: an even three-way blend only kept leaves where the views agreed, which ate
+  // holes into the crown and blurred it, so the picture looked thinner than the 3D tree it replaces
+  w = w * w * w;
+  w /= max(w.x + w.y + w.z, 1e-5);
   vec4 t0 = w.x > 0.0 ? texture(u_octA, cellUV(v_f0)) : vec4(0.0);
   vec4 t1 = w.y > 0.0 ? texture(u_octA, cellUV(v_f1)) : vec4(0.0);
   vec4 t2 = w.z > 0.0 ? texture(u_octA, cellUV(v_f2)) : vec4(0.0);
   float a = t0.a * w.x + t1.a * w.y + t2.a * w.z;
-  if (a < 0.5 * (w.x + w.y + w.z) || a <= 0.0) discard;
+  // leaf-scale breakup: the captured picture is too coarse to hold single leaves, so close up its crown read as smooth
+  // blobs next to the 3D tree. Fine noise fixed to the picture frays the outline and speckles the colour like leaves
+  vec2 dq = w.x >= max(w.y, w.z) ? v_f0.xy : w.y >= w.z ? v_f1.xy : v_f2.xy;
+  float kLeaf = 1.0 - smoothstep(45.0, 95.0, v_depth);
+  float leafy = kLeaf > 0.0 ? (vnoise(dq * 46.0) * 0.6 + vnoise(dq * 110.0 + 3.7) * 0.4 - 0.5) * kLeaf : 0.0;
+  if (a + leafy * 0.55 < 0.42 * (w.x + w.y + w.z) || a <= 0.0) discard;
   if (u_dbg == 1) { fragColor = vec4(0.0, 1.0, 1.0, 1.0); return; }
   vec3 wa = w * vec3(t0.a, t1.a, t2.a) / a;
   // compressed cut-outs store black in the clear texels, so the filtered colour is premultiplied: divide it out
-  vec3 alb0 = (t0.rgb * w.x + t1.rgb * w.y + t2.rgb * w.z) / a;
+  vec3 alb0 = (t0.rgb * w.x + t1.rgb * w.y + t2.rgb * w.z) / a * (1.0 + leafy * 0.45);
   vec4 n0 = wa.x > 0.0 ? texture(u_octN, cellUV(v_f0)) : vec4(0.5);
   vec4 n1 = wa.y > 0.0 ? texture(u_octN, cellUV(v_f1)) : vec4(0.5);
   vec4 n2 = wa.z > 0.0 ? texture(u_octN, cellUV(v_f2)) : vec4(0.5);
@@ -1175,14 +1469,17 @@ void main(){
   vec3 wp = v_wpos + v_toCam * (v_R - 2.0 * v_R * dep);  // the leaf's real position: shadows land where they should
   float shT = farI ? envLight(wp) : shadowAt(wp, vec3(0.0, 1.0, 0.0));
   vec3 n = normalize(vec3(v_rot.x * nl.x + v_rot.y * nl.z, nl.y, -v_rot.y * nl.x + v_rot.x * nl.z));
-  n = normalize(mix(n, vec3(0.0, 1.0, 0.0), 0.6));
+  // past the shadow map (32 m) nothing shaded the picture, so far trees stood flat and bright next to the 3D ones.
+  // Stand-in self-shadow from the captured leaf normals: the side of the crown turned away from the sun goes dark
+  shT *= mix(1.0, mix(0.22, 1.0, smoothstep(-0.35, 0.5, dot(n, u_sunDir.xyz))), smoothstep(22.0, 32.0, v_depth));
+  n = normalize(mix(n, vec3(0.0, 1.0, 0.0), 0.45));
   vec3 alb = alb0 * alb0;
-  float sh = mix(mix(0.42, 0.9, shT) * mix(0.75, 1.0, smoothstep(0.08, 0.45, u_sunDir.y)), 0.62, 0.8);
+  float sh = mix(mix(0.26, 0.95, shT) * mix(0.75, 1.0, smoothstep(0.08, 0.45, u_sunDir.y)), 0.62, 0.42);
   vec3 lit = lambert(alb, n, sh);
   {
     vec3 V = normalize(u_camPos - wp);
     float through = pow(max(dot(-V, u_sunDir.xyz), 0.0), 4.0) * smoothstep(-0.02, 0.15, u_sunDir.y);
-    lit += alb * vec3(1.05, 1.15, 0.6) * u_sunCol.rgb * through * 0.35;
+    lit += alb * vec3(1.05, 1.15, 0.6) * u_sunCol.rgb * through * 0.5;
   }
   vec3 c = outColor(lit);
   c = mix(c, fogTint(wp), mix(fogObject(wp, v_depth), fogGround(wp, v_depth), smoothstep(60.0, 160.0, v_depth)));
@@ -1237,22 +1534,25 @@ void captureImpostors(int only = -1, bool mips = true, int vFrom = 0, int vTo = 
     for (auto& sp : g_slots) if (sp->layer != L_GRASS && !sp->parts.empty()) types++;
     g_impRows = std::max(1, std::min(32, types));
     IMP_ATLAS_H = g_impRows * IMP_CELL_H;
-    auto mk = [](GLuint& tex) {
+    g_impRowRT = gfx::hasS3TC();
+    const int RT_H = g_impRowRT ? IMP_CELL_H : IMP_ATLAS_H;
+    auto mk = [RT_H](GLuint& tex) {
       glGenTextures(1, &tex);
       glBindTexture(GL_TEXTURE_2D, tex);
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, IMP_ATLAS, IMP_ATLAS_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, IMP_ATLAS, RT_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 4);
-      gfx::addBufferBytes((long long)IMP_ATLAS * IMP_ATLAS_H * 4 * 4 / 3);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, g_impRowRT ? 0 : 4);
+      if (g_impRowRT) glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      gfx::addBufferBytes(g_impRowRT ? (long long)IMP_ATLAS * RT_H * 4 : (long long)IMP_ATLAS * IMP_ATLAS_H * 4 * 4 / 3);
     };
     mk(g_impTex);
     mk(g_impNrm);
     glGenRenderbuffers(1, &g_impDepth);
     glBindRenderbuffer(GL_RENDERBUFFER, g_impDepth);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, IMP_ATLAS, IMP_ATLAS_H);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, IMP_ATLAS, RT_H);
     glGenFramebuffers(1, &g_impFbo);
     glBindFramebuffer(GL_FRAMEBUFFER, g_impFbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_impTex, 0);
@@ -1283,7 +1583,7 @@ void captureImpostors(int only = -1, bool mips = true, int vFrom = 0, int vTo = 
   GLint prevFbo = 0;
   glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
   glBindFramebuffer(GL_FRAMEBUFFER, g_impFbo);
-  glViewport(0, 0, IMP_ATLAS, IMP_ATLAS_H);
+  glViewport(0, 0, IMP_ATLAS, g_impRowRT ? IMP_CELL_H : IMP_ATLAS_H);
   const GLfloat cc0[4] = {0.42f, 0.38f, 0.26f, 0}, cc1[4] = {0.5f, 1.0f, 0.5f, 0};
   auto clr = [&]() { glClearBufferfv(GL_COLOR, 0, cc0); glClearBufferfv(GL_COLOR, 1, cc1); glClear(GL_DEPTH_BUFFER_BIT); };
   if (only < 0) clr();
@@ -1309,8 +1609,12 @@ void captureImpostors(int only = -1, bool mips = true, int vFrom = 0, int vTo = 
     float W = std::max(2 * rxz, h * 0.5f) * 1.02f;
     sp->imp = t;
     sp->impW = W;
+    // margin: leaf cards grow a little at distance (crown LOD), so the captured silhouette can poke past the mesh bounds
+    sp->cropX = std::min(1.0f, 2 * rxz * 1.25f / W);
+    sp->cropY = std::min(1.0f, h * 1.06f / (2 * W));
     sp->impBase = mn.y;
     Vec3 c{0, mn.y + W, 0};
+    if (only < 0 && g_impRowRT) { glDisable(GL_SCISSOR_TEST); clr(); glEnable(GL_SCISSOR_TEST); }   // the one-row target is reused per type
     for (int v = only >= 0 ? vFrom : 0; v < (only >= 0 ? vTo : IMP_VIEWS); v++) {
       float a = v * TAU / IMP_VIEWS;
       Vec3 d{std::sin(a), 0, std::cos(a)};
@@ -1324,8 +1628,8 @@ void captureImpostors(int only = -1, bool mips = true, int vFrom = 0, int vTo = 
       render::frame.cam[0] = eye.x; render::frame.cam[1] = eye.y; render::frame.cam[2] = eye.z;
       render::uploadFrame();
       int col = v, row = t;
-      glViewport(col * IMP_CELL_W, row * IMP_CELL_H, IMP_CELL_W, IMP_CELL_H);
-      glScissor(col * IMP_CELL_W, row * IMP_CELL_H, IMP_CELL_W, IMP_CELL_H);
+      glViewport(col * IMP_CELL_W, impRtY(row), IMP_CELL_W, IMP_CELL_H);
+      glScissor(col * IMP_CELL_W, impRtY(row), IMP_CELL_W, IMP_CELL_H);
       if (only >= 0) clr();
       for (auto& p : sp->parts) {
         Shader& s = render::objectFor(p.mat, IM_NONE, OF_CAPTURE);
@@ -1334,18 +1638,32 @@ void captureImpostors(int only = -1, bool mips = true, int vFrom = 0, int vTo = 
       }
     }
     if (!sp->impBatch.vao) sp->impBatch.create(&g_impQuad, InstKind::Lite);
+    if (only < 0 && g_impRowRT && mips) {
+      GLint au = 0, tb = 0;
+      glGetIntegerv(GL_ACTIVE_TEXTURE, &au);
+      glActiveTexture(GL_TEXTURE0 + 15);   // a scratch unit: the upload must not disturb what the capture shaders have bound
+      glGetIntegerv(GL_TEXTURE_BINDING_2D, &tb);
+      glDisable(GL_SCISSOR_TEST);
+      compressImpRow(t);
+      glBindTexture(GL_TEXTURE_2D, (GLuint)tb);
+      glActiveTexture((GLenum)au);
+      glBindFramebuffer(GL_FRAMEBUFFER, g_impFbo);
+      glEnable(GL_SCISSOR_TEST);
+    }
     t++;
   }
   glDisable(GL_SCISSOR_TEST);
   render::frame = saved;
   render::uploadFrame();
   if (mips) {
-    glBindTexture(GL_TEXTURE_2D, g_impTex);
-    glGenerateMipmap(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, g_impNrm);
-    glGenerateMipmap(GL_TEXTURE_2D);
+    if (!g_impRowRT) {
+      glBindTexture(GL_TEXTURE_2D, g_impTex);
+      glGenerateMipmap(GL_TEXTURE_2D);
+      glBindTexture(GL_TEXTURE_2D, g_impNrm);
+      glGenerateMipmap(GL_TEXTURE_2D);
+    }
     if (only >= 0) compressImpRow(only, true);
-    else for (int r = 0; r < t; r++) compressImpRow(r);
+    else if (!g_impRowRT) for (int r = 0; r < t; r++) compressImpRow(r);
   }
   glBindFramebuffer(GL_FRAMEBUFFER, prevFbo);
   glViewport(vp[0], vp[1], vp[2], vp[3]);
@@ -1476,13 +1794,16 @@ void captureOct(int only, bool mips, int vFrom, int vTo) {
   glDisable(GL_SCISSOR_TEST);
   render::frame = saved;
   render::uploadFrame();
-  if (only < 0 || g_octReady) { g_octReady = true; g_treeBand = 10.0f; g_impMergeDirty = true; }
+  if (only < 0 || g_octReady) { g_octReady = true; g_treeBand = 4.0f; g_impMergeDirty = true; }  // short hand-over: far fewer trees sit half-dissolved (stippled) at any moment
   glBindFramebuffer(GL_FRAMEBUFFER, prevFbo);
   glViewport(vp[0], vp[1], vp[2], vp[3]);
 }
 
 
 Mesh g_canopy;
+// the canopy sheet is cut into 160 m tiles so only those in view and inside the haze are sent to the GPU
+struct CanopyTile { size_t first; GLsizei count; Vec3 mn, mx; };
+std::vector<CanopyTile> g_canopyTiles;
 const float CANOPY_STEP = 5.0f;
 
 const char* CANOPY_VS = R"(
@@ -1517,7 +1838,9 @@ uniform float u_rows;
 uniform sampler2D u_atlas;
 out vec4 fragColor;
 void main(){
-  float cov = v_c.r;
+  float cov = 1.0, bkey = v_c.r;
+  // bare broadleaf crowns in winter: the far canopy thins to the few evergreen and leftover crowns
+  cov *= 1.0 - u_bare * 0.95 * (1.0 - v_c.g);
   if (cov < 0.24 + 0.16 * vnoise(v_wpos.xz * 0.22)) discard;
   float d = distance(v_wpos.xz, u_camPos.xz);
   float fin = smoothstep(u_in.x, u_in.y, d);
@@ -1538,27 +1861,45 @@ void main(){
   float row = ti < 16 ? u_row[ti] : -1.0;
   if (row >= 0.0) {
     vec4 a = textureLod(u_atlas, vec2(0.5, (row + 0.62) / u_rows), 6.0);
-    if (a.a > 0.05) { vec3 tc = (a.rgb - vec3(0.42, 0.38, 0.26) * (1.0 - a.a)) / a.a; tc = tc * tc * 0.85; alb = mix(alb, tc, 0.75); }
+    if (a.a > 0.05) { vec3 tc = (a.rgb - vec3(0.42, 0.38, 0.26) * (1.0 - a.a)) / a.a; tc = tc * tc * 0.85; alb = mix(alb, tc, 0.95); }   // same colour as the billboards (was 75%): no colour step at the hand-over
   }
   // individual crowns: lumpy tops with sunlit and shaded sides
   vec2 cq = v_wpos.xz * 0.28;
-  float crown = vnoise(cq) * 0.6 + vnoise(cq * 2.3 + 4.0) * 0.4;
+  float crown = vnoise(cq);   // one noise tap (was 6): ~half the far-canopy pixel cost
   vec3 n = normalize(v_n);
-  vec3 cg = vec3(vnoise(cq + vec2(0.35, 0.0)) - vnoise(cq - vec2(0.35, 0.0)), 0.0, vnoise(cq + vec2(0.0, 0.35)) - vnoise(cq - vec2(0.0, 0.35)));
-  n = normalize(n - cg * 1.6);
-  alb *= mix(0.72, 1.12, crown);
+
+  alb *= mix(0.88, 1.06, crown);
+  float hgt = v_c.a;
+  {  // spring blossom: same trees as up close
+    float lSpr = clamp(u_spring * 1.5 - smoothstep(10.0, 160.0, v_wpos.y) * 0.5, 0.0, 1.0);
+    alb = mix(alb, vec3(0.62, 0.3, 0.38), (1.0 - pine) * step(0.72, bkey) * 0.7 * lSpr * smoothstep(0.3, 0.6, hgt));
+  }
+  alb *= mix(0.5, 1.12, hgt);                       // self-shadowed underside, bright tips
+  float tj = fract(sin(v_t * 91.7 + floor(v_wpos.x * 0.25) * 1.3 + floor(v_wpos.z * 0.25) * 7.1) * 4375.5);
+  alb *= mix(vec3(0.9, 0.95, 0.88), vec3(1.08, 1.06, 0.96), tj);  // tree-to-tree hue / brightness variety
+  alb *= 1.12;
   float snowP = smoothstep(0.35, 0.75, fract(sin(dot(floor(v_wpos.xz * 0.6), vec2(17.1, 93.7))) * 3758.5));
   alb = mix(alb, vec3(0.8, 0.83, 0.88), u_snow * smoothstep(0.55, 0.95, n.y) * mix(0.15, 0.45, snowP) * (1.0 - 0.5 * pine));
   alb *= (0.62 + 0.3 * n1);
-  vec3 c = outColor(lambert(alb, n, envLight(v_wpos)) * mix(0.7, 1.0, cov));  // cloud shadows reach the far forest too
+  vec3 lit = lambert(alb, n, envLight(v_wpos)) * mix(0.7, 1.0, cov);
+  float back = pow(max(0.0, dot(normalize(v_wpos - u_camPos), u_sunDir.xyz)), 4.0);   // sun through the leaves (rim glow)
+  lit += alb * vec3(1.0, 0.9, 0.55) * back * 0.45 * hgt;
+  vec3 c = outColor(lit);  // cloud shadows reach the far forest too
+  // aerial perspective: distant forest takes the sky's colour, warm gold toward the sun, cool blue away from it
+  vec3 vd = normalize(v_wpos - u_camPos);
+  float toSun = clamp(dot(normalize(vd.xz + 1e-4), normalize(u_sunDir.xz + 1e-4)) * 0.5 + 0.5, 0.0, 1.0);
+  vec3 air = mix(vec3(0.42, 0.56, 0.78), vec3(1.0, 0.8, 0.55), toSun * toSun) * fogTint(v_wpos) * 1.6;
+  float aer = smoothstep(120.0, 900.0, v_depth) * 0.4 * clamp(u_sunDir.y * 4.0 + 0.2, 0.0, 1.0);
+  c = mix(c, air, aer);
   c = mix(c, fogTint(v_wpos), fogGround(v_wpos, v_depth));
   fragColor = vec4(c, 1.0);
 }
 )";
 
+// Merged distant forest: every tree beyond the impostor range becomes a tiny closed crown (two stacked 5-sided
+// cones for pines, a 5-sided dome for broadleaf), all crowns of a 64 m tile baked into one mesh and drawn with
+// one call. Real silhouettes against the sky and valley instead of the old smooth canopy sheet.
 void buildCanopy() {
-  const int N = (int)(MAP_HALF * 2 / CANOPY_STEP) + 1;
-  std::vector<float> cov((size_t)N * N, 0), hgt((size_t)N * N, 0), pine((size_t)N * N, 0), rnd((size_t)N * N, 0);
   CellCache tmp;
   tmp.limit = 1 << 30;
   int nc = (int)std::ceil(MAP_HALF / CELL);
@@ -1576,84 +1917,125 @@ void buildCanopy() {
     slotR[i] = rr;
     slotPine[i] = slots[i]->file.find("Pine") != std::string::npos;
   }
+  const float TS = 128;   // 128 m tiles: ~4x fewer draw calls than 64 m, culling still tight enough
+  const int NT = (int)std::ceil(2 * MAP_HALF / TS);
+  struct T { float x, z, y, h, r; uint8_t pine, type; float rot; };
+  std::vector<std::vector<T>> tiles((size_t)NT * NT);
+  size_t ntree = 0;
   for (int cx = -nc; cx < nc; cx++)
     for (int cz = -nc; cz < nc; cz++)
       for (const Item& it : getCell(tmp, L_TREE, cx, cz)) {
         if (it.file >= slots.size() || !slots[it.file] || blocked(it.x, it.z)) continue;
-        float r = std::max(4.0f, slotR[it.file] * it.scale * 1.25f), h = slotH[it.file] * it.scale;
-        int i0 = (int)std::floor((it.x - r + MAP_HALF) / CANOPY_STEP), i1 = (int)std::ceil((it.x + r + MAP_HALF) / CANOPY_STEP);
-        int j0 = (int)std::floor((it.z - r + MAP_HALF) / CANOPY_STEP), j1 = (int)std::ceil((it.z + r + MAP_HALF) / CANOPY_STEP);
-        for (int j = std::max(0, j0); j <= std::min(N - 1, j1); j++)
-          for (int i = std::max(0, i0); i <= std::min(N - 1, i1); i++) {
-            float x = -MAP_HALF + i * CANOPY_STEP, z = -MAP_HALF + j * CANOPY_STEP;
-            float q = 1 - ((x - it.x) * (x - it.x) + (z - it.z) * (z - it.z)) / (r * r);
-            if (q <= 0) continue;
-            size_t k = (size_t)j * N + i;
-            float w = std::sqrt(q);
-            if (w > cov[k]) { pine[k] = slotPine[it.file] ? 1.0f : 0.0f; rnd[k] = (it.file + 0.5f) / 255.0f; }
-            cov[k] = std::max(cov[k], w);
-            hgt[k] = std::max(hgt[k], h * (0.78f + 0.22f * w));
-          }
+        int ti = std::max(0, std::min(NT - 1, (int)((it.x + MAP_HALF) / TS))), tj = std::max(0, std::min(NT - 1, (int)((it.z + MAP_HALF) / TS)));
+        float h = slotH[it.file] * it.scale, r = std::max(1.6f, slotR[it.file] * it.scale * 0.95f);
+        tiles[(size_t)tj * NT + ti].push_back({it.x, it.z, world::getTerrainHeight(it.x, it.z), h, r, (uint8_t)(slotPine[it.file] ? 1 : 0), (uint8_t)it.file, it.rot});
+        ntree++;
       }
-  for (int pass = 0; pass < 3; pass++) {
-    std::vector<float> hc = hgt, cc = cov;
-    for (int j = 1; j + 1 < N; j++)
-      for (int i = 1; i + 1 < N; i++) {
-        size_t k = (size_t)j * N + i;
-        float sh = 0, sc = 0, sw = 0;
-        for (int dj = -1; dj <= 1; dj++)
-          for (int di = -1; di <= 1; di++) {
-            size_t q = (size_t)(j + dj) * N + (i + di);
-            float w = (di == 0 && dj == 0) ? 2.0f : 1.0f;
-            sc += cc[q] * w;
-            if (cc[q] > 0.05f) { sh += hc[q] * w; sw += w; }
-          }
-        cov[k] = sc / 10.0f;
-        if (sw > 0 && cc[k] > 0.05f) hgt[k] = sh / sw;
-      }
+  // far away, lone meadow trees read as scattered dots: keep only trees with company (groves and forest)
+  size_t lone = 0;
+  {
+    const float NR = 14;
+    std::vector<std::vector<T>> keep(tiles.size());
+    auto near = [&](const T& t) {
+      int c = 0;
+      int ti = (int)((t.x + MAP_HALF) / TS), tj = (int)((t.z + MAP_HALF) / TS);
+      for (int dj = -1; dj <= 1; dj++)
+        for (int di = -1; di <= 1; di++) {
+          int a = ti + di, b = tj + dj;
+          if (a < 0 || b < 0 || a >= NT || b >= NT) continue;
+          for (const T& o : tiles[(size_t)b * NT + a])
+            if ((o.x - t.x) * (o.x - t.x) + (o.z - t.z) * (o.z - t.z) < NR * NR && ++c > 2) return c;
+        }
+      return c;
+    };
+    for (size_t k = 0; k < tiles.size(); k++)
+      for (const T& t : tiles[k]) { keep[k].push_back(t); if (near(t) <= 2) lone++; }   // lone trees kept: dropping them made them vanish past the billboard range
+    tiles.swap(keep);
   }
-  std::vector<float> ys((size_t)N * N);
-  for (int j = 0; j < N; j++)
-    for (int i = 0; i < N; i++) {
-      size_t k = (size_t)j * N + i;
-      float x = -MAP_HALF + i * CANOPY_STEP, z = -MAP_HALF + j * CANOPY_STEP;
-      float g = world::getTerrainHeight(x, z);
-      ys[k] = cov[k] > 0.05f ? g + hgt[k] * 0.85f : g - 3;
-    }
   MeshData md;
   md.fmt = VFmt::P3C4N4;
-  for (int j = 0; j < N; j++)
-    for (int i = 0; i < N; i++) {
-      size_t k = (size_t)j * N + i;
-      float x = -MAP_HALF + i * CANOPY_STEP, z = -MAP_HALF + j * CANOPY_STEP;
-      float hl = ys[(size_t)j * N + std::max(0, i - 1)], hr = ys[(size_t)j * N + std::min(N - 1, i + 1)];
-      float hd = ys[(size_t)std::max(0, j - 1) * N + i], hu = ys[(size_t)std::min(N - 1, j + 1) * N + i];
-      Vec3 n = Vec3(hl - hr, 2 * CANOPY_STEP, hd - hu).normalized();
-      VtxP3C4N4 v;
-      v.p[0] = x; v.p[1] = ys[k]; v.p[2] = z;
-      v.c = (uint32_t)(clampf(cov[k], 0, 1) * 255) | ((uint32_t)(pine[k] * 255) << 8) | ((uint32_t)(rnd[k] * 255) << 16) | (255u << 24);
-      v.n[0] = (int8_t)(n.x * 127); v.n[1] = (int8_t)(n.y * 127); v.n[2] = (int8_t)(n.z * 127); v.n[3] = 0;
-      const uint8_t* b = (const uint8_t*)&v;
-      md.verts.insert(md.verts.end(), b, b + sizeof v);
-      md.bmin = {std::min(md.bmin.x, x), std::min(md.bmin.y, ys[k]), std::min(md.bmin.z, z)};
-      md.bmax = {std::max(md.bmax.x, x), std::max(md.bmax.y, ys[k]), std::max(md.bmax.z, z)};
+  uint32_t nv = 0;
+  auto vert = [&](float x, float y, float z, Vec3 n, uint32_t col) {
+    VtxP3C4N4 v;
+    v.p[0] = x; v.p[1] = y; v.p[2] = z;
+    v.c = col;
+    n = n.normalized();
+    v.n[0] = (int8_t)(n.x * 127); v.n[1] = (int8_t)(n.y * 127); v.n[2] = (int8_t)(n.z * 127); v.n[3] = 0;
+    const uint8_t* b = (const uint8_t*)&v;
+    md.verts.insert(md.verts.end(), b, b + sizeof v);
+    md.bmin = {std::min(md.bmin.x, x), std::min(md.bmin.y, y), std::min(md.bmin.z, z)};
+    md.bmax = {std::max(md.bmax.x, x), std::max(md.bmax.y, y), std::max(md.bmax.z, z)};
+    return nv++;
+  };
+  const int S = 6;
+  // ring of S verts at height y, radius r; returns first index
+  auto ring = [&](const T& t, float y, float r, float up, float rot, uint32_t col, float ox = 0, float oz = 0) {
+    uint32_t f = nv;
+    for (int k = 0; k < S; k++) {
+      float a = rot + k * TAU / S, ca = std::cos(a), sa = std::sin(a);
+      float wob = 0.85f + 0.3f * (float)(((unsigned)((int)(t.x * 7.0f) * 73856093) ^ (unsigned)((int)(t.z * 7.0f) * 19349663) ^ (unsigned)(k * 83492791)) % 1000u) / 1000.0f;
+      vert(t.x + ox + ca * r * wob, t.y + y, t.z + oz + sa * r * wob, Vec3(ca, up, sa), col);
     }
-  md.vertexCount = N * N;
-  for (int j = 0; j + 1 < N; j++)
-    for (int i = 0; i + 1 < N; i++) {
-      uint32_t a = j * N + i, b = a + 1, c = a + N, d = c + 1;
-      if (cov[a] < 0.05f && cov[b] < 0.05f && cov[c] < 0.05f && cov[d] < 0.05f) continue;
+    return f;
+  };
+  auto band = [&](uint32_t lo, uint32_t hi) {
+    for (int k = 0; k < S; k++) {
+      uint32_t a = lo + k, b = lo + (k + 1) % S, c = hi + k, d = hi + (k + 1) % S;
       md.idx.insert(md.idx.end(), {a, c, b, b, c, d});
     }
+  };
+  auto cap = [&](uint32_t r0, uint32_t apex) { for (int k = 0; k < S; k++) md.idx.insert(md.idx.end(), {r0 + k, apex, r0 + (k + 1) % S}); };
+  g_canopyTiles.clear();
+  for (int tj = 0; tj < NT; tj++)
+    for (int ti = 0; ti < NT; ti++) {
+      auto& L = tiles[(size_t)tj * NT + ti];
+      if (L.empty()) continue;
+      CanopyTile ct{md.idx.size(), 0, Vec3(1e9f, 1e9f, 1e9f), Vec3(-1e9f, -1e9f, -1e9f)};
+      for (const T& t : L) {
+        // alpha = height in the crown (shader: dark, shaded underside -> sunlit tips)
+        float bk = std::fmod(std::floor(t.x * 2.0f) * 0.6180339f + std::floor(t.z * 2.0f) * 0.7548777f, 1.0f); if (bk < 0) bk += 1;
+        auto C = [&](float ao) { return (uint32_t)(bk * 255) | ((uint32_t)(t.pine * 255) << 8) | ((uint32_t)((t.type + 0.5f) / 255.0f * 255) << 16) | ((uint32_t)(clampf(ao, 0, 1) * 255) << 24); };
+        if (t.pine) {
+          // three tiers: a narrow, layered spire instead of one fat cone
+          const float yb[3] = {0.14f, 0.42f, 0.66f}, yt[3] = {0.55f, 0.8f, 1.0f}, rr[3] = {0.95f, 0.7f, 0.42f};
+          for (int k = 0; k < 3; k++) {
+            uint32_t r0 = ring(t, t.h * yb[k], t.r * rr[k] * 0.85f, -0.1f, t.rot + k * 0.5f, C(0.15f + 0.25f * k));
+            uint32_t a0 = vert(t.x, t.y + t.h * yt[k], t.z, Vec3(0, 1, 0), C(0.75f + 0.12f * k));
+            cap(r0, a0);
+          }
+        } else {
+          // two overlapping lumps: an irregular, cloud-like crown instead of one rock-like dome
+          for (int l = 0; l < 2; l++) {
+            float ang = t.rot * 3.1f + l * 2.6f, off = t.r * 0.32f;
+            float ox = std::cos(ang) * off, oz = std::sin(ang) * off, sc = l ? 0.72f : 0.86f, yo = l ? 0.1f : 0.0f;
+            uint32_t r0 = ring(t, t.h * (0.36f + yo), t.r * 0.7f * sc, -0.6f, t.rot + l, C(0.1f), ox, oz);
+            uint32_t r1 = ring(t, t.h * (0.6f + yo), t.r * 0.95f * sc, 0.15f, t.rot + l + 0.52f, C(0.55f), ox, oz);
+            uint32_t a = vert(t.x + ox, t.y + t.h * (0.88f + yo * 0.8f), t.z + oz, Vec3(0, 1, 0), C(1.0f));
+            band(r0, r1);
+            cap(r1, a);
+            uint32_t b0 = vert(t.x + ox, t.y + t.h * (0.3f + yo), t.z + oz, Vec3(0, -1, 0), C(0.0f));
+            for (int k = 0; k < S; k++) md.idx.insert(md.idx.end(), {r0 + (k + 1) % S, b0, r0 + k});
+          }
+        }
+        ct.mn = Vec3(std::min(ct.mn.x, t.x - t.r), std::min(ct.mn.y, t.y), std::min(ct.mn.z, t.z - t.r));
+        ct.mx = Vec3(std::max(ct.mx.x, t.x + t.r), std::max(ct.mx.y, t.y + t.h), std::max(ct.mx.z, t.z + t.r));
+      }
+      ct.count = (GLsizei)(md.idx.size() - ct.first);
+      if (ct.count > 0) g_canopyTiles.push_back(ct);
+    }
+  md.vertexCount = nv;
+  if (std::getenv("HW_CANOPYSTAT")) std::printf("CANOPY lone %zu trees %zu tiles %zu verts %u tris %zu (%.1f MB)\n", lone, ntree, g_canopyTiles.size(), nv, md.idx.size() / 3, (md.verts.size() + md.idx.size() * 4) / 1048576.0);
   if (!md.idx.empty()) g_canopy = uploadMesh(md);
 }
 }  // namespace
 
 namespace forest {
+unsigned rockMaskTexture() { return rockMaskTex(); }
 
 float grassDensity(float x, float z) {
   if (LAYERS.empty()) defineLayers();
-  return LAYERS[L_GRASS].chance(x, z, world::getTerrainHeight(x, z));
+  int biome;
+  return LAYERS[L_GRASS].chance(x, z, world::getTerrainHeight(x, z)) * biomeFlora(L_GRASS, x, z, biome);
 }
 
 
@@ -1699,6 +2081,7 @@ void init() {
         slot->heavy = a->tris > 5000;
         for (const AssetPart& ap : a->parts) {
           PartSlot p;
+          p.cardLod = ap.cardLod;
           p.mesh = &ap.mesh;
           p.lod = ap.lod.vao ? &ap.lod : &ap.mesh;
           p.mat = ap.mat;
@@ -1712,7 +2095,7 @@ void init() {
         p.batch.create(p.mesh, InstKind::Lite, k ? o.batch.ivbo : 0);
         p.shadowBatch.create(p.lod && p.lod->vao ? p.lod : p.mesh, InstKind::Lite, k ? o.shadowBatch.ivbo : 0);
         if (L.id != L_GRASS && p.lod) {
-          p.lodBatch.create(p.lod, InstKind::Lite, k && o.lodBatch.ivbo ? o.lodBatch.ivbo : 0);
+          p.lodBatch.create(p.cardLod ? p.mesh : p.lod, InstKind::Lite, k && o.lodBatch.ivbo ? o.lodBatch.ivbo : 0);
           if (p.lod != p.mesh) slot->hasLod = true;
         }
       }
@@ -1752,17 +2135,46 @@ void markDirty() { g_dirty = true; }
 static bool g_jumped = false;
 void seasonJumped() { g_jumped = true; }
 
+static void inventory() {
+  // HW_INVENTORY: every placed type on the whole map, its triangles, and what this frame draws of it
+  CellCache tmp; tmp.limit = 1 << 30;
+  int nc = (int)std::ceil(MAP_HALF / CELL);
+  const char* LN[4] = {"grass", "undergrowth", "rocks/logs", "trees"};
+  for (const LayerDef& L : LAYERS) {
+    if (L.id == L_GRASS) continue;
+    std::vector<long long> cnt(L.files.size(), 0);
+    for (int cx = -nc; cx < nc; cx++)
+      for (int cz = -nc; cz < nc; cz++)
+        for (const Item& it : getCell(tmp, L.id, cx, cz)) if (it.file < cnt.size() && !blocked(it.x, it.z)) cnt[it.file]++;
+    const auto& slots = g_layerSlots[L.id];
+    for (size_t f = 0; f < L.files.size(); f++) {
+      FileSlot* sl = f < slots.size() ? slots[f] : nullptr;
+      long long tris = 0, lod = 0;
+      if (sl) for (auto& p : sl->parts) { if (p.mesh) tris += p.mesh->count / 3; if (p.lod) lod += p.lod->count / 3; }
+      std::fprintf(stderr, "INV %-11s %-28s placed %7lld  tris %6lld  lod %6lld  drawn: 3D %5zu  mid %5zu  billboard %5zu\n", LN[L.id], L.files[f].first.c_str(), cnt[f], tris, lod,
+                  sl ? sl->visible.size() : 0, sl ? sl->midVisible.size() : 0, sl ? sl->farVisible.size() : 0);
+    }
+  }
+  std::fflush(stdout);
+}
+
 void update(const Vec3& cam, const Vec3& fwd) {
+  { static int fr = 0; static const bool inv = std::getenv("HW_INVENTORY") != nullptr; if (inv && ++fr == 40) inventory(); }
   pollImpRowJobs();
+  static bool s_maskSeen = false;   // the stony-ground mask arrived: rebuild so grass thins around the rocks
+  if (!s_maskSeen && g_rockMaskReady.load(std::memory_order_acquire)) { s_maskSeen = true; g_dirty = true; }
+  static unsigned recapAt = 0;
   if (g_jumped && g_impSig >= 0) {
     g_jumped = false;
     g_capNext = -1;
+    recapAt = render::frameNo + 240;
     captureImpostors();  // full capture in one go: no orange autumn pictures after loading a summer save
     g_impSig = g_capSig = seasonSig();
   }
   if (g_impSig < 0) {
     captureImpostors();
     if (g_impFbo) { g_impReady = true; g_dirty = true; }
+    recapAt = render::frameNo + 240;   // once more a few seconds in: the first capture can run before the loaded season reaches the shaders (orange pictures in spring)
   } else if (g_capNext >= 0) {
     if ((render::frameNo % 3) == 0) {  // season impostor recapture: one slice every 3rd frame (never restart mid-way)
       // NP slices per type: small, even frame cost. Each type's mips and compressed copy are refreshed when its
@@ -1774,7 +2186,8 @@ void update(const Vec3& cam, const Vec3& fwd) {
       g_capNext++;
       if (last) { g_impSig = g_capSig; g_capNext = -1; }
     }
-  } else if (std::fabs(seasonSig() - g_impSig) > 0.5f) {
+  } else if (std::fabs(seasonSig() - g_impSig) > 0.5f || (recapAt && render::frameNo >= recapAt)) {
+    recapAt = 0;
     g_capSig = seasonSig();
     g_capNext = 0;
   }
@@ -2043,8 +2456,10 @@ static void drawPart(PartSlot& p, InstBatch& b, int extra, float f0, float f1, f
   s->set1f("u_packed", packed ? 1.0f : 0.0f);
   if (render::dbgMode == 2) { if (f1 > 0) f0 = f1 = (f0 + f1) * 0.5f, f1 += 0.01f; if (i1 > 0) i0 = i1 = (i0 + i1) * 0.5f, i1 += 0.01f; }
   s->set1i("u_tier", &b == &p.lodBatch ? 1 : 0);
-  s->set2f("u_fade", f0, f1);
-  s->set2f("u_fadeIn", i0, i1);
+  float bk = g_bandK * (1.0f - 0.4f * g_denseMove);   // dense and moving: shorter overlap where both versions draw
+  s->set2f("u_fade", f0, f0 + (f1 - f0) * bk);
+  s->set2f("u_fadeIn", i0, i0 + (i1 - i0) * bk);
+  s->set1f("u_cardBias", 0.35f * g_denseMove);
   drawBatch(b);
   s->set2f("u_fade", 0, 0);
   s->set2f("u_fadeIn", 0, 0);
@@ -2147,11 +2562,11 @@ void main(){
   float sh = leafFar > 0.99 ? mix(1.0, envLight(wp), recv) : mix(1.0, shadowAtK(wp, n, true), recv);
   g_envVis *= ao;
   sh *= mix(1.0, ao, 0.55);
-  sh = mix(0.42, 0.9, sh) * mix(0.75, 1.0, smoothstep(0.08, 0.45, u_sunDir.y));
-  sh = mix(sh, 0.62, 0.85 * max(leafFar, edgeOn));
+  sh = mix(0.26, 0.95, sh) * mix(0.75, 1.0, smoothstep(0.08, 0.45, u_sunDir.y));
+  sh = mix(sh, 0.62, max(0.52 * leafFar, 0.85 * edgeOn));   // far crowns keep light and shade (matches the pictures beyond)
   vec3 lit = lambert(sc, n, sh);
   float thru = pow(max(dot(-normalize(u_camPos - wp), u_sunDir.xyz), 0.0), 4.0) * smoothstep(-0.02, 0.15, u_sunDir.y);
-  lit += sc * vec3(1.05, 1.15, 0.6) * u_sunCol.rgb * thru * mix(0.25, 0.75, sh) * 0.55;
+  lit += sc * vec3(1.05, 1.15, 0.6) * u_sunCol.rgb * thru * mix(0.25, 0.85, sh) * 0.75;
   vec3 c = outColor(lit);
   c = mix(c, fogTint(wp), fogObject(wp, depth));
   fragColor = vec4(c, 1.0);
@@ -2245,6 +2660,32 @@ void drawOpaque() {
   bool pre = g_tuner.shade() == 1;
   if (const char* e = std::getenv("HW_PRE")) pre = e[0] == '1';
   // shade-once leaves: the G-buffer pass does what the pre-pass did (each leaf pixel lit once), in one geometry pass
+  // solid parts first (trunks, branches, rocks, logs): they fill depth, so leaf pixels behind them are rejected before
+  // they are shaded or written to the leaf buffer. Same pixels end up on screen, fewer of them are paid for.
+  static bool noUnder0 = std::getenv("HW_NOUNDER") != nullptr;
+  static bool solidFirst = std::getenv("HW_NOSOLIDFIRST") == nullptr;
+  for (auto& s : g_slots) {
+    if (!solidFirst) break;
+    if (noUnder0 && s->layer == L_UNDER) continue;
+    LodCfg lc = lodFor(s->layer);
+    bool packed = s->layer == L_UNDER;
+    bool useImp = imp && s->imp >= 0;
+    for (auto& p : s->parts) {
+      if (p.mat.cutout) continue;
+      float R = LAYERS[s->layer].radius();
+      int li = s->layer < 4 ? s->layer : 3;
+      int pi = profOpen ? profOpen(LAYER_PROF[0][li]) : -1;
+      if (!useImp) drawPart(p, p.batch, 0, R * 0.84f, R, 0, 0, packed);
+      else if (s->hasLod) drawPart(p, p.batch, 0, lc.mid, lc.mid + MID_BAND, 0, 0, packed);
+      else drawPart(p, p.batch, 0, lc.imp, lc.imp + impBand(s->layer), 0, 0, packed);
+      if (profClose) profClose(pi);
+      if (useImp && s->hasLod) {
+        pi = profOpen ? profOpen(LAYER_PROF[1][li]) : -1;
+        drawPart(p, p.lodBatch, 0, lc.imp, lc.imp + impBand(s->layer), lc.mid, lc.mid + MID_BAND, packed);
+        if (profClose) profClose(pi);
+      }
+    }
+  }
   bool defer = g_tuner.shade() == 2 && leafDeferBegin();
   if (defer) {
     pre = false;
@@ -2305,6 +2746,7 @@ void drawOpaque() {
     long long t0_ = gfx::triangles;
     for (auto& p : s->parts) {
       if (defer && p.mat.cutout && !p.proc) continue;  // already drawn and lit by the shade-once pass
+      if (!p.mat.cutout && solidFirst) continue;        // solid parts went first, above
       float R = LAYERS[s->layer].radius();
       int li = s->layer < 4 ? s->layer : 3;
       int pi = profOpen ? profOpen(LAYER_PROF[0][li]) : -1;
@@ -2340,6 +2782,12 @@ void drawOpaque() {
     } else {
       sh.set1i("u_atlas", 0);
       sh.set1i("u_nrm", 5);
+      {
+        float cr[64];
+        for (int i = 0; i < 32; i++) { cr[i * 2] = 1; cr[i * 2 + 1] = 1; }
+        for (auto& sp : g_slots) if (sp->imp >= 0 && sp->imp < 32) { cr[sp->imp * 2] = sp->cropX; cr[sp->imp * 2 + 1] = sp->cropY; }
+        glUniform2fv(sh.loc("u_crop"), 32, cr);
+      }
       glActiveTexture(GL_TEXTURE5);
       glBindTexture(GL_TEXTURE_2D, g_impNrmC ? g_impNrmC : g_impNrm);
       glActiveTexture(GL_TEXTURE0);
@@ -2349,8 +2797,14 @@ void drawOpaque() {
       if (g_impAll[L].count <= 0) continue;
       LodCfg lc = lodFor(L);
       float cn = canopyNear();
-      float ib = render::dbgMode == 2 ? 0.01f : impBand(L), i0 = render::dbgMode == 2 ? lc.imp + impBand(L) * 0.5f : lc.imp;
+      float ib = render::dbgMode == 2 ? 0.01f : impBand(L) * g_bandK * (1.0f - 0.4f * g_denseMove), i0 = render::dbgMode == 2 ? lc.imp + impBand(L) * 0.5f : lc.imp;
       sh.set1i("u_dbg", render::dbgMode);
+      {
+        float bloom[32] = {};
+        for (auto& sp : g_slots)
+          if (sp && sp->layer == L_TREE && sp->imp >= 0 && sp->imp < 32 && sp->file.find("Pine") == std::string::npos && sp->file.find("Dead") == std::string::npos) bloom[sp->imp] = 1;
+        glUniform1fv(sh.loc("u_rowBloom"), 32, bloom);
+      }
       {
         static float g[3] = {1.75f, 1.9f, 1.15f};
         static bool rd = false;
@@ -2366,6 +2820,8 @@ void drawOpaque() {
     pImp = profOpen ? profOpen("forest.canopy") : -1;
     if (g_canopy.vao) {
       Shader& cs = render::program("canopy", CANOPY_VS, CANOPY_FS);
+      glActiveTexture(GL_TEXTURE0);
+      glBindTexture(GL_TEXTURE_2D, g_impTexC ? g_impTexC : g_impTex);   // its colour comes from the (current season) tree pictures: bind them even when no picture was drawn this frame
       cs.set2f("u_in", canopyNear(), canopyNear() + CANOPY_BAND);
       cs.set1i("u_atlas", 0);
       cs.set1f("u_rows", (float)g_impRows);
@@ -2376,7 +2832,19 @@ void drawOpaque() {
         for (size_t i = 0; i < ts.size() && i < 16; i++) if (ts[i] && ts[i]->imp >= 0) rows[i] = (float)ts[i]->imp;
         glUniform1fv(cs.loc("u_row"), 16, rows);
       }
-      g_canopy.draw();
+      glBindVertexArray(g_canopy.vao);
+      const size_t isz = g_canopy.indexType == GL_UNSIGNED_INT ? 4 : 2;
+      const Vec3 cp = render::cam.pos;
+      const float cn0 = canopyNear();
+      for (const CanopyTile& t : g_canopyTiles) {
+        float dx = std::max(0.0f, std::max(t.mn.x - cp.x, cp.x - t.mx.x)), dz = std::max(0.0f, std::max(t.mn.z - cp.z, cp.z - t.mx.z));
+        float fx = std::max(std::fabs(t.mn.x - cp.x), std::fabs(t.mx.x - cp.x)), fz = std::max(std::fabs(t.mn.z - cp.z), std::fabs(t.mx.z - cp.z));
+        if (fx * fx + fz * fz < cn0 * cn0) continue;   // whole tile still inside the impostor range
+        if (dx * dx + dz * dz > (HAZE_CULL + 40) * (HAZE_CULL + 40) || !render::cam.box(t.mn, t.mx)) continue;
+        glDrawElements(GL_TRIANGLES, t.count, g_canopy.indexType, (const void*)(t.first * isz));
+        gfx::drawCalls++;
+        gfx::triangles += t.count / 3;
+      }
     }
   }
   if (profClose) profClose(pImp);
@@ -2432,6 +2900,39 @@ void drawBlobs() { drawCasts(g_casts); }
 
 int instanceCount() { return g_instances; }
 
+// stony ground around the rocks: a 0.5 m mask over the whole map, painted from every rock's footprint
+// (built once on the precompute thread, uploaded on first use; the terrain grades into scree around each boulder)
+void buildRockMask() {
+  std::vector<uint8_t> m((size_t)RM_N * RM_N, 0);
+  const float lo = -852.5f, ts = 1705.0f / RM_N;
+  for (auto& cell : g_pre[L_ROCK])
+    for (const Item& it : cell) {
+      const std::string& f = LAYERS[L_ROCK].files[it.file].first;
+      if (f.rfind("Rock", 0) != 0) continue;
+      float R = it.scale * (f.find("Boulder") != std::string::npos ? 2.0f : 1.5f) + 0.6f;
+      static const bool dbg = std::getenv("HW_ROCKLIST") != nullptr;
+      if (dbg && it.scale > 1.4f && std::fabs(it.x) < 300 && std::fabs(it.z) < 300) std::printf("BIGROCK %.1f %.1f s %.2f %s\n", it.x, it.z, it.scale, f.c_str());
+      int x0 = (int)((it.x - R - lo) / ts), x1 = (int)((it.x + R - lo) / ts) + 1;
+      int z0 = (int)((it.z - R - lo) / ts), z1 = (int)((it.z + R - lo) / ts) + 1;
+      for (int z = std::max(0, z0); z <= std::min(RM_N - 1, z1); z++)
+        for (int x = std::max(0, x0); x <= std::min(RM_N - 1, x1); x++) {
+          float wx = lo + (x + 0.5f) * ts, wz = lo + (z + 0.5f) * ts;
+          float d = hypot2(wx - it.x, wz - it.z);
+          float v = 1 - sstep(d, R * 0.45f, R);
+          uint8_t b = (uint8_t)(clampf(v, 0, 1) * 255);
+          uint8_t& o = m[(size_t)z * RM_N + x];
+          if (b > o) o = b;
+        }
+    }
+  if (std::getenv("HW_ROCKLIST")) {
+    size_t nz = 0; for (uint8_t v : m) nz += v > 50;
+    int px = (int)((-204.1f - lo) / ts), pz = (int)((-290.0f - lo) / ts);
+    std::printf("ROCKMASK nonzero %zu centre %d\n", nz, m[(size_t)pz * RM_N + px]);
+  }
+  g_rockMask.swap(m);
+  g_rockMaskReady.store(true, std::memory_order_release);
+}
+
 void precomputeItems() {
   if (LAYERS.empty()) defineLayers();
   auto t0 = std::chrono::steady_clock::now();
@@ -2452,6 +2953,7 @@ void precomputeItems() {
   size_t n = 0;
   for (int L = L_UNDER; L <= L_TREE; L++) for (auto& c : g_pre[L]) { c.shrink_to_fit(); n += c.size(); }
   g_preReady.store(true, std::memory_order_release);
+  buildRockMask();
   std::printf("forest items precomputed: %zu in %.0f ms (%.1f MB)\n", n, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(), n * sizeof(Item) / 1048576.0);
 }
 
@@ -2595,6 +3097,15 @@ bool obstacleAt(float x, float z, float r) {
 
 bool horizonVisible(const Vec3& mn, const Vec3& mx) { return horizonVisibleImpl(mn, mx); }
 
+// test helper: nearest loaded tree whose model name contains `name`
+bool findTree(const char* name, float x, float z, float& ox, float& oz) {
+  float best = 1e18f; bool ok = false;
+  for (auto& sp : g_slots) {
+    if (sp->file.find(name) == std::string::npos) continue;
+    for (auto& it : sp->items) { float d = (it.x - x) * (it.x - x) + (it.z - z) * (it.z - z); if (d < best) { best = d; ox = it.x; oz = it.z; ok = true; } }
+  }
+  return ok;
+}
 void nearTrees(float x, float z, float r, std::vector<float>& out, int max) {
   struct N { float d; Item it; };
   std::vector<N> near;
@@ -2627,6 +3138,19 @@ bool nearestRock(float x, float z, float& ox, float& oz, float& os) {
         if (d < best) { best = d; ox = it.x; oz = it.z; os = it.scale; }
       }
   return best < 1e8f;
+}
+
+bool undergrowthNear(float x, float z, float r) {
+  // a bush, fern or plant within reach of your legs (cells checked around the point)
+  int cx0 = (int)std::floor((x - r - 1.5f) / CELL), cx1 = (int)std::floor((x + r + 1.5f) / CELL);
+  int cz0 = (int)std::floor((z - r - 1.5f) / CELL), cz1 = (int)std::floor((z + r + 1.5f) / CELL);
+  for (int cz = cz0; cz <= cz1; cz++)
+    for (int cx = cx0; cx <= cx1; cx++)
+      for (const Item& it : getCell(g_mainCache, L_UNDER, cx, cz)) {
+        float rr = r + it.scale * 0.6f, dx = x - it.x, dz = z - it.z;
+        if (dx * dx + dz * dz < rr * rr && !blocked(it.x, it.z)) return true;
+      }
+  return false;
 }
 
 bool treeTrunkAt(float x, float y, float z) {

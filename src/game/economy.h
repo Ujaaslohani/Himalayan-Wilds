@@ -11,7 +11,8 @@ constexpr float SAFE_DEFENSE = 10;
 
 struct Trade { const char* id; Cost give, get; };
 extern const Trade TRADES[9];
-extern const Trade CARAVAN[4];
+constexpr int CARAVAN_N = 8, CARAVAN_BASIC = 4;   // the last four come only with the seasonal bridge caravan
+extern const Trade CARAVAN[CARAVAN_N];
 struct GearDef { const char *id, *name, *blurb; Cost cost; };
 constexpr int GEAR_COUNT = 6;
 extern const GearDef GEAR[GEAR_COUNT];

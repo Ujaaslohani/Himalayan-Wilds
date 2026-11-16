@@ -39,5 +39,6 @@ const Model* load(const std::string& assetPath);  // cached; nullptr if missing
 
 // draw one posed model; `xf` places it in the world (translation * yaw * scale)
 void draw(const Model& m, const Pose& p, const Mat4& xf, bool shadow);
+void setWhite(float w);  // 0..1 pale coat (the white deer)
 void beginDraw(bool shadow);
 }

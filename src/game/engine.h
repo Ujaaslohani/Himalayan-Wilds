@@ -67,7 +67,7 @@ struct HudEvent {
   float amount = 0;
 };
 
-enum MarkerIcon { MI_WOOD, MI_STONE, MI_FIBER, MI_HERB, MI_HARVEST, MI_RECRUIT, MI_CLUE, MI_QUEST, MI_ANIMAL, MI_BUILDING, MI_NPC, MI_DANGER, MI_BANDIT, MI_FOE, MI_COUNT };
+enum MarkerIcon { MI_WOOD, MI_STONE, MI_FIBER, MI_HERB, MI_HARVEST, MI_RECRUIT, MI_CLUE, MI_QUEST, MI_ANIMAL, MI_BUILDING, MI_NPC, MI_DANGER, MI_BANDIT, MI_FOE, MI_WAYPOINT, MI_TRACK, MI_COUNT };
 
 struct Marker {
   float x, y, z;
@@ -82,7 +82,7 @@ struct QuestTarget {
 };
 
 enum class Status { Start, Playing, Victory };
-enum class Tab { None, Inventory, Quests, Buildings, Map };
+enum class Tab { None, Inventory, Quests, Buildings, Map, Skills };
 
 struct Engine {
   bool playing = false;
@@ -128,6 +128,8 @@ struct Engine {
 
   std::string nearbyPrompt;
   QuestTarget questTarget;
+  struct { bool valid = false; float x = 0, z = 0; } waypoint;                  // set by clicking the map
+  struct { bool valid = false; int sp = 0; float x = 0, z = 0; int day = -1; } hunterTip;   // Kalyan's daily word on where a herd is
   struct Noise { float x = 0, z = 0, r = 0, t = -99; } noise;
   float clock = 0;
   float simMs = 0;
@@ -159,6 +161,8 @@ struct App {
   bool menuOpen = false, howToOpen = false, showStyle = false, boardOpen = false;
   bool musicMuted = false, sfxMuted = false;
   std::string notification;
+  struct Note { std::string text; double at; double life; };
+  std::vector<Note> notes;  // stacked: a new notice no longer wipes one you are still reading
   double notifyAt = -100;
   int startSeason = 2;
   float jobAcc = 0, arrivalAcc = 0, secAcc = 0, saveAcc = 0;

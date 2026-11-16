@@ -1,3 +1,4 @@
+#include "skills.h"
 #include "../render/water.h"
 #include "extras.h"
 #include "economy.h"
@@ -87,14 +88,45 @@ Mesh g_rack, g_tro[6];
 struct Bandit {
   float x, z, hp, cd;
   float yaw = 0, phase = 0, speed = 0, drawT = 0, strafe = 1, strafeT = 0, wanderT = 0, tx = 0, tz = 0;
-  float dodgeT = 0, dodgeCd = 0, dodgeDir = 1;  // quick sidestep out of the player's aim
+  float dodgeT = 0, dodgeCd = 0, dodgeDir = 1;
+  float relT = 0;                                // follow-through after a release  // quick sidestep out of the player's aim
   float deadT = 0;                               // seconds since killed (death fall, then the body lies a while)
   bool melee = false;                            // axe man: charges in instead of shooting (camp level 4+)
   float swingT = 0;                              // axe swing in progress
   float coverX = 0, coverZ = 0, coverT = 0;      // tree he is using as cover, and when to re-pick it
   bool alert = false;
+  int sawLast = -1;
+  float seeT = 0, lostT = 0;                     // seconds he has had you in sight without a break, and since he lost you
+  float look = 0;                                // head turned off the body's facing (scanning the woods)
+  float vx = 0, vz = 0;                          // ground velocity: eased so he accelerates and turns like a person
+  float hitT = 9, hitSide = 0;                   // seconds since an arrow struck him, and from which side (-1 left .. 1 right)
+  bool hitHead = false, fallFwd = false;         // headshot flinch; shot from behind: he pitches forward when he dies
 };
-struct BArrow { Vec3 p, v; float life; bool stuck; };
+float g_awareK = 0, g_awareX = 0, g_awareZ = 0;  // the closest-to-spotting bandit (HUD hint)
+// does this bandit see the player? view cone, range, and tree trunks / ridges in the way
+static bool banditSees(const Bandit& b, const Vec3& p, float range) {
+  float dx = p.x - b.x, dz = p.z - b.z, d = hypot2(dx, dz);
+  if (d > range) return false;
+  float fa = b.yaw + b.look, c = (dx * std::sin(fa) + dz * std::cos(fa)) / std::max(d, 0.01f);
+  if (d > 1.8f && c < 0.42f) return false;                      // ~130 degree field of view
+  float ey = world::getTerrainHeight(b.x, b.z) + 1.6f, ty = p.y - 0.25f;
+  int n = (int)(d / 0.45f);   // fine steps: a trunk you stand right behind is never stepped over
+  for (int k = 1; k < n; k++) {
+    float t = (float)k / n, x = b.x + dx * t, z = b.z + dz * t, y = ey + (ty - ey) * t;
+    if (y < world::getTerrainHeight(x, z) - 0.25f) return false;  // a real rise in the ground (not snow ripples / grass bumps)
+    if (forest::treeTrunkAt(x, y, z)) return false;               // a trunk
+  }
+  return true;
+}
+struct BArrow { Vec3 p, v; float life; bool stuck; bool whizzed = false; };
+// loudness and stereo position of a sound at x,z for the player
+void spatial(float x, float z, float& gain, float& pan) {
+  const Vec3& p = E.player.pos;
+  float dx = x - p.x, dz = z - p.z, d = std::max(1.0f, hypot2(dx, dz));
+  gain = clampf(1.0f / (0.6f + d * 0.09f), 0, 1);
+  float yaw = E.player.yaw, rx = std::cos(yaw), rz = -std::sin(yaw);
+  pan = clampf((dx * rx + dz * rz) / d, -1.0f, 1.0f);
+}
 std::vector<BArrow> g_barrows;  // bandit arrows in flight (or stuck in the ground for a few seconds)
 Mesh g_arrowMesh;
 const float DRAW_TIME = 0.7f;
@@ -347,13 +379,14 @@ void buildMeshes() {
 void hurt(float dmg) {
   auto& P = E.player;
   if (E.world.gearArmour) dmg = std::max(1.0f, std::round(dmg * 0.6f));
+  dmg = std::max(1.0f, std::round(dmg * skills::damageTaken()));
   P.hp = std::max(0.0f, P.hp - dmg);
   P.hurtT = E.clock;
   HudEvent e;
   e.kind = HudEvent::Hurt;
   e.amount = dmg;
   emitEvent(e);
-  audio::tone(Wave::Square, 900, 300, 0.12f, 0.05f);
+  audio::arrowHitBody();  // dull impact + grunt (was a square-wave "pew")
   if (P.hp <= 0) {
     P.hp = P.maxHp * 0.6f;
     P.pos = {0, 1.7f, 9};
@@ -397,21 +430,29 @@ void drawBanditsMh(Shader& s) {
       float throe = std::min(1.0f, t / 0.3f);
       float u = clampf((t - 0.25f) / 0.75f, 0, 1), fall = u * u;   // accelerates like a real fall
       float bounce = t > 1.0f ? std::sin(std::min(1.0f, (t - 1.0f) / 0.3f) * PI) * 0.06f : 0.0f;
-      float ang = (PI * 0.5f - 0.04f) * fall - bounce;
+      float ang = ((PI * 0.5f - 0.04f) * fall - bounce) * (b.fallFwd ? -1.0f : 1.0f);   // backward, or face-down when shot from behind
       float sink = clampf((t - 25) / 6, 0, 1) * 0.45f;
       it.base = Mat4::compose({b.x, y + 0.13f * fall - sink, b.z}, Quat::axisAngle({0, 1, 0}, b.yaw) * Quat::axisAngle({1, 0, 0}, -ang), {1, 1, 1});
       it.dead = true; it.pull = 0; it.alert = false; it.drawing = false; it.yaw = b.yaw; it.pos = {b.x, y, b.z};
       mh::Pose& P = it.pose;
-      P.headPitch = -0.55f * throe * (1 - 0.7f * fall);
+      P.headPitch = (b.fallFwd ? 0.35f : -0.55f) * throe * (1 - 0.7f * fall);
       P.armOutL = P.armOutR = 0.5f * throe + 0.6f * fall;
-      P.armL = P.armR = 0.9f * throe * (1 - fall) + 0.3f * fall;
+      P.armL = P.armR = (b.fallFwd ? 1.3f : 0.9f) * throe * (1 - fall) + (b.fallFwd ? 1.6f : 0.3f) * fall;   // forward: arms thrown out to break the fall
+      P.headYaw = b.hitSide * 0.4f * throe;
       P.elbowL = P.elbowR = 0.3f;
       P.lean = -0.15f * throe * (1 - fall);
       items.push_back(it);
       continue;
     }
-    it.pull = b.drawT > 0 ? std::min(1.0f, b.drawT / (DRAW_TIME * 0.7f)) : 0.0f;
-    it.alert = b.alert; it.drawing = b.drawT > 0; it.yaw = b.yaw; it.pos = {b.x, y, b.z};
+    // draw cycle: nock (0-25%), raise and draw to the cheek (25-60%), anchor and aim (60-100%)
+    float u = b.drawT > 0 ? b.drawT / DRAW_TIME : 0.0f;
+    static const char* bp = std::getenv("HW_BPOSE");  // test: freeze every archer at this point of the draw (>1 = release)
+    if (bp) { float f = (float)std::atof(bp); b.alert = true; if (f > 1) { u = 0; b.relT = 0.45f * (2 - f); } else { u = f; b.relT = 0; } }
+    auto ss = [](float x) { x = clampf(x, 0, 1); return x * x * (3 - 2 * x); };
+    float raise = u > 0 ? ss(u / 0.4f) : 0.0f, drawK = u > 0 ? ss((u - 0.25f) / 0.35f) : 0.0f;
+    float rel = b.relT > 0 ? b.relT / 0.45f : 0.0f;  // 1 at the release, fades to 0
+    it.pull = drawK;
+    it.alert = b.alert; it.drawing = u > 0.2f; it.yaw = b.yaw; it.pos = {b.x, y, b.z};
     mh::Pose& P = it.pose;
     P.walkPhase = b.phase;
     P.walk = std::min(1.0f, b.speed * 0.4f);
@@ -424,14 +465,41 @@ void drawBanditsMh(Shader& s) {
       float chop = sw > 0.5f ? 1.0f - (sw - 0.5f) / 0.5f : 1.0f;
       P.armR = b.alert ? (sw > 0 ? 0.4f + 2.4f * up * chop + 0.2f * (sw > 0.5f) : 0.9f) : 0.3f;
       P.elbowR = b.alert ? (sw > 0 ? 0.3f + 0.8f * (1 - up) : 1.1f) : 0.5f;
-      P.armL = b.alert ? 0.5f : 0.1f; P.elbowL = 0.8f;
-      P.lean = b.alert ? 0.12f + (sw > 0.5f ? 0.15f : 0.0f) : 0.0f;
+      P.armL = b.alert ? 0.5f + (sw > 0 ? 0.5f * up : 0.0f) : 0.1f; P.elbowL = 0.8f;
+      P.armOutL = sw > 0 ? 0.35f * up : 0.0f;                                      // off arm swings out for balance
+      // wind-up leans back, the chop throws the whole body forward; charging, he leans into the run
+      P.lean = b.alert ? (sw > 0 ? (sw < 0.5f ? 0.05f - 0.12f * up : 0.08f + 0.3f * chop) : 0.1f + std::min(0.22f, 0.035f * b.speed)) : 0.0f;
+      P.headPitch = sw > 0.5f ? 0.12f * chop : 0.0f;
+      P.armSwing = b.alert ? 0.6f : 1.0f;
     } else if (b.alert) {
-      P.armL = 1.5f; P.armOutL = 0.25f; P.elbowL = -0.55f;                 // bow arm straight at the target
-      P.armR = 1.5f; P.armOutR = 0.15f; P.elbowR = -0.5f; P.foldR = 1.0f + 1.2f * it.pull;  // string hand drawn back to the cheek
-      P.headPitch = 0.05f;
+      // ready: bow half raised. Drawing: bow arm comes up straight, the string hand reaches the string then pulls
+      // back to the cheek. Release: the string hand flies back past the ear, the bow arm kicks and settles.
+      float hold = std::max(raise, rel);
+      float tremble = drawK > 0.95f ? std::sin(E.clock * 23.0f + b.x) * 0.012f : 0.0f;
+      P.armL = 0.95f + 0.55f * hold - 0.12f * rel * rel + tremble; P.armOutL = 0.25f * hold; P.elbowL = -0.55f * hold + 0.25f * (1 - hold);
+      P.armR = 0.85f + 0.65f * hold - 0.1f * rel; P.armOutR = 0.15f + 0.4f * rel;
+      P.elbowR = -0.5f * hold + 0.2f * (1 - hold) - 0.35f * rel;
+      P.foldR = 0.6f + 1.6f * drawK + 0.6f * rel;
+      P.headPitch = 0.05f + 0.04f * drawK; P.headYaw = -0.18f * drawK + b.look * (1 - hold);   // sights down the arrow; running: eyes on you
+      P.lean = 0.06f * drawK - 0.05f * rel + std::min(0.26f, 0.038f * b.speed) * (1 - hold);  // leans into a sprint
+      P.armSwing = 0.75f;
     } else {
       P.armL = 0.15f; P.elbowL = 0.4f;  // bow held low while walking the camp
+      P.headYaw = clampf(b.look, -1.1f, 1.1f);
+      if (b.speed < 0.1f) {   // standing: slow breathing, weight shifting, a restless bow hand
+        float ph = E.clock + b.x * 0.37f;
+        P.lean += 0.02f * std::sin(ph * 1.5f);
+        P.armL += 0.05f * std::sin(ph * 0.6f); P.armOutR = 0.05f + 0.04f * std::sin(ph * 0.45f + 1.0f);
+        P.headPitch = 0.04f * std::sin(ph * 0.33f);
+      }
+    }
+    if (b.alert && b.speed < 0.3f && !b.melee && b.drawT <= 0) P.lean += 0.025f * std::sin(E.clock * 2.4f + b.x);   // winded, breathing hard
+    if (b.hitT < 0.45f) {   // struck: head snaps back on a headshot, the body doubles over otherwise, twisting away from the side hit
+      float f = std::sin(b.hitT / 0.45f * PI) * (1.0f - b.hitT / 0.45f * 0.4f);
+      if (b.hitHead) P.headPitch -= 0.45f * f; else P.lean += 0.28f * f;
+      P.headYaw -= b.hitSide * 0.35f * f;
+      P.armOutL += 0.3f * f; P.armOutR += 0.3f * f;
+      P.elbowL += 0.3f * f; P.elbowR += 0.3f * f;
     }
     items.push_back(it);
   }
@@ -442,7 +510,7 @@ void drawBanditsMh(Shader& s) {
     mh::Look L;
     L.kind = mh::BANDIT;
     L.skin = 0.82f;
-    L.tunic = {0.024f, 0.019f, 0.016f}; L.trousers = {0.04f, 0.032f, 0.026f}; L.shoes = {0.01f, 0.008f, 0.006f};
+    L.tunic = {0.05f, 0.04f, 0.033f}; L.trousers = {0.075f, 0.06f, 0.045f}; L.shoes = {0.03f, 0.022f, 0.016f};   // dark wool and leather, not pure black
     L.sash = {0.2f, 0.02f, 0.015f}; L.cap = {0.02f, 0.02f, 0.02f};
     mh::draw(it.base, L, it.pose, hypot2(it.pos.x - cx, it.pos.z - cz), false);
   }
@@ -695,6 +763,7 @@ int trophyAppeal() { int n = 0; for (auto& kv : g_trophy) n += kv.second; return
 bool banditsActive() { return g_banditOn; }
 bool banditCamp(float& x, float& z) { x = g_campX; z = g_campZ; return g_banditOn; }
 int banditLevel() { return g_campLevel; }
+float banditAwareness(float& x, float& z) { x = g_awareX; z = g_awareZ; return g_awareK; }
 int banditHeads(float* xyz, int maxN) {
   if (!g_banditOn) return 0;
   int n = 0;
@@ -724,7 +793,13 @@ bool arrowHit(const Vec3& a, const Vec3& b, float dmg) {
     float px = a.x + d.x * t, py = a.y + d.y * t, pz = a.z + d.z * t;
     if (hypot2(px - bd.x, pz - bd.z) > 0.42f || py < y0 || py > y0 + 1.8f) continue;
     bool head = py > y0 + 1.4f;
-    bd.hp -= 0.5f * dmg * (head ? 2.0f : 1.0f);  // bandits take half damage
+    if (!bd.alert) dmg *= skills::sneakMult();   // he never saw you
+    bd.hp -= 0.5f * dmg * (head ? skills::headMult() : 1.0f);  // bandits take half damage
+    {
+      float dl = std::max(1e-4f, std::sqrt(L2)), fx = std::sin(bd.yaw), fz = std::cos(bd.yaw);
+      float along = (d.x * fx + d.z * fz) / dl, side = (d.x * fz - d.z * fx) / dl;
+      bd.hitT = 0; bd.hitHead = head; bd.hitSide = clampf(side, -1, 1); bd.fallFwd = along > 0.2f;
+    }
     bd.alert = true; bd.dodgeT = 0.45f; bd.dodgeDir = randf() < 0.5f ? -1.0f : 1.0f; bd.dodgeCd = 1.2f;  // flinch away from the next shot
     HudEvent ev; ev.kind = HudEvent::Hit; ev.headshot = head; ev.kill = bd.hp <= 0; emitEvent(ev);
     audio::meleePunch();
@@ -832,23 +907,66 @@ void update(float dt) {
     const Vec3& p = E.player.pos;
     CampTier T = tier(g_campLevel);
     float pCamp = hypot2(p.x - g_campX, p.z - g_campZ);
+    // engage range also from the bandits themselves: a band that strayed from its fire (or a camp centre saved
+    // elsewhere) used to stand blind next to you because only the distance to the camp centre counted
+    for (auto& b : g_bandits) if (b.hp > 0) pCamp = std::min(pCamp, hypot2(p.x - b.x, p.z - b.z));
     // player velocity (for leading shots) and where the player is aiming
     static Vec3 lastP = p; Vec3 pv = dt > 0 ? (p - lastP) * (1.0f / dt) : Vec3{}; lastP = p;
     if (pv.length() > 12) pv = Vec3{};
     float aimX = std::sin(E.player.yaw) * -1.0f, aimZ = std::cos(E.player.yaw) * -1.0f;
     { Vec3 f = render::cam.forward(); float fl = hypot2(f.x, f.z); if (fl > 0.01f) { aimX = f.x / fl; aimZ = f.z / fl; } }
-    // the band fights together: one sees you or is hit, all of them turn on you
+    // stealth: a bandit raises the alarm only after holding you in his line of sight for 3 s without a break.
+    // Crouching shrinks how far he can pick you out; so do night and the leopard cloak. Being hit alerts at once.
+    // The band fights together: once one is alerted, all of them turn on you.
+    const bool crouch = E.player.crouching;
+    float sightR = crouch ? (E.player.moving ? 17.0f : 12.0f) : (E.player.sprinting ? 55.0f : 44.0f);
+    sightR *= (0.4f + 0.6f * E.daylight) * (invCount("leopard_cloak") > 0 ? 0.7f : 1.0f) * (0.9f + 0.03f * g_campLevel) * skills::banditSight();
+    const float spotT = skills::spotTime();
     bool camp = false;
-    float spotR = (T.range + 14) * (invCount("leopard_cloak") > 0 ? 0.7f : 1.0f);  // the leopard cloak hides you longer
-    for (auto& b : g_bandits) if (b.hp > 0 && (b.alert || hypot2(p.x - b.x, p.z - b.z) < spotR)) camp = true;
+    g_awareK = 0;
+    for (auto& b : g_bandits) {
+      if (b.hp <= 0) continue;
+      if (!b.alert && E.playing && pCamp < 110) {
+        // the sight ray (trunks, terrain) is re-cast ~8 times a second per bandit, staggered; between casts he keeps
+        // the last answer
+        static unsigned tick = 0; tick++;
+        size_t bi = (size_t)(&b - &g_bandits[0]);
+        if ((tick + bi * 3) % 8 == 0 || b.sawLast < 0) b.sawLast = banditSees(b, p, sightR) ? 1 : 0;
+        if (b.sawLast == 1) {
+          b.seeT += dt; b.lostT = 0;
+          if (hypot2(p.x - b.x, p.z - b.z) < (crouch ? 4.0f : 9.0f)) b.seeT = spotT;   // right in front of him: seen at once
+        }
+        else if ((b.lostT += dt) > 0.35f) b.seeT = 0;           // a short blink (a sapling, a stumble) doesn't reset him
+        if (b.seeT >= spotT) b.alert = true;
+        if (b.seeT / spotT > g_awareK) { g_awareK = b.seeT / spotT; g_awareX = b.x; g_awareZ = b.z; }
+      }
+      if (b.alert) camp = true;
+      if (b.alert && E.playing) {
+        // in a fight he keeps checking whether he can see you (the stealth cast above only runs while unaware):
+        // without this a bandit alerted by a hit kept "lost you" forever and never drew his bow again
+        static unsigned tick2 = 0; tick2++;
+        size_t bi = (size_t)(&b - &g_bandits[0]);
+        if ((tick2 + bi * 3) % 4 == 0) {
+          Bandit look = b; look.look = 0;
+          float dxp = p.x - b.x, dzp = p.z - b.z;
+          look.yaw = std::atan2(dxp, dzp);   // alert: he is looking for you, not straight ahead
+          b.sawLast = banditSees(look, p, tier(g_campLevel).range + 15.0f) ? 1 : 0;
+        }
+        if (b.sawLast == 1) b.lostT = 0; else b.lostT += dt;
+      }
+    }
+    if (std::getenv("HW_STEALTHLOG")) { static int fr = 0; if (++fr % 15 == 0) { std::printf("stealth R=%.1f", sightR); for (auto& b : g_bandits) std::printf(" [d%.0f see%.2f %c]", hypot2(p.x - b.x, p.z - b.z), b.seeT, b.alert ? 'A' : '-'); std::printf("\n"); } }
     int alive = 0; for (auto& b : g_bandits) if (b.hp > 0) alive++;
     int slot = 0;
     for (size_t i = 0; i < g_bandits.size(); i++) {
       Bandit& b = g_bandits[i];
+      b.hitT += dt;
       if (b.hp <= 0) { b.deadT += dt; continue; }
       float dx = p.x - b.x, dz = p.z - b.z, d = hypot2(dx, dz);
       float fromCamp = hypot2(b.x - g_campX, b.z - g_campZ);
       b.alert = camp && pCamp < 110 && E.playing;
+      if (!b.alert && pCamp >= 110) b.seeT = 0;
+      float faceYaw = b.yaw, turnRate = 3.0f;   // where the body wants to face this frame
       float mx = 0, mz = 0, spd = 0;
       if (b.alert) {
         bool hurtBad = b.hp < T.hp * 0.35f;
@@ -900,12 +1018,25 @@ void update(float dt) {
         // evade: when the player draws a bow on this bandit, sidestep hard (not mid-draw, with a cooldown)
         float onTarget = -(aimX * ux + aimZ * uz);
         if (E.bow.drawing && onTarget > 0.985f && b.dodgeCd <= 0 && b.drawT <= 0 && b.swingT <= 0) {
-          b.dodgeT = 0.5f; b.dodgeCd = 1.6f + randf() * 1.2f; b.dodgeDir = randf() < 0.5f ? -1.0f : 1.0f;
+          b.dodgeT = 0.75f; b.dodgeCd = 1.8f + randf() * 1.2f;
+          // break toward the side he is already moving, a person doesn't reverse mid-stride
+          float side = b.vx * -uz + b.vz * ux;
+          b.dodgeDir = std::fabs(side) > 0.8f ? (side > 0 ? 1.0f : -1.0f) : (randf() < 0.5f ? -1.0f : 1.0f);
         }
-        if (b.dodgeT > 0) { b.dodgeT -= dt; mx = -uz * b.dodgeDir; mz = ux * b.dodgeDir; spd = 6.0f; b.drawT = 0; }
+        if (b.dodgeT > 0) {
+          // a sprinting break out of your line of fire: sideways and a little forward-diagonal, body turned into the run
+          b.dodgeT -= dt; b.drawT = 0;
+          float fx = -uz * b.dodgeDir * 0.94f + ux * 0.34f, fz = ux * b.dodgeDir * 0.94f + uz * 0.34f;
+          mx = fx; mz = fz; spd = b.dodgeT > 0.2f ? 6.8f : 3.0f;
+        }
         if (fromCamp > 75) { mx = (g_campX - b.x) / fromCamp; mz = (g_campZ - b.z) / fromCamp; spd = 3.6f; }
-        b.yaw = std::atan2(dx, dz);
+        // facing: square up to you to shoot or when slow; when running, turn the body into the run and look at you
+        turnRate = 9.0f;
+        bool run = b.speed > 2.6f && b.drawT <= 0 && !b.melee;
+        faceYaw = run && hypot2(b.vx, b.vz) > 0.5f ? std::atan2(b.vx, b.vz) : std::atan2(dx, dz);
+        b.look = run ? clampf(wrapAngle(std::atan2(dx, dz) - b.yaw), -1.1f, 1.1f) : b.look * std::max(0.0f, 1 - dt * 8);
         if (!b.melee) b.cd -= dt;
+        if (b.relT > 0) b.relT -= dt;
         if (b.melee) {
         } else if (b.drawT > 0) {
           spd = 0;  // feet planted while drawing
@@ -925,9 +1056,14 @@ void update(float dt) {
             Vec3 v = dir * (sp / std::max(L, 0.01f));
             v.y += 0.5f * 9.8f * tt;  // lob to cancel the drop
             g_barrows.push_back({from, v, 3.0f, false});
-            audio::tone(Wave::Triangle, 700, 200, 0.18f, 0.04f);  // bowstring twang
+            b.relT = 0.45f;
+            { float sg, sp2; spatial(b.x, b.z, sg, sp2); audio::bowRelease(sg, sp2); }
           }
-        } else if (b.cd <= 0 && d < T.range && b.dodgeT <= 0) b.drawT = 0.001f;
+        } else if (b.cd <= 0 && d < T.range && b.dodgeT <= 0 && (b.sawLast == 1 || b.lostT < 4.0f)) {   // only at you if he can see you (or just lost you): no shooting blind at the tree you hide behind
+          b.drawT = 0.001f;
+          float sg, sp2; spatial(b.x, b.z, sg, sp2);
+          audio::bowCreak(sg, sp2);
+        }
         slot++;
       } else {
         b.drawT = 0;
@@ -938,20 +1074,35 @@ void update(float dt) {
           b.wanderT = 4 + randf() * 6;
         }
         float wx = b.tx - b.x, wz = b.tz - b.z, wd = hypot2(wx, wz);
-        if (wd > 0.6f) { mx = wx / wd; mz = wz / wd; spd = fromCamp > 20 ? 3.0f : 1.1f; b.yaw = std::atan2(wx, wz); }
+        if (wd > 0.6f) { mx = wx / wd; mz = wz / wd; spd = fromCamp > 20 ? 3.0f : 1.1f; faceYaw = std::atan2(wx, wz); }
+        // idle: glance around the woods; moving: mostly eyes front
+        float scan = std::sin(E.clock * 0.31f + i * 2.3f) * 0.8f + std::sin(E.clock * 0.83f + i) * 0.3f;
+        float lookT = spd > 0 ? scan * 0.3f : scan;
+        if (b.seeT > 0.7f) {   // something moved: stop, and turn to stare at it
+          float toP = wrapAngle(std::atan2(dx, dz) - b.yaw);
+          lookT = clampf(toP, -1.0f, 1.0f); spd = 0;
+          if (b.seeT > 1.6f) { faceYaw = std::atan2(dx, dz); turnRate = 1.6f; }
+        }
+        b.look += (lookT - b.look) * std::min(1.0f, dt * 2.5f);
       }
+      b.yaw += clampf(wrapAngle(faceYaw - b.yaw), -turnRate * dt, turnRate * dt);
       // keep apart from the other bandits
       for (size_t j = 0; j < g_bandits.size(); j++) {
         if (j == i || g_bandits[j].hp <= 0) continue;
         float ox = b.x - g_bandits[j].x, oz = b.z - g_bandits[j].z, od = hypot2(ox, oz);
         if (od < 1.6f && od > 0.01f) { b.x += ox / od * (1.6f - od) * 0.5f; b.z += oz / od * (1.6f - od) * 0.5f; }
       }
-      b.speed += (spd - b.speed) * std::min(1.0f, dt * 6);
+      {  // ease the velocity toward the wanted one: hard push-off for a dodge, softer otherwise (no instant reversals)
+        float acc = b.dodgeT > 0 ? 9.0f : (spd > 0 ? 4.5f : 6.0f);
+        float k = std::min(1.0f, dt * acc);
+        b.vx += (mx * spd - b.vx) * k; b.vz += (mz * spd - b.vz) * k;
+        b.speed = hypot2(b.vx, b.vz);
+      }
       if (b.speed > 0.05f) {
-        float nx = b.x + mx * b.speed * dt, nz = b.z + mz * b.speed * dt;
+        float nx = b.x + b.vx * dt, nz = b.z + b.vz * dt;
         forest::resolveTreeCollision(nx, nz, 0.35f);
         if (world::slopeAt(nx, nz) < 0.75f && world::waterHeightAt(nx, nz) < world::getTerrainHeight(nx, nz) + 0.3f) { b.x = nx; b.z = nz; }
-        else b.strafe = -b.strafe;
+        else { b.strafe = -b.strafe; b.vx *= -0.3f; b.vz *= -0.3f; }
       }
       b.phase += dt * TAU * (b.speed > 0.05f ? 0.85f + 0.3f * b.speed : 0.0f);  // stride cadence matched to speed (no foot sliding)
     }
@@ -970,10 +1121,26 @@ void update(float dt) {
       float t = clampf((c - a.p).dot(ab) / std::max(1e-6f, ab.dot(ab)), 0, 1);
       Vec3 q = a.p + ab * t;
       float hd = hypot2(q.x - c.x, q.z - c.z), vy = q.y - c.y;
-      if (hd < 0.42f && vy > -0.9f && vy < 0.75f) { hurt(tier(g_campLevel).dmg); dead = true; }
-      else if (forest::treeTrunkAt(np.x, np.y, np.z)) { a.stuck = true; a.life = 4.0f; a.v = a.v * 0.001f; }  // thunk: cover works both ways
+      if (!a.whizzed && hd < 3.0f && std::fabs(vy) < 2.5f && !(hd < 0.42f && vy > -0.9f && vy < 0.75f)) { a.whizzed = true; float sg, sp2; spatial(q.x, q.z, sg, sp2); audio::arrowWhiz(1.0f - hd / 3.5f, sp2); }
+      // a trunk anywhere along this step's flight stops the arrow before it can reach you (the step is ~1.3 m: checking
+      // only its end let arrows skip through thin trunks and hit a player in cover)
+      bool trunk = false;
+      Vec3 hitAt = np;
+      {
+        float L = std::sqrt(ab.dot(ab));
+        int n = std::max(1, (int)std::ceil(L / 0.25f));
+        float tEnd = (hd < 0.42f && vy > -0.9f && vy < 0.75f) ? t : 1.0f;   // only up to where it would meet you
+        for (int k = 1; k <= n; k++) {
+          float u = (float)k / n * tEnd;
+          Vec3 sp = a.p + ab * u;
+          if (forest::treeTrunkAt(sp.x, sp.y, sp.z)) { trunk = true; hitAt = sp; break; }
+        }
+      }
+      if (trunk) { a.stuck = true; a.life = 4.0f; a.p = hitAt; a.v = a.v * 0.001f; float sg, sp2; spatial(hitAt.x, hitAt.z, sg, sp2); audio::arrowThunk(sg, sp2, true); }
+      else if (hd < 0.42f && vy > -0.9f && vy < 0.75f) { hurt(tier(g_campLevel).dmg); dead = true; }
+      else if (forest::treeTrunkAt(np.x, np.y, np.z)) { a.stuck = true; a.life = 4.0f; a.v = a.v * 0.001f; float sg, sp2; spatial(np.x, np.z, sg, sp2); audio::arrowThunk(sg, sp2, true); }  // thunk: cover works both ways
       else if (float ws = world::waterHeightAt(np.x, np.z); ws > world::getTerrainHeight(np.x, np.z) + 0.08f && np.y < ws) { water::ripple(np.x, ws, np.z, 0.9f, 0.6f); dead = true; }
-      else if (np.y < world::getTerrainHeight(np.x, np.z)) { a.stuck = true; a.life = 4.0f; a.p = np; a.p.y = world::getTerrainHeight(np.x, np.z) + 0.05f; }
+      else if (np.y < world::getTerrainHeight(np.x, np.z)) { a.stuck = true; a.life = 4.0f; a.p = np; a.p.y = world::getTerrainHeight(np.x, np.z) + 0.05f; float sg, sp2; spatial(np.x, np.z, sg, sp2); audio::arrowThunk(sg * 0.8f, sp2, false); }
       else a.p = np;
     }
     if (dead) { g_barrows[i] = g_barrows.back(); g_barrows.pop_back(); }

@@ -15,16 +15,16 @@
 
 namespace envmap {
 namespace {
-const int N = 256;
+const int N = 384;   // world 1.4x wider: about the same metres per texel as before
 GLuint g_env = 0, g_horA = 0, g_horB = 0, g_detail = 0, g_water = 0;  // g_water: RG16F 512^2, r = water surface (ground where dry), g = still(1)/flowing(0.6) water mask
-const int ND = 1024;
+const int ND = 1536;
 std::vector<Stamp> g_treeStamps, g_lastOcc;
 std::vector<float> g_treeOcc;  // trees and rocks never move: their shade is rasterised once and reused on every rebake
 std::vector<FireLight> g_lastLights;
 bool g_detailBaked = false;
 std::vector<float> g_haze, g_canopyC, g_openC, g_wetC, g_flowX, g_flowZ;
 std::vector<uint8_t> g_surf;  // SURF_* per texel (512 x 512, ~2.4 m)
-const int NS = 512;  // CPU copies of baked channels
+const int NS = 768;  // CPU copies of baked channels
 float g_cull = 230;
 float g_camY = 0;
 const float HMIN = -100, HRANGE = 1000;
@@ -174,7 +174,7 @@ void build() {
   {
     // water surface map: lets the ground shader put moss on lake and river beds and keep dry-ground layers
     // (litter, dirt, grass texture) out from under the water
-    const int NW = 512;
+    const int NW = 768;
     std::vector<uint16_t> wpx((size_t)NW * NW * 2);
     auto half = [](float f) {  // float -> IEEE half
       uint32_t x; std::memcpy(&x, &f, 4);
@@ -429,6 +429,7 @@ float hazeCullDistance(float px, float pz, float dt) {
       float a = k * 0.5236f;
       rmin = std::min(rmin, hazeAt(px + std::cos(a) * D * 0.35f, pz + std::sin(a) * D * 0.35f));
     }
+    rmin = std::max(rmin, 0.5f * (1.0f - std::min(1.0f, std::max(0.0f, (g_camY - 70.0f) / 40.0f))));   // same floor as the shader (smoothstep ~ linear here)
     float lift = 1.0f + std::max(0.0f, g_camY - 15.0f - 25.0f) / 45.0f;  // eye high above the valley: thinner haze (same as the shader)
     D = std::max(230.0f, std::min(1200.0f, 3.6f * lift / (0.0165f * std::max(0.05f, rmin))));
   }

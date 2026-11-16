@@ -1,3 +1,4 @@
+#include "skills.h"
 #include "extras.h"
 #include <filesystem>
 #include <atomic>
@@ -7,6 +8,7 @@
 #include "../core/crashlog.h"
 #include "tutorial.h"
 #include "relics.h"
+#include "secrets.h"
 #include "season.h"
 #include "village.h"
 #include "resources.h"
@@ -64,10 +66,10 @@ std::vector<Building> initialBuildings() {
   };
   add("campfire", "Village Hearth", 1, 0, 0, 0, {}, true, "The heart of the settlement.");
   add("hunter_hut", "Hunter's Lodge", 2, 6, -4, 0.2f, {{"wood", 15}, {"fiber", 6}, {"stone", 6}}, false, "Fletches arrows for you and doubles pelt yields.");
-  add("carpenter_workshop", "Carpenter's Workshop", 2, -8, 6, -0.3f, {{"wood", 22}, {"fiber", 8}, {"stone", 10}}, false, "Devan saws timber for the village stockpile.");
-  add("herbalist_lodge", "Herbalist's Sanctuary", 2, 10, 8, -0.6f, {{"wood", 12}, {"stone", 10}, {"herb", 6}}, false, "Meera grows herbs and twists nettle fibre.");
-  add("watchtower", "Mountain Watchtower", 2, -6, -10, 0.8f, {{"wood", 28}, {"stone", 18}, {"fiber", 10}}, false, "Spots wildlife across the valley and quarries slate.");
-  add("bridge", "River Bridge", 1, world::BRIDGE_SITE[0], world::BRIDGE_SITE[1], 0, {{"wood", 40}, {"stone", 25}, {"fiber", 15}, {"deer_pelt", 4}}, false, "Reopens the old trade trail across the river.");
+  add("carpenter_workshop", "Carpenter's Workshop", 2, -8, 6, -0.3f, {{"wood", 32}, {"fiber", 12}, {"stone", 16}}, false, "Devan saws timber for the village stockpile.");
+  add("herbalist_lodge", "Herbalist's Sanctuary", 2, 10, 8, -0.6f, {{"wood", 20}, {"stone", 16}, {"herb", 8}}, false, "Meera grows herbs and twists nettle fibre.");
+  add("watchtower", "Mountain Watchtower", 2, -6, -10, 0.8f, {{"wood", 45}, {"stone", 32}, {"fiber", 16}}, false, "Spots wildlife across the valley and quarries slate.");
+  add("bridge", "River Bridge", 1, world::BRIDGE_SITE[0], world::BRIDGE_SITE[1], 0, {{"wood", 80}, {"stone", 55}, {"fiber", 30}, {"deer_pelt", 4}}, false, "Reopens the old trade trail across the river.");
   v.back().pos[1] = 0;
   return v;
 }
@@ -294,7 +296,7 @@ void secondTick() {
     if (A.arrivalAcc >= wait) {
       A.arrivalAcc = 0;
       A.population += 1;
-      std::string name = SETTLER_NAMES[(int)(randf() * 20) % 20];
+      std::string name = village::nextResidentName();   // the villager who will actually walk in
       actions::notify(name + " has arrived and moved in. Residents: " + std::to_string(A.population) + "/" + std::to_string(cap) + ".");
       popup("New settler", rgbHex("#7dd3fc"));
       actions::addScore(40);
@@ -385,6 +387,15 @@ Json buildSave() {
   Json cl = Json::array();
   for (auto& c : A.clues) if (c.discovered) cl.push(Json::string(c.id));
   d.set("clues", cl);
+  {
+    Json w = Json::object();
+    w.set("valid", Json::number(E.waypoint.valid ? 1 : 0)); w.set("x", Json::number(E.waypoint.x)); w.set("z", Json::number(E.waypoint.z));
+    d.set("waypoint", w);
+    Json h = Json::object();
+    h.set("valid", Json::number(E.hunterTip.valid ? 1 : 0)); h.set("sp", Json::number(E.hunterTip.sp)); h.set("x", Json::number(E.hunterTip.x));
+    h.set("z", Json::number(E.hunterTip.z)); h.set("day", Json::number(E.hunterTip.day));
+    d.set("hunterTip", h);
+  }
   Json st = Json::array();
   for (auto& s : A.structures) {
     Json o = Json::object();
@@ -469,6 +480,10 @@ void notify(const std::string& text) {
   crashlog::note(text);
   A.notification = text;
   A.notifyAt = platform::time();
+  if (!A.notes.empty() && A.notes.back().text == text) { A.notes.back().at = A.notifyAt; return; }
+  // reading time: ~5 s plus ~1 s per 15 characters, capped at 14 s
+  A.notes.push_back({text, A.notifyAt, std::min(14.0, 5.0 + text.size() / 15.0)});
+  if (A.notes.size() > 4) A.notes.erase(A.notes.begin());
 }
 
 void openDialogue(const std::string& id) {
@@ -684,6 +699,7 @@ void newGame() {
   events::reset();
   tutorial::start();
   relics::reset();
+  secrets::reset();
   extras::reset();
   A.uid = 1;
   A.jobAcc = 0;
@@ -716,6 +732,7 @@ int latestSlot() {
   return best;
 }
 
+int g_pendingContinue = -2;
 bool continueGame(int slot) {
   finishSaves();
   if (slot >= 0) A.saveSlot = slot;
@@ -774,6 +791,13 @@ bool continueGame(int slot) {
       for (auto& q : A.quests)
         if (q.id == o.str("id") && o.flag("completed")) { q.completed = true; q.progress = q.target; }
   A.clues = initialClues();
+  E.waypoint = {};
+  E.hunterTip = {};
+  if (const Json* w = d.get("waypoint")) { E.waypoint.valid = w->num("valid", 0) != 0; E.waypoint.x = (float)w->num("x", 0); E.waypoint.z = (float)w->num("z", 0); }
+  if (const Json* h = d.get("hunterTip")) {
+    E.hunterTip.valid = h->num("valid", 0) != 0; E.hunterTip.sp = (int)h->num("sp", 0);
+    E.hunterTip.x = (float)h->num("x", 0); E.hunterTip.z = (float)h->num("z", 0); E.hunterTip.day = (int)h->num("day", -1);
+  }
   if (const Json* cl = d.get("clues"))
     for (auto& c : cl->arr)
       for (auto& x : A.clues) if (x.id == c.s) x.discovered = true;
@@ -932,12 +956,18 @@ void upgrade(Building& b) {
 void trade(const Trade& t) {
   bool market = false;
   for (auto& s : A.structures) if (s.kind == SK_MARKET_STALL) market = true;
-  if (!market) { actions::notify("Build a Market Stall first."); return; }
+  bool caravan = t.id[0] == 'c' || t.id[0] == 'x';
+  if (!market && !caravan) { actions::notify("Build a Market Stall first."); return; }
   if (!has(t.give)) { actions::notify("Need " + shortfall(t.give) + "."); return; }
   spend(t.give);
-  Cost got = t.get;
-  for (auto& g : got) g.second = (int)std::lround(g.second * events::tradeMult());
-  actions::addItems(got);
+  Cost got = t.get, items;
+  for (auto& g : got) {
+    if (g.first == "renown") { actions::addScore(g.second); continue; }           // standing order: paid in renown
+    if (g.first == "skill_point") { skills::grantPoint(g.second); continue; }     // a teaching
+    if (!caravan) g.second = (int)std::lround(g.second * events::tradeMult());
+    items.push_back(g);
+  }
+  actions::addItems(items);
   audio::coinPickup();
   popup("Traded for " + costText(got), rgbHex("#fde68a"));
 }
@@ -1066,7 +1096,7 @@ void update(float dt) {
   E.uiOpen = uiOpen();
   if (A.victoryAt > 0 && E.clock >= A.victoryAt) { A.victoryAt = -1; A.status = Status::Victory; }
   if (A.status != Status::Playing) return;
-  if (!A.menuOpen) { tutorial::update(dt); relics::update(dt); extras::update(dt); }
+  if (!A.menuOpen) { tutorial::update(dt); relics::update(dt); secrets::update(dt); extras::update(dt); }
   if (!A.menuOpen) {
     A.secAcc += dt;
     while (A.secAcc >= 1) {

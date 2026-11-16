@@ -1,3 +1,8 @@
+#include "player.h"
+#include <map>
+#include "secrets.h"
+#include <functional>
+#include "skills.h"
 #include "../render/water.h"
 #include "../render/skinned.h"
 #include "extras.h"
@@ -6,6 +11,8 @@
 #include "buildings.h"
 #include <unordered_map>
 #include "wildlife.h"
+#include "secrets.h"
+#include <functional>
 #include "economy.h"
 #include "season.h"
 #include "fx.h"
@@ -82,7 +89,7 @@ float lastHour = -1, coldWarned = 0;
 bool walkable(float x, float z) {
   if (std::fabs(x) > MAP_HALF - 8 || std::fabs(z) > MAP_HALF - 8) return false;
   float h = world::getTerrainHeight(x, z);
-  if (h < -0.55f || h > 48) return false;
+  if (h < -0.55f || h > (x * x + z * z > 700.0f * 700.0f ? 92.0f : 48.0f)) return false;   // the outer uplands are open country; the old valley's peaks are not
   if (world::lakeAt(x, z) >= 0) return false;
   float sx = world::getTerrainHeight(x + 1.2f, z) - world::getTerrainHeight(x - 1.2f, z);
   float sz = world::getTerrainHeight(x, z + 1.2f) - world::getTerrainHeight(x, z - 1.2f);
@@ -237,7 +244,7 @@ float hearingRadius(Species sp) {
   const Hear& H = SPEC[sp].hear;
   float r = p.sprinting ? H.sprint : p.moving ? (p.crouching ? H.crouch : H.walk) : p.crouching ? H.crouch * 0.6f : H.still;
   if (E.isNight) r *= 0.75f;
-  return r;
+  return r * skills::noiseMult();
 }
 
 void updatePredator(Animal* a, float dt);
@@ -386,12 +393,35 @@ void playerDown(Animal* a) {
   actions::notify("The " + nm + " overpowered you. Villagers carried you back to the hearth. Heal up, crouch past predators, or bring friends of the arrow kind.");
 }
 
+// one voice per animal at a time: a new call waits until the last one has finished (no stacking when hit repeatedly)
+std::map<int, float> g_voiceUntil;
+bool voiceFree(const Animal* a, float len) {
+  float& u = g_voiceUntil[a->id];
+  if (E.clock < u) return false;
+  u = E.clock + len;
+  return true;
+}
+
+// where an animal's voice sits for the listener: distance gain, stereo side, and doppler from the closing speed
+void voiceAt(const Animal* a, float& dd, float& gain, float& pan, float& rate) {
+  const Vec3& p = E.player.pos;
+  dd = hypot2(p.x - a->x, p.z - a->z);
+  gain = 0.7f * std::min(1.0f, 3.0f / std::max(dd, 0.5f));   // real falloff: half as loud each time the distance doubles past 3 m
+  float yaw = E.player.yaw, rx = std::cos(yaw), rz = -std::sin(yaw);
+  pan = clampf(((a->x - p.x) * rx + (a->z - p.z) * rz) / std::max(dd, 1.0f), -1.0f, 1.0f);
+  float ux = (p.x - a->x) / std::max(dd, 0.5f), uz = (p.z - a->z) / std::max(dd, 0.5f);
+  float vs = a->speed * (std::sin(a->yaw) * ux + std::cos(a->yaw) * uz);   // animal moving toward you (+)
+  float vl = -(player::velocity().x * ux + player::velocity().z * uz);     // you moving toward it (+)
+  rate = clampf((343.0f + vl) / (343.0f - vs), 0.9f, 1.1f);
+}
+
 void hurtPlayer(Animal* a, float dmg) {
   auto& P = E.player;
   const Vec3& p = P.pos;
   float dx = p.x - a->x, dz = p.z - a->z;
   float d = std::max(0.1f, hypot2(dx, dz));
   if (E.world.gearArmour) dmg = std::max(1.0f, std::round(dmg * 0.6f));
+  dmg = std::max(1.0f, std::round(dmg * skills::damageTaken()));
   P.hp = std::max(0.0f, P.hp - dmg);
   P.hurtT = E.clock;
   P.knock = Vec3(dx / d, 0, dz / d) * (a->sp == SP_BEAR ? 9.0f : 5.0f);
@@ -399,17 +429,30 @@ void hurtPlayer(Animal* a, float dmg) {
   e.kind = HudEvent::Hurt;
   e.amount = dmg;
   emitEvent(e);
-  if (const PredDef* pd = PRED(a->sp)) audio::tone(Wave::Sawtooth, pd->growl * 1.7f, pd->growl, 0.28f, 0.13f);  // boars are not predators: no growl entry (null here crashed the game)
-  else audio::tone(Wave::Sawtooth, 160, 110, 0.28f, 0.13f);  // boar squeal-grunt
+  {
+    float dd, gain, pan, rate;   // the attacker's own bite / swipe / strike / charge sound, from where it is
+    voiceAt(a, dd, gain, pan, rate);
+    if (voiceFree(a, audio::animalVoiceLen(a->sp, 1)))
+      audio::animalVoice(a->sp, 1, std::max(gain, 0.5f), pan, rate, dd / 343.0f);
+  }
   if (P.hp <= 0) playerDown(a);
 }
 
 void growl(Animal* a) {
-  if (!PRED(a->sp)) return;  // only predators have a growl
+  if (!PRED(a->sp) && a->sp != SP_BOAR) return;  // predators and boars have a voice
   const Vec3& p = E.player.pos;
   if (hypot2(p.x - a->x, p.z - a->z) > 35) return;
-  float g = PRED(a->sp)->growl;
-  audio::tone(Wave::Sawtooth, g, g * 0.7f, a->sp == SP_BEAR ? 0.7f : 0.45f, 0.09f);
+  // a pack calls once: the first wolf to notice you speaks for the herd, the rest stay quiet for a while
+  if (a->sp == SP_WOLF && a->herd) {
+    static std::map<const void*, float> lastCall;
+    float& t = lastCall[a->herd];
+    if (t > 0 && E.clock - t < 12) return;
+    t = E.clock;
+  }
+  float dd, gain, pan, rate;
+  voiceAt(a, dd, gain, pan, rate);
+  if (!voiceFree(a, audio::animalVoiceLen(a->sp, 0))) return;
+  audio::animalVoice(a->sp, 0, gain, pan, rate, dd / 343.0f);   // arrives after the time sound takes to travel
 }
 
 void alertPack(Animal* a, int state) {
@@ -851,7 +894,7 @@ void updateHerds(float dt) {
   for (auto& hp : herds) {
     Herd* hh = hp.get();
     float hdt = dt;
-    if (hypot2(p.x - hh->ax, p.z - hh->az) > 220) { hh->slow += dt; if (hh->slow < 0.5f) continue; hdt = hh->slow; hh->slow = 0; }
+    if (hypot2(p.x - hh->ax, p.z - hh->az) > 220) { hh->slow += dt; if (hh->slow < 1.0f) continue; hdt = hh->slow; hh->slow = 0; }
     auto& h = hp;
     float dt = hdt;
     migrate(h.get(), dt);
@@ -898,6 +941,26 @@ namespace wildlife {
 const char* speciesName(Species sp) { return SPEC[sp].name; }
 bool isPredator(Species sp) { return PRED(sp) != nullptr; }
 int animalCount() { return (int)animals.size(); }
+int g_whiteId = -1;
+int whiteDeer(float& x, float& y, float& z) {
+  if (g_whiteId < 0) {
+    // the white deer: the first doe of the deer herd that grazes farthest out in the meadows
+    float best = 0;
+    for (auto& a : animals) if (a->sp == SP_DEER && a->herd && a->herd->members.size() > 1 && a->herd->members[0] == a.get()) {
+      float r = hypot2(a->x, a->z);
+      if (r > best && r < 560) { best = r; g_whiteId = a->herd->members[1]->id; }
+    }
+  }
+  for (auto& a : animals) if (a->id == g_whiteId) { x = a->x; y = a->y; z = a->z; return a->state == S_DOWNED ? 2 : 1; }
+  return 0;
+}
+void forEachWounded(const std::function<void(float, float, float, int)>& cb) {
+  for (auto& a : animals) {
+    if (a->state == S_DOWNED || a->hp >= SPEC[a->sp].hp - 0.5f) continue;
+    if (a->speed < 1.2f) continue;  // a still animal leaves no trail
+    cb(a->x, a->z, a->yaw, a->id);
+  }
+}
 int nearPositions(float x, float z, float r, float* out, int maxN) {
   int n = 0;
   for (auto& a : animals) {
@@ -925,12 +988,14 @@ void spawn(uint32_t seed) {
     for (int k = 0; k < 160; k++) {
       float ang = rnd.next() * TAU;
       // only the tutorial herd lives near camp; other deer stay well out in the wilds
-      float r = tutorial ? 42 + rnd.next() * 30 : (PRED(sp) ? 100.0f : sp == SP_DEER ? 170.0f : 55.0f) + rnd.next() * (gi < 30 ? 170 : 400);
+      // herds spread over the whole valley by area (not bunched near the middle), and none crowding the village
+      float r0 = PRED(sp) ? 140.0f : sp == SP_DEER ? 170.0f : 110.0f, r1 = gi < 30 ? 360.0f : 470.0f;
+      float r = tutorial ? 42 + rnd.next() * 30 : std::sqrt(r0 * r0 + rnd.next() * (r1 * r1 - r0 * r0));
       if (std::fabs(std::cos(ang) * r) > MAP_HALF - 30 || std::fabs(std::sin(ang) * r) > MAP_HALF - 30) continue;
       float x = std::cos(ang) * r, z = std::sin(ang) * r;
       float s = habitatScore(sp, x, z);
       if (s < 0) continue;
-      for (auto& h : herds) if (hypot2(h->ax - x, h->az - z) < 45) s -= 2;
+      for (auto& h : herds) if (hypot2(h->ax - x, h->az - z) < 70) s -= 2;
       if (s > bs) { bs = s; bx = x; bz = z; }
     }
     if (bs < 0) continue;
@@ -946,6 +1011,40 @@ void spawn(uint32_t seed) {
     }
     herds.push_back(std::move(herd));
   }
+  // outer lands: each country keeps its own animals
+  static const Species OUTER[B_COUNT][4] = {
+      {SP_DEER, SP_BOAR, SP_BEAR, SP_DEER},          // vale
+      {SP_GORAL, SP_LEOPARD, SP_GORAL, SP_WOLF},     // crags
+      {SP_WOLF, SP_GORAL, SP_LEOPARD, SP_WOLF},      // snowfields
+      {SP_BOAR, SP_BEAR, SP_DEER, SP_BOAR},          // fern forest
+      {SP_DEER, SP_GORAL, SP_DEER, SP_WOLF}};        // meadows
+  Rng ro(seed * 2654435761u + 17);
+  int perBiome[B_COUNT] = {0, 0, 0, 0, 0};
+  const int outerN = (int)herds.size(), cap = outerN / B_COUNT + 3;   // as many herds again as the first valley holds
+  for (int n = 0, tries = 0; n < outerN && tries < 6000; tries++) {
+    P2 g = world::outerPoint(ro.next() * TAU, 25 + ro.next() * 200);
+    float x = g[0], z = g[1];
+    float bw[B_COUNT];
+    world::biomeWeights(x, z, bw);
+    int b = 0;
+    for (int i = 1; i < B_COUNT; i++) if (bw[i] > bw[b]) b = i;
+    if (perBiome[b] >= cap) continue;
+    Species sp = OUTER[b][perBiome[b] % 4];
+    if (habitatScore(sp, x, z) < 0) continue;
+    bool close = false;
+    for (auto& h : herds) if (hypot2(h->ax - x, h->az - z) < 60) close = true;
+    if (close) continue;
+    auto herd = std::make_unique<Herd>();
+    herd->sp = sp;
+    herd->ax = x;
+    herd->az = z;
+    herd->migT = 60 + ro.next() * 180;
+    herd->size = SPEC[sp].herdLo + (int)std::floor(ro.next() * (SPEC[sp].herdHi - SPEC[sp].herdLo + 1));
+    for (int i = 0; i < herd->size; i++) makeAnimal(sp, herd.get(), x + (ro.next() - 0.5f) * 8, z + (ro.next() - 0.5f) * 8, &ro);
+    herds.push_back(std::move(herd));
+    perBiome[b]++;
+    n++;
+  }
 }
 
 void update(float dt) {
@@ -953,19 +1052,28 @@ void update(float dt) {
   auto& P = E.player;
   g_cloak = invCount("leopard_cloak") > 0;
   nightEvents(dt);
-  if (P.hp < P.maxHp && E.clock - P.hurtT > 6) P.hp = std::min(P.maxHp, P.hp + dt * (hypot2(p.x, p.z) < VILLAGE_SAFE ? 10 : 2.5f));
+  if (P.hp < P.maxHp && E.clock - P.hurtT > skills::regenDelay()) P.hp = std::min(P.maxHp, P.hp + dt * skills::regenMult() * (hypot2(p.x, p.z) < VILLAGE_SAFE ? 10 : 2.5f));
   bool paused = E.uiOpen || !E.playing;
+  static size_t s_tick = 0;
   for (size_t i = 0; i < animals.size(); i++) {
     Animal* a = animals[i].get();
     if (paused && PRED(a->sp)) continue;
-    bool far = std::fabs(a->x - p.x) + std::fabs(a->z - p.z) > 220;
-    if (far) {
+    float md = std::fabs(a->x - p.x) + std::fabs(a->z - p.z);   // (a cheap stand-in for distance: up to 1.41x the real one)
+    if (md > 220) {
       a->slow += dt;
-      if (a->slow < 0.3f) continue;
+      if (a->slow < 0.5f) continue;   // out of sight: twice a second
       updateAnimal(a, a->slow);
       a->slow = 0;
+    } else if (md > 90 && a->state != S_DOWNED) {
+      // 90-160: alternate frames; 160-220 (beyond ~120 m real distance): every 4th frame. Each animal on its own
+      // phase so the work is spread evenly. Predators chasing or attacking always run every frame.
+      bool busy = a->state == S_CHASE || a->state == S_ATTACK || a->state == S_POUNCE || a->state == S_CHARGE || a->state == S_FLEE;
+      unsigned mask = busy ? 0 : md > 160 ? 3 : 1;
+      a->slow += dt;
+      if (((s_tick + i) & mask) == 0) { updateAnimal(a, a->slow); a->slow = 0; }
     } else updateAnimal(a, dt);
   }
+  s_tick++;
   updateHerds(dt);
 }
 
@@ -1016,7 +1124,8 @@ void damage(Animal* a, float dmg, bool headshot) {
   // watchtower: lookouts call targets, so arrows hit raiders harder inside the settlement
   if (a->raid && hasWatchtower() && hypot2(E.player.pos.x, E.player.pos.z) < VILLAGE_SAFE + 25) dmg *= 1.5f;
   if (!PRED(a->sp)) { markDanger(a->x, a->z); if (a->herd) a->herd->migT = 0; }
-  a->hp -= (headshot ? dmg * 2 : dmg) * 0.5f;  // animals take half damage
+  if (a->state == S_GRAZE || a->state == S_WALK || a->state == S_FEED) dmg *= skills::sneakMult();   // it never saw you coming
+  a->hp -= (headshot ? dmg * skills::headMult() : dmg) * 0.5f;  // animals take half damage
   const Vec3& p = E.player.pos;
   const PredDef* D = PRED(a->sp);
   HudEvent ev;
@@ -1049,6 +1158,7 @@ void damage(Animal* a, float dmg, bool headshot) {
   }
   if (a->hp <= 0) {
     extras::onKill(a->sp);
+    if (a->id == g_whiteId) secrets::onWhiteDeerKilled();
     a->state = S_DOWNED;
     a->speed = 0;
     a->downT = 0;
@@ -1090,9 +1200,23 @@ CarcassYield harvestCarcass(Animal* a) {
   out.name = SPEC[a->sp].name;
   out.yields = SPEC[a->sp].yields;
   for (auto& y : out.yields)
+  {
     if (y.first == "deer_pelt" || y.first == "boar_hide") y.second = (int)std::round(y.second * E.world.bonus.peltMult);
+    if (y.first.find("pelt") != std::string::npos || y.first.find("hide") != std::string::npos || y.first.find("fur") != std::string::npos) y.second += skills::peltExtra();
+  }
   removeAnimal(a);
   return out;
+}
+
+bool randomHerd(Species sp, float awayX, float awayZ, float minDist, float& ox, float& oz) {
+  std::vector<Herd*> pool;
+  for (auto& h : herds) {
+    if (h->sp != sp || hypot2(h->ax - awayX, h->az - awayZ) < minDist) continue;
+    for (Animal* m : h->members) if (m->state != S_DOWNED) { pool.push_back(h.get()); break; }
+  }
+  if (pool.empty()) return false;
+  Herd* h = pool[(size_t)(randf() * pool.size()) % pool.size()];
+  return nearestHerd(sp, h->ax, h->az, ox, oz);
 }
 
 bool nearestHerd(Species sp, float x, float z, float& ox, float& oz) {
@@ -1269,6 +1393,7 @@ static void drawSkinList(std::vector<SkinDraw>& L, bool shadow) {
       at("Head", s.head); at("Torso", s.b0); at("Torso3", s.b1);
       s.hitClock = E.clock;
     }
+    skinned::setWhite(d.a->id == g_whiteId ? 1.0f : 0.0f);
     skinned::draw(*d.m, s.pose, d.xf, shadow);
   }
   glEnable(GL_CULL_FACE);

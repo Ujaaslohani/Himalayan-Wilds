@@ -88,7 +88,9 @@ void main(){
   if (v_kind > 1.5) {
     // light scattered in the haze around a fire or lamp: a wide, soft warm bloom that lights the air nearby
     float a = exp(-d * d * 3.2) * (1.0 - d);
-    fragColor = vec4(vec3(1.0, 0.62, 0.3) * a * 0.2 * u_nightAmt, 1.0);
+    float thick = 1.0 + 1.2 * u_rain + 1.4 * u_volFog;   // more mist in the air: more light caught in it
+    float fl = 0.9 + 0.1 * sin(u_clock * 7.3 + gl_FragCoord.x * 0.001) * sin(u_clock * 3.1);
+    fragColor = vec4(vec3(1.0, 0.6, 0.28) * a * 0.24 * thick * fl * max(u_nightAmt, 0.25 * u_volFog), 1.0);
     return;
   }
   if (v_kind > 0.5) {

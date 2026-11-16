@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include "../core/math.h"
 #include "engine.h"
 #include <string>
@@ -37,6 +38,7 @@ void damage(Animal* a, float dmg, bool headshot);
 Animal* findCarcass(float x, float z, float r);
 CarcassYield harvestCarcass(Animal* a);
 bool nearestHerd(Species sp, float x, float z, float& ox, float& oz);
+bool randomHerd(Species sp, float awayX, float awayZ, float minDist, float& ox, float& oz);   // a live herd at least minDist away
 const char* speciesName(Species sp);
 bool isPredator(Species sp);
 void initRender();
@@ -44,6 +46,8 @@ void draw();
 void drawShadow();
 void drawBlobs();
 int animalCount();
+int whiteDeer(float& x, float& y, float& z);   // 0 none, 1 alive, 2 down
+void forEachWounded(const std::function<void(float, float, float, int)>& cb);  // x, z, yaw, id of hurt animals on the move
 void snapshot();          // remember positions before a fixed simulation step
 void setAlpha(float a);   // 0..1 blend between previous and current step for drawing
 int nearPositions(float x, float z, float r, float* out, int maxN);  // (x, z, radius) triples

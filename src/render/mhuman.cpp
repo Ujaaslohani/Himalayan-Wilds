@@ -61,7 +61,7 @@ void main(){
   fragColor = vec4(1.0);
 #else
   vec3 alb;
-  float fab = 1.0;
+  float fab = 1.0, skinW = 0.0;
   if (v_uv.x < -0.5) {
     // rigid garment: vertex colour, or a per-villager colour picked by the alpha code
     int code = int(v_col.a * 255.0 + 0.5);
@@ -93,14 +93,22 @@ void main(){
     alb = mix(alb, u_shoe * grain, m.b);
     vec4 acc = texture(u_mhAcc, v_uv);
     alb = mix(alb, srgbToLinear(acc.rgb) * grain, acc.a);
+    skinW = clamp(1.0 - m.r - m.g - m.a - m.b - acc.a, 0.0, 1.0);
   }
   vec3 n = normalize(v_nrm);
   if (!gl_FrontFacing) n = -n;
   float sh = shadowAt(v_wpos + n * 0.05, n);  // offset off the low-poly surface: no self-shadow speckle
+  alb *= 1.0 - 0.3 * u_wet * (1.0 - skinW);   // soaked clothes go darker in the rain
   vec3 lit = lambert(alb, n, sh);
   vec3 V = normalize(u_camPos - v_wpos);
+  float ndl = dot(n, u_sunDir.xyz);
+  // skin: light bleeds through (soft, warm terminator) instead of a hard plastic edge
+  lit += skinW * alb * vec3(0.55, 0.22, 0.12) * u_sunCol.rgb * clamp(0.5 - abs(ndl - 0.05) * 1.6, 0.0, 1.0) * sh;
+  lit += skinW * alb * u_hemiSky.rgb * 0.18;
+  // cloth and figure: a sky-coloured rim (independent of albedo) so dark clothes still read as a shape, not a hole
   float rim = pow(1.0 - max(dot(n, V), 0.0), 3.0);
-  lit += rim * 0.12 * alb * (u_hemiSky.rgb + u_sunCol.rgb * 0.25);
+  lit += rim * (0.12 * alb + 0.05 * u_hemiSky.rgb * (1.0 - skinW)) * (u_hemiSky.rgb + u_sunCol.rgb * 0.25) * 2.0;
+  lit += (1.0 - skinW) * fab * 0.02 * u_hemiSky.rgb * (0.5 + 0.5 * n.y);   // fibres scatter a little sky light
   vec3 c = outColor(lit);
   c = mix(c, fogTint(v_wpos), fogObject(v_wpos, v_depth));
   fragColor = vec4(c, 1.0);

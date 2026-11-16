@@ -1,3 +1,6 @@
+#include <cstring>
+#include "secrets.h"
+#include "skills.h"
 #include "../render/water.h"
 #include "../render/envmap.h"
 #include "extras.h"
@@ -27,8 +30,10 @@ namespace {
 float g_feetY = 0;
 float g_eyeH = 1.65f;
 float g_footT = 0;
+double g_stride = 0;   // walk cycle phase: one step per pi; the head dips and the foot lands together
 float g_slowT = 0;
 Vec3 g_vel;
+Vec3 g_hvel, g_lastP;   // horizontal velocity from the last frame's movement (audio doppler)
 bool g_lmb = false, g_rmb = false;
 float g_fov = 75;
 Mat4 g_camWorld;
@@ -198,13 +203,21 @@ void releaseBow() {
     actions::addItems({{"arrow", -1}});
     B.cooldown = 0.4f;
     B.lastShotPower = B.draw;
-    audio::tone(Wave::Triangle, 240, 70, 0.12f, 0.14f);
+    audio::bowRelease(0.55f + 0.45f * B.draw, 0.1f);  // your own bow: same real string-and-limb release
   }
   B.draw = 0;
 }
 
 // walkable height for the player: terrain, floors, bridges, plus the tops of rocks, stumps and logs to stand on
-static float groundAt(float x, float z) { return std::max(walkHeight(x, z), forest::obstacleTop(x, z)); }
+// trails and roads may be steeper than open slopes (roads into the new country cross rolling ground and fords)
+static bool onPath(float x, float z) { return world::nearRoute(x, z) < 7.0f || world::pathDistance(x, z) < 4.0f; }
+static float groundAt(float x, float z) {
+  float cy;   // inside the cave behind the falls the floor replaces the cliff above it
+  if (secrets::caveFloor(x, z, E.player.pos.y - 1.6f, cy)) return cy;
+  float g = std::max(walkHeight(x, z), forest::obstacleTop(x, z));
+  if (secrets::bridgeDeck(x, z, E.player.pos.y - 1.6f, cy)) g = std::max(g, cy);
+  return g;
+}
 
 void jump() {
   auto& P = E.player;
@@ -266,8 +279,6 @@ void interact() {
       audio::powerupChime();
       return;
     }
-  actions::notify("Nothing to gather here. Follow the compass icons to timber, slate, nettle and herbs.");
-  audio::crispClick();
 }
 
 void onKeyPressed(int key) {
@@ -277,6 +288,7 @@ void onKeyPressed(int key) {
   if (key == K_J) { actions::openTab(Tab::Quests); return; }
   if (key == K_B) { actions::openTab(Tab::Buildings); return; }
   if (key == K_M) { actions::openTab(Tab::Map); return; }
+  if (key == K_K) { actions::openTab(Tab::Skills); return; }
   if (E.uiOpen) return;
   if (key == K_P && w.placing.empty()) {
     E.photo = !E.photo;
@@ -317,7 +329,11 @@ void onMouseUp(int button) {
   if (button == 1) g_rmb = false;
 }
 
+Vec3 velocity() { return g_hvel; }
+float stridePhase() { return (float)g_stride; }
 void update(float dt) {
+  if (dt > 1e-4f) { Vec3 d = E.player.pos - g_lastP; g_hvel = d.lengthSq() < 400 ? Vec3{d.x / dt, 0, d.z / dt} : Vec3{0, 0, 0}; }
+  g_lastP = E.player.pos;
   Input& in = platform::input();
   auto& CS = E.cutscene;
   if (CS.dur > 0) {
@@ -391,13 +407,24 @@ void update(float dt) {
 
   B.aiming = active && E.world.placing.empty() && g_rmb;
   B.cooldown = std::max(0.0f, B.cooldown - dt);
-  if (B.drawing && active && invCount("arrow") > 0 && B.cooldown <= 0) B.draw = std::min(1.0f, B.draw + dt / 0.7f);
+  if (B.drawing && active && invCount("arrow") > 0 && B.cooldown <= 0) B.draw = std::min(1.0f, B.draw + dt / (0.7f * skills::drawTime()));
   else if (!B.drawing) B.draw = std::max(0.0f, B.draw - dt * 4);
 
   float mz = 0, mx = 0;
   if (active) {
     mz = (in.down[K_W] || in.down[K_UP] ? 1.0f : 0.0f) - (in.down[K_S] || in.down[K_DOWN] ? 1.0f : 0.0f);
     mx = (in.down[K_D] || in.down[K_RIGHT] ? 1.0f : 0.0f) - (in.down[K_A] || in.down[K_LEFT] ? 1.0f : 0.0f);
+  }
+  {  // selftest: HW_WALKTEST="x,z,yaw" walks the real player physics forward from there and logs the path
+    static const char* wt = std::getenv("HW_WALKTEST");
+    static int wf = 0;
+    if (wt) {
+      wf++;
+      float tx, tz, ty;
+      if (wf <= 60 && std::sscanf(wt, "%f,%f,%f", &tx, &tz, &ty) == 3) { P.pos = {tx, world::getTerrainHeight(tx, tz) + 1.7f, tz}; g_feetY = P.pos.y - 1.7f; P.yaw = ty; g_vel = {0, 0, 0}; }
+      if (wf > 60) { mz = 1; mx = 0; P.yaw = (float)std::atof(std::strrchr(wt, ',') + 1); }
+      if (wf > 20 && wf % 20 == 0) std::printf("WALK %d %.2f %.2f %.2f\n", wf, P.pos.x, g_feetY, P.pos.z);
+    }
   }
   P.sprinting = active && in.down[K_SHIFT] && mz > 0 && !P.crouching && !B.drawing;
   Vec3 fwd(-std::sin(P.yaw), 0, -std::cos(P.yaw));
@@ -421,28 +448,35 @@ void update(float dt) {
   P.pos.x += (g_vel.x + P.knock.x) * dt;
   P.pos.z += (g_vel.z + P.knock.z) * dt;
   P.knock *= std::max(0.0f, 1 - dt * 5);
-  { int pi_ = forest::profOpen ? forest::profOpen("treeCollision") : -1; forest::resolveTreeCollision(P.pos.x, P.pos.z, 0.38f, g_feetY); bridgeRailCollision(P.pos.x, P.pos.z, P.pos.y - 1.7f); if (forest::profClose) forest::profClose(pi_); }
-  resolveBuildingCollision(P.pos.x, P.pos.z, 0.38f);
+  // standing still: last frame's position was already resolved against trees, rails and buildings
+  static float rx = 1e9f, rz = 1e9f, ry = 1e9f;
+  if (std::fabs(P.pos.x - rx) > 1e-4f || std::fabs(P.pos.z - rz) > 1e-4f || std::fabs(P.pos.y - ry) > 0.05f) {
+    int pi_ = forest::profOpen ? forest::profOpen("treeCollision") : -1; forest::resolveTreeCollision(P.pos.x, P.pos.z, 0.38f, g_feetY); bridgeRailCollision(P.pos.x, P.pos.z, P.pos.y - 1.7f); if (forest::profClose) forest::profClose(pi_);
+    resolveBuildingCollision(P.pos.x, P.pos.z, 0.38f);
+    rx = P.pos.x; rz = P.pos.z; ry = P.pos.y;
+  }
   P.pos.x = clampf(P.pos.x, -MAP_HALF + 4, MAP_HALF - 4);
   P.pos.z = clampf(P.pos.z, -MAP_HALF + 4, MAP_HALF - 4);
 
   float ground = groundAt(P.pos.x, P.pos.z);
-  bool onTerrain = ground <= world::getTerrainHeight(P.pos.x, P.pos.z) + 0.02f;
+  float caveY;
+  bool inCave = secrets::caveFloor(P.pos.x, P.pos.z, g_feetY, caveY);   // the cliff above is not the floor here
+  bool onTerrain = !inCave && ground <= world::getTerrainHeight(P.pos.x, P.pos.z) + 0.02f;
   float g0 = groundAt(px0, pz0);
   float moved = hypot2(P.pos.x - px0, P.pos.z - pz0);
   float grade = (ground - g0) / (moved > 0 ? moved : 1e-4f);
   if (!P.onGround && !onTerrain && ground > g_feetY && ground - g_feetY <= 0.4f) {
     g_feetY = ground;
     if (P.velY > 0) P.velY = 0;
-  } else if (ground > g_feetY + (P.onGround ? 0.45f : 0.06f) || (!P.onGround && onTerrain && ground > g_feetY - 0.25f && grade > 1.3f) || (P.onGround && onTerrain && grade > (world::nearRoute(P.pos.x, P.pos.z) < 7.0f ? 1.35f : 0.95f))) {
+  } else if (ground > g_feetY + (P.onGround ? 0.45f : 0.06f) || (!P.onGround && onTerrain && ground > g_feetY - 0.25f && grade > 1.3f) || (P.onGround && onTerrain && grade > (onPath(P.pos.x, P.pos.z) ? 1.35f : 0.95f))) {
     P.pos.x = px0;
     P.pos.z = pz0;
     if (P.onGround) g_vel *= 0.6f;
     ground = g0;
   }
-  if (P.onGround && ground <= world::getTerrainHeight(P.pos.x, P.pos.z) + 0.02f) {
+  if (P.onGround && !inCave && ground <= world::getTerrainHeight(P.pos.x, P.pos.z) + 0.02f) {
     float sl = world::localSlope(P.pos.x, P.pos.z);
-    float slMax = world::nearRoute(P.pos.x, P.pos.z) < 7.0f ? 1.35f : 0.95f;  // trails may be steeper than open slopes
+    float slMax = onPath(P.pos.x, P.pos.z) ? 1.35f : 0.95f;  // trails may be steeper than open slopes
     if (sl > slMax) {
       float gx = world::getTerrainHeight(P.pos.x + 0.6f, P.pos.z) - world::getTerrainHeight(P.pos.x - 0.6f, P.pos.z);
       float gz = world::getTerrainHeight(P.pos.x, P.pos.z + 0.6f) - world::getTerrainHeight(P.pos.x, P.pos.z - 0.6f);
@@ -479,7 +513,21 @@ void update(float dt) {
     }
   }
   g_eyeH += ((P.crouching ? 1.05f : 1.65f) - g_eyeH) * std::min(1.0f, dt * 10);
-  float headBob = P.moving && P.onGround ? std::sin(E.clock * (P.sprinting ? 12 : 8.5f)) * (P.sprinting ? 0.05f : 0.025f) : 0;
+  // the stride follows how fast you actually cover ground (steps ~0.75 m walking, ~1.15 m running)
+  bool stepping = P.moving && P.onGround;
+  int stepNow = 0;
+  if (stepping) {
+    float sp = std::sqrt(g_hvel.x * g_hvel.x + g_hvel.z * g_hvel.z);
+    // cadence like a person: ~1.9 steps/s walking, ~3.0 running, ~1.3 crouched; slower when held back (snow, water,
+    // drawing the bow), so the interval between steps really changes with the gait
+    float nominal = g_settings.playerSpeed * (P.sprinting ? g_settings.sprintMultiplier : 1.0f) * (P.crouching ? 0.45f : 1.0f);
+    float cadence = P.sprinting ? 3.0f : P.crouching ? 1.3f : 1.9f;
+    float rate = cadence * clampf(sp / std::max(nominal, 0.1f), 0.45f, 1.15f);   // steps per second
+    double before = g_stride;
+    g_stride += dt * rate * PI;
+    stepNow = (int)std::floor(g_stride / PI) - (int)std::floor(before / PI);
+  }
+  float headBob = stepping ? -std::fabs((float)std::sin(g_stride)) * (P.sprinting ? 0.07f : 0.035f) + (P.sprinting ? 0.035f : 0.0175f) : 0;
   P.pos.y = g_feetY + g_eyeH + headBob;
   {
     // deep water: swim with the head above the surface instead of walking along the lake bed with the eyes under it
@@ -492,8 +540,7 @@ void update(float dt) {
   }
 
   if (P.moving && P.onGround && active) {
-    g_footT += dt * (P.sprinting ? 3.3f : P.crouching ? 1.2f : 2.0f);
-    if (g_footT >= 1) {
+    if (stepNow > 0) {   // a footfall: exactly when the head bottoms out
       g_footT = 0;
       // the surface underfoot picks the sound
       float terr = world::getTerrainHeight(P.pos.x, P.pos.z);
@@ -501,13 +548,19 @@ void update(float dt) {
       float wsurf = world::waterHeightAt(P.pos.x, P.pos.z);
       if (ground < wsurf + 0.2f && !onFloor) { audio::footstepWater(); water::ripple(P.pos.x, wsurf, P.pos.z, P.sprinting ? 1.0f : 0.6f, P.sprinting ? 0.5f : 0.15f); }
       else if (onFloor) audio::footstepWood();
+      bool onPath = world::pathDistance(P.pos.x, P.pos.z) < 2.6f || world::nearRoute(P.pos.x, P.pos.z) < 2.6f;
+      if (ground < wsurf + 0.2f || onFloor) {}
       else if (season.snow > 0.45f) audio::footstepSnow();
       else {
         envmap::Surface sf = envmap::surfaceAt(P.pos.x, P.pos.z);  // baked surface map
         if (sf == envmap::SURF_STONE) audio::footstepStone();
         else if (sf == envmap::SURF_EARTH) { if (!P.crouching) audio::footstepStone(); }  // packed earth: firmer, duller step
+        else if (onPath) audio::footstepStone();   // roads and trails: packed earth, never grass or leaves
         else if (!P.crouching) audio::footstepGrass();
       }
+      // brushing through undergrowth: with the step itself, only where plants actually crowd the ground
+      if (!onFloor && !onPath && season.snow < 0.6f && forest::undergrowthNear(P.pos.x, P.pos.z, 0.9f))
+        audio::foliageRustle(P.crouching ? 0.12f : 0.26f);
     }
   }
 
