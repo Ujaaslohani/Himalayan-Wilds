@@ -740,6 +740,12 @@ void update(float dt) {
   F.fogParam[3] = g_wet;
   F.shadowMix[1] = g_rain;
   F.shadowMix[2] = g_settings.volFog || std::getenv("HW_VOLFOG") ? 1.0f : 0.0f;
+  {  // v0.9.88: how deep in the woods the camera stands (0 open .. 1 dense forest), eased: drives the green forest haze
+    static float fin = 0;
+    float want = clampf((world::forestDensity(render::cam.pos.x, render::cam.pos.z) - 0.25f) / 0.5f, 0, 1);
+    fin += (want - fin) * 0.02f;
+    F.shadowMix[3] = fin;
+  }
   if (E.lanternOn && E.playing && !E.photo) {
     // carried low in the left hand, a little ahead: lights the ground and trunks around the player
     Vec3 f = render::cam.forward();

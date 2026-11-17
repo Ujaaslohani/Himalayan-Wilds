@@ -671,6 +671,10 @@ void init() {
   Json d;
   A.saveSlot = latestSlot();
   A.hasSave = readSave(d);
+  if (A.hasSave) {   // v0.9.81: load the menu world in the saved season, so Continue doesn't re-photograph every tree type
+    const Json* se = d.get("season");
+    restoreSeason(se ? (int)se->num("start", 2) : 2, se ? (int)se->num("day", 0) : 0, (float)d.num("time", 7.5));
+  }
 }
 
 void newGame() {

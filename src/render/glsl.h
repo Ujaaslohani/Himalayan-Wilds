@@ -50,6 +50,7 @@ layout(std140) uniform Frame {
 #define u_wet u_fogParam.w
 #define u_rain u_shadowMix.y
 #define u_volFog u_shadowMix.z
+#define u_forestIn u_shadowMix.w
 #define PI 3.141592653589793
 #define FADE_NOISE_STATIC() fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(0.06711056, 0.00583715))))
 #define FADE_NOISE() fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy) + 5.588238 * mod(floor(u_clock * 60.0), 64.0), vec2(0.06711056, 0.00583715))))
@@ -140,7 +141,22 @@ float horizonShadow(vec3 wp){
 uniform sampler2D u_detailMap;  // r contact shade, g firelight, b light height (envmap.cpp, ~1.2 m texels)
 vec3 g_fireLight = vec3(0.0);   // baked lamp/campfire light at the shaded point, added in lambert()
 vec3 g_lanternC = vec3(0.0), g_lanternL = vec3(0.0, 1.0, 0.0);  // hand lantern light at the shaded point (colour, direction to it)
+vec3 g_wpos = vec3(0.0);   // shaded point, kept for lambert() (canopy dapples)
+// v0.9.89: a closed canopy. Where little sky is visible the crowns overhead take almost all the sun; what gets
+// through lands as small moving dapples (light through leaf gaps), so the forest floor reads as shade with spots
+float canopyDapple(vec3 wp, float envVis){
+  float cover = smoothstep(0.3, 0.75, 1.0 - envVis);
+  cover *= 1.0 - smoothstep(5.0, 12.0, wp.y - envGround(envAt(wp.xz)));   // only below the crowns: the canopy top stays sunlit
+  if (cover < 0.001) return 1.0;
+  vec2 q = wp.xz * 0.85 + wp.y * 0.25 + u_windDir * sin(u_clock * 0.7) * 0.15;
+  vec2 i = floor(q), f = fract(q); f = f * f * (3.0 - 2.0 * f);
+  float a = fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5453), b = fract(sin(dot(i + vec2(1, 0), vec2(127.1, 311.7))) * 43758.5453);
+  float c = fract(sin(dot(i + vec2(0, 1), vec2(127.1, 311.7))) * 43758.5453), d = fract(sin(dot(i + vec2(1, 1), vec2(127.1, 311.7))) * 43758.5453);
+  float nz = mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+  return mix(1.0, 0.08 + 0.92 * smoothstep(0.68, 0.82, nz), cover);
+}
 float envLight(vec3 wp){
+  g_wpos = wp;
   vec4 e = envAt(wp.xz);
   vec4 dm = texture(u_detailMap, envUV(wp.xz));
   float above = wp.y - envGround(e);
@@ -163,16 +179,32 @@ float envLight(vec3 wp){
 vec3 lambert(vec3 albedo, vec3 n, float shadow){
   // sky light: darker under the canopy (forest interiors read dark against bright clearings), and slightly cool
   // where the sun does not reach, so sunlit patches look warm against blue-ish shade
-  vec3 irr = mix(u_hemiGround.rgb, u_hemiSky.rgb, 0.5 * n.y + 0.5) * mix(0.36, 1.0, g_envVis);
-  irr *= mix(vec3(0.8, 0.95, 0.68), vec3(1.0), g_envVis);   // under the canopy the light that reaches you came through leaves: green-tinted
-  irr *= mix(vec3(0.9, 0.97, 1.1), vec3(1.0), shadow);
+  vec3 irr = mix(u_hemiGround.rgb, u_hemiSky.rgb, 0.5 * n.y + 0.5) * mix(0.3, 1.0, g_envVis);   // v0.9.88: deep forest shade is darker (was 0.42)
+  irr *= mix(vec3(0.66, 0.96, 0.5), vec3(1.0), g_envVis);   // ...and greener the deeper you go (light filtered through more leaves)   // under the canopy the light that reaches you came through leaves: green-tinted (v0.9.85: greener)
+  irr *= mix(vec3(0.94, 1.0, 1.0), vec3(1.0), shadow);       // shade green-grey, not blue (was 0.9, 0.97, 1.1)
   irr += g_fireLight;
   irr += g_lanternC * (0.3 + 0.7 * max(dot(n, g_lanternL), 0.0));
-  irr += u_sunCol.rgb * max(dot(n, u_sunDir.xyz), 0.0) * shadow;
+#if !defined(CAPTURE)
+  shadow *= canopyDapple(g_wpos, g_envVis);
+#endif
+  vec3 sunC = mix(u_sunCol.rgb, vec3(dot(u_sunCol.rgb, vec3(0.3333))), 0.2);   // v0.9.89: whiter sunlight
+  irr += sunC * max(dot(n, u_sunDir.xyz), 0.0) * shadow;
   return albedo * irr * (1.0 / PI);
 }
 vec3 outColor(vec3 lit){
   vec3 a = aces(lit);
+  {  // v0.9.85 grade: a little less contrast, soft highlights, muted blues (film-like, not "game green")
+    a = a * 0.94 + 0.01;
+    a -= max(a - 0.78, 0.0) * 0.35;
+    float L = dot(a, vec3(0.2126, 0.7152, 0.0722));
+    float blue = smoothstep(0.0, 0.12, a.b - max(a.r, a.g));
+    a = mix(a, vec3(L), blue * 0.4);   // v0.9.89: paler, hazier sky (was 0.25)
+    // v0.9.89 palette: greens and yellow-greens muted and deeper (no lime grass), as in a real summer forest
+    float grn = smoothstep(0.0, 0.08, a.g - a.b) * smoothstep(-0.05, 0.05, a.g - a.r * 0.9);
+    a = mix(a, vec3(L), grn * 0.22);
+    a *= mix(1.0, 0.86, grn);
+    a.r = mix(a.r, a.r * 0.9, grn * smoothstep(0.0, 0.1, a.r - a.b));   // take the yellow out of sunlit grass
+  }
 #if 0  // colour grade removed: ungraded tone mapping reads more natural
   // cinematic grade: richer colour, warm highlights / cool shadows at low sun
   float L = dot(a, vec3(0.2126, 0.7152, 0.0722));
@@ -239,6 +271,7 @@ vec3 fogTint(vec3 wp){
   vec3 base = mix(u_fogCol.rgb, u_fogCol.rgb * vec3(0.66, 0.86, 1.25) + vec3(0.0, 0.02, 0.07), far);
   base = mix(base, min(base * 1.12 + vec3(0.025), vec3(1.0)), u_daylight);  // daylight haze is luminous, not grey
   base = mix(base, vec3(dot(base, vec3(0.3, 0.59, 0.11))) * vec3(1.07, 1.05, 0.98) + vec3(0.03), 0.16 * u_daylight * (1.0 - far));  // near haze is soft sunlit white, distant layers stay blue
+  base = mix(base, base * vec3(0.78, 0.95, 0.74) + vec3(0.0, 0.012, 0.0), u_forestIn * 0.7 * (1.0 - far));   // v0.9.88: haze between the trees is green-grey
   return mix(base, warm, k);
 }
 float valleyMist(vec3 wp, float depth){
@@ -265,7 +298,9 @@ float fogGround(vec3 wp, float depth){
     float tod = mix(0.45, 1.0, 1.0 - smoothstep(0.35, 0.8, u_daylight)) + u_rain * 0.6;
     vf = low * bank * tod * smoothstep(3.0, 70.0, depth) * 0.42;
   }
-  return max(max(max(max(max(nf, smoothstep(180.0, 2300.0, depth) * 0.84), valleyMist(wp, depth)), layer), hazeAmt(wp, depth)), vf);
+  // v0.9.88: in the woods, a soft haze hangs between the trunks: near trees crisp, the ones behind them fade into depth
+  float fh = u_forestIn * u_daylight * smoothstep(6.0, 70.0, depth) * 0.38;
+  return max(max(max(max(max(max(nf, smoothstep(180.0, 2300.0, depth) * 0.84), valleyMist(wp, depth)), layer), hazeAmt(wp, depth)), vf), fh);
 }
 uniform sampler2DShadow u_shadowMap;
 uniform sampler2DShadow u_shadowPrev;
@@ -503,8 +538,15 @@ v_ao = 1.0;
   col *= srgbToLinear(a_itint.rgb);
 #endif
 #endif
-#if defined(INST_LITE) && (defined(K_BARK) || defined(K_ROCK))
-  col *= mix(0.55, 1.0, smoothstep(0.0, 0.9, a_pos.y * s));  // contact darkening where it meets the ground
+#if (defined(K_BARK) || defined(K_ROCK) || defined(K_LEAF)) && !defined(CAPTURE)
+  {  // v0.9.88 contact darkening where things meet the ground: trunk bases, rock feet, the dark heart of a bush
+    float hy = (M * vec4(a_pos, 1.0)).y - sO.y;
+#if defined(K_LEAF)
+    col *= mix(0.5, 1.0, smoothstep(0.0, 0.7, hy));
+#else
+    col *= mix(0.38, 1.0, smoothstep(0.0, 1.5, hy));
+#endif
+  }
 #endif
   v_col = vec4(col, a_col.a);
 #ifdef VF_GLB
@@ -538,6 +580,9 @@ vec3 seasonColor(vec3 sc, vec3 wp, float ny, float seed){
   // every leaf cluster a slightly different green: fresh yellow-green to deep green, like real canopies
   float hv = fract(seed * 7.31 + floor(wp.y * 0.7) * 0.13);
   sc *= mix(vec3(0.86, 0.96, 0.82), vec3(1.16, 1.14, 0.78), hv) * mix(1.0, 1.08, u_daylight);
+#ifndef CAPTURE
+  sc *= mix(0.84, 1.14, seed) * vec3(1.0 + 0.14 * (fract(seed * 7.31) - 0.5), 1.0, 1.0 - 0.2 * (fract(seed * 3.17) - 0.5));   // v0.9.85: each tree its own green
+#endif
   float sL = mix(0.85, clamp(dot(sc, vec3(0.3, 0.59, 0.11)) * 3.2, 0.35, 1.25), 0.75);
   float sNear = 1.0 - smoothstep(8.0, 20.0, distance(wp, u_camPos));   // per-tree season colours settle before the hand-over to pictures (22 m+)
 #ifdef CAPTURE
@@ -841,7 +886,10 @@ void main(){
   if (wetK > 0.01) {
     vec3 Vw = normalize(u_camPos - v_wpos);
     float gl = pow(max(dot(reflect(-u_sunDir.xyz, n), Vw), 0.0), 48.0);
-    lit += (u_sunCol.rgb * gl * 0.5 * sh + u_hemiSky.rgb * (0.05 + 0.3 * pow(1.0 - max(dot(n, Vw), 0.0), 3.0))) * wetK;  // wet gloss: the grey sky mirrored at grazing angles
+    // v0.9.90: much softer, and faded with distance: the full-strength sky sheen turned pale bark (birch) into glowing
+    // white columns in the rain, and the sharp highlight flickered on the bark grain
+    float wd = 1.0 - smoothstep(15.0, 40.0, v_depth);
+    lit += (u_sunCol.rgb * gl * 0.25 * sh * wd + u_hemiSky.rgb * (0.01 + 0.1 * pow(1.0 - max(dot(n, Vw), 0.0), 3.0)) * min(1.0, 1.4 - dot(sc, vec3(0.6)))) * wetK;
   }
 #endif
 #if defined(CUTOUT) && !defined(CAPTURE)

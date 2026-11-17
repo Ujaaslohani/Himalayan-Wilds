@@ -92,10 +92,7 @@ The game autosaves to `%APPDATA%\HimalayanWilds\save.json` on Windows and `~/.lo
 
 ## Credits
 
-- "Cliff Shrub For Terrain" (https://skfb.ly/o7uQ6) by Natural_Disbuster, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/) -> assets/models/Bush.glb
-- "nettle leaves" (https://skfb.ly/oRRZL) by Lin-yan, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/) -> assets/models/Nettle Leaves.glb
 - "Medieval Houses Asset" (https://skfb.ly/oHnzY) and "Medieval Market Stall Asset 4/4" (https://skfb.ly/oHnC8) by Uğur Yakışık, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/) -> assets/buildings/*.hwb (changes: assets/buildings/LICENSE-Sketchfab.txt)
 - "Jalapeno Plant" (https://skfb.ly/69PBy) by zvanstone, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/) -> assets/models/Jalapeno.glb
-- "Blueberry" (https://skfb.ly/6uowU) by rufusrockwell, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/) -> assets/models/Blueberry.glb
 - Animal models: see assets/animals/LICENSE-Sketchfab.txt
 - Model changes: see assets/models/LICENSE-Sketchfab.txt

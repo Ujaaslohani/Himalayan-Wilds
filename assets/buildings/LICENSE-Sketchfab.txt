@@ -5,4 +5,4 @@ The village buildings (*.hwb) are converted from two models by Uğur Yakışık:
 
 Changes: textures baked to one colour per triangle, ground planes and forge props removed, small props decimated,
 rescaled to the game's building footprints, walls/roof/wood recoloured by the player's style choices,
-houses combined into the family house and community hall; the stall frame is reused for the animal shelter.
+two houses combined into the family house; the market stall is 25% lower; the stall frame is reused for the animal shelter.

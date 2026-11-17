@@ -92,12 +92,13 @@ const float TREE_W[B_COUNT][8] = {      // oak, maple, birch, cedar, rhododendro
     {0.06f, 0.05f, 0.30f, 0.10f, 0, 0.12f, 0.27f, 0.10f},      // snow line: birch and (tall) cedar, some hardy oak/maple
     {0.14f, 0.10f, 0, 0, 0.10f, 0.34f, 0, 0.32f},              // fern forest: tall oak and maple dominate
     {0.16f, 0.12f, 0.06f, 0, 0.10f, 0.30f, 0, 0.26f}};         // meadow copses
-const float UNDER_W[B_COUNT][10] = {    // fern, bush (cliff shrub), flowering bush, daisies, violets, poppy, lupin, nettle leaves, jalapeno, blueberry
-    {0.25f, 0.20f, 0, 0.025f, 0.025f, 0.05f, 0, 0.20f, 0.10f, 0.15f},   // v0.9.77: ferns 0.45 -> 0.25
-    {0, 0.50f, 0, 0.10f, 0.10f, 0.20f, 0, 0.05f, 0, 0.05f},
-    {0, 0.90f, 0, 0, 0, 0, 0, 0.10f, 0, 0},
-    {0.32f, 0, 0, 0, 0, 0, 0.08f, 0.30f, 0.12f, 0.18f},
-    {0, 0, 0.10f, 0.12f, 0.12f, 0.08f, 0.50f, 0, 0.03f, 0.05f}};        // daisies = violets
+const float UNDER_W[B_COUNT][14] = {    // fern, bush, flowering bush, daisies, violets, poppy, lupin, jalapeno,
+                                         // leafy bush A/B, leafy herb A/B, leafy clump A/B (v0.9.84: nettle removed)
+    {0.367f, 0.12f, 0, 0.025f, 0.025f, 0.05f, 0, 0.1f, 0.06f, 0.06f, 0.05f, 0.05f, 0.047f, 0.046f},
+    {0, 0.35f, 0, 0.1f, 0.1f, 0.2f, 0, 0, 0.05f, 0.05f, 0, 0, 0.075f, 0.075f},
+    {0, 1.0f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0.475f, 0.06f, 0, 0, 0, 0, 0.08f, 0.12f, 0.045f, 0.045f, 0.045f, 0.045f, 0.043f, 0.042f},
+    {0, 0, 0.1f, 0.12f, 0.12f, 0.08f, 0.55f, 0.03f, 0, 0, 0, 0, 0, 0}};
 const float ROCK_W[B_COUNT][7] = {      // medium, slab, jagged, boulder, stump, broken stump, log
     {0.28f, 0.11f, 0.06f, 0.43f, 0.03f, 0.03f, 0.06f},
     {0.20f, 0.35f, 0.35f, 0.10f, 0, 0, 0},
@@ -135,7 +136,8 @@ float treeHeightShift(const std::string& file, float scl) {
   static const std::pair<const char*, float> BASE[] = {{"ptree:oak-tall", 19.1f}, {"ptree:maple-tall", 21.0f}, {"ptree:Pine-cedar-tall", 26.2f}, {"ptree:oak", 12.2f},
                                                        {"ptree:maple", 14.9f}, {"ptree:birch", 15.6f}, {"ptree:Pine-cedar", 19.4f}, {"ptree:rhodo", 11.6f}};
   float base = 0;
-  for (auto& b : BASE) if (file == b.first) { base = b.second; break; }
+  const std::string key = file.size() > 3 && file.compare(file.size() - 3, 3, "-v2") == 0 ? file.substr(0, file.size() - 3) : file;   // second shapes share their species' heights
+  for (auto& b : BASE) if (key == b.first) { base = b.second; break; }
   if (base <= 0) return scl;
   float h = base * scl;
   // rank of this height in the old mix (0..1)
@@ -209,7 +211,7 @@ const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
   for (int sx = 0; sx < n; sx++)
     for (int sz = 0; sz < n; sz++) {
       float jx = rng.next(), jz = rng.next(), roll = rng.next(), pick = rng.next(), rot = rng.next(), sc = rng.next(), keep = rng.next();
-      if (layer == L_TREE) { jx = 0.3f + 0.4f * jx; jz = 0.3f + 0.4f * jz; }   // trees keep to the middle of their slot: >= 3.2 m between trunks
+      if (layer == L_TREE) { jx = 0.375f + 0.25f * jx; jz = 0.375f + 0.25f * jz; }   // trees keep to the middle of their slot: >= 4 m between trunks
       float x = cx * CELL + (sx + jx) * slot;
       float z = cz * CELL + (sz + jz) * slot;
       if (std::fabs(x) > MAP_HALF - 3 || std::fabs(z) > MAP_HALF - 3) continue;
@@ -229,7 +231,7 @@ const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
       if (roll > ch) {
         if (ch <= 0 || layer == L_GRASS || layer == L_UNDER) continue;
         float fd = world::forestDensity(x, z);
-        if (layer == L_TREE && !noMid && fd > 0.3f && keep < 0.7f && roll < ch + 0.035f * fd) spare = true;
+        if (layer == L_TREE && !noMid && fd > 0.3f && keep < 0.7f && roll < ch + 0.08f * fd) spare = true;   // v0.9.85: more saplings (was 0.035): a real middle storey
         else if (layer == L_ROCK && fd > 0.35f && world::slopeAt(x, z) < 0.6f && roll < ch + 0.05f * fd) spare = true;   // deadwood slots (was 0.12: halved again in v0.9.76)
         else continue;
       }
@@ -237,7 +239,8 @@ const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
       size_t fi = 0;
       if (biome >= 0 && layer != L_GRASS) {
         const float* W = layer == L_TREE ? TREE_W[biome] : layer == L_UNDER ? UNDER_W[biome] : ROCK_W[biome];
-        for (; fi < L.files.size() - 1; fi++) {   // rows sum to 1
+        const size_t nW = layer == L_TREE ? 8 : L.files.size();   // tree rows weigh the 8 base files; the -v2 shapes are swapped in below
+        for (; fi < nW - 1; fi++) {   // rows sum to 1
           acc += W[fi];
           if (pick < acc) break;
         }
@@ -249,6 +252,10 @@ const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
         }
       }
       float scl = L.scaleLo + sc * (L.scaleHi - L.scaleLo);
+      if (layer == L_TREE && fi < 8 && std::fmod(pick * 31.7f + sc * 3.3f, 1.0f) < 0.5f) {   // v0.9.85: half of each main species uses its second shape
+        static const int V2[8] = {8, 9, 10, 11, -1, 12, -1, 13};
+        if (V2[fi] >= 0 && (size_t)V2[fi] < L.files.size()) fi = (size_t)V2[fi];
+      }
       if (layer == L_ROCK && L.files[fi].first.rfind("Rock", 0) != 0 && std::fmod(pick * 7.31f, 1.0f) < 0.5f) continue;   // half the stumps and logs again (v0.9.76)
       if (layer == L_ROCK && L.files[fi].first.rfind("Rock", 0) != 0) {  // stumps and logs only where trees grow
         if (world::forestDensity(x, z) < 0.3f || world::slopeAt(x, z) > 0.6f) fi = (size_t)(pick * 4) % 4;
@@ -267,7 +274,7 @@ const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
       }
       if (layer == L_TREE && spare) {
         scl = 0.28f + 0.2f * sc;          // saplings and young trees (4-8 m): the forest's middle storey
-        if (pick < 0.6f) fi = 4;          // mostly bushy rhododendron: young broadleaves read as sticks at this size
+        if (pick < 0.4f) fi = 4;          // bushy rhododendron, the rest young oak/maple/birch (v0.9.85: was 60% rhododendron)
         else if (L.files[fi].first.find("Pine") != std::string::npos) fi = 2;   // no pine saplings: they render as dark cones
       } else if (layer == L_TREE) {
         scl *= 0.9f + 0.25f * (sc * sc);  // a few giants among the ordinary trees
@@ -284,7 +291,12 @@ const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
         y = world::getTerrainHeight(x, z);
       }
       if (layer == L_UNDER && L.files[fi].first.rfind("Flower", 0) == 0) scl *= 1.6f;
-      if (layer == L_UNDER && (L.files[fi].first.rfind("Nettle", 0) == 0 || L.files[fi].first.rfind("Jalapeno", 0) == 0 || L.files[fi].first.rfind("Blueberry", 0) == 0)) scl = 0.92f + 0.16f * sc;   // nettle 0.9 m, jalapeno 1.6 m, blueberry 1.2 m: kept above the grass   // flower clumps: big enough to read in the grass
+      if (layer == L_UNDER && L.files[fi].first.rfind("Lupin", 0) == 0) scl *= 1.4f;   // v0.9.79: lupin 0.6-1.2 m
+      if (layer == L_UNDER && (L.files[fi].first.rfind("Jalapeno", 0) == 0 || L.files[fi].first.rfind("Leafy", 0) == 0)) {
+        float fdn = world::forestDensity(x, z);   // these three belong to the woods: rare outside them
+        if (fdn < 0.35f && std::fmod(pick * 13.7f, 1.0f) < 0.85f * (1.0f - fdn / 0.35f)) continue;
+      }
+      if (layer == L_UNDER && (L.files[fi].first.rfind("Jalapeno", 0) == 0 || L.files[fi].first.rfind("Leafy", 0) == 0)) scl = 0.92f + 0.16f * sc;   // nettle 0.9 m, jalapeno 1.6 m, blueberry 1.2 m: kept above the grass   // flower clumps: big enough to read in the grass
       if (layer == L_UNDER) {
         // in the woods, bushes and big plants grow into a 1.5-3 m shrub layer (the gap between grass and canopy)
         const std::string& f = L.files[fi].first;
@@ -463,12 +475,12 @@ void defineLayers() {
                     },
                     0.75f, 1.2f, [] { return g_settings.fullMap ? 140.0f : g_settings.grassRadius; }, 12, 0.2f, 0.45f});
   LAYERS.push_back({L_UNDER, 202,
-                    {{"Fern.glb", 0.12f}, {"Bush.glb", 0.1f}, {"Bush with Flowers.glb", 0.08f},
+                    {{"Fern.glb", 0.12f}, {"Bush.glb", 0.03f}, {"Bush with Flowers.glb", 0.08f},
                      {"Flower Group.glb", 0.1f}, {"Flower Group-LqTljN6Wg2.glb", 0.05f}, {"Flower Single.glb", 0.07f},
-                     {"Lupin.glb", 0.0f}, {"Nettle Leaves.glb", 0.12f}, {"Jalapeno.glb", 0.07f}, {"Blueberry.glb", 0.09f}},   // weight 0: only the outer meadows grow it (keeps every plant of the first valley where it was)
+                     {"Lupin.glb", 0.0f}, {"Jalapeno.glb", 0.07f}, {"Leafy Bush A.glb", 0.03f}, {"Leafy Bush B.glb", 0.03f}, {"Leafy Herb A.glb", 0.025f}, {"Leafy Herb B.glb", 0.025f}, {"Leafy Clump A.glb", 0.025f}, {"Leafy Clump B.glb", 0.025f}},   // weight 0: only the outer meadows grow it (keeps every plant of the first valley where it was)
                     5,
                     [](float x, float z, float h) -> float {
-                      if (h < -0.5f || h > 88 || world::pathDistance(x, z) < 2 || world::nearRoute(x, z) < 3.6f || hypot2(x, z) < SETTLEMENT_RADIUS || world::slopeAt(x, z) > 0.8f) return 0;
+                      if (h < -0.5f || h > 88 || world::pathDistance(x, z) < 3.0f || world::nearRoute(x, z) < 4.2f || hypot2(x, z) < SETTLEMENT_RADIUS || world::slopeAt(x, z) > 0.8f) return 0;
                       if (world::riverMask(x, z) > 0.3f || world::lakeAt(x, z, 1) >= 0) return 0;
                       return 0.3f + 0.85f * world::forestDensity(x, z);
                     },
@@ -477,7 +489,7 @@ void defineLayers() {
                     [](float x, float z, float h) -> float {
                       if (h < -0.8f || hypot2(x, z) < 14) return 0;
                       float pd = world::pathDistance(x, z), nr = world::nearRoute(x, z);
-                      if (pd < 3.5f || nr < 5.5f) return trailEdge(x, z) ? 0.75f : 0.0f;   // small stones lining paths
+                      if (pd < 3.5f || nr < 5.5f) return 0.0f;   // v0.9.79: nothing on or at the edge of paths/roads
                       for (const Shrine& sh : world::SHRINES) if (hypot2(x - sh.x, z - sh.z) < COURT + 10) return 0;
                       if (world::lakeAt(x, z, 1) >= 0) return 0;
                       float sl = world::slopeAt(x, z);
@@ -486,8 +498,9 @@ void defineLayers() {
                     },
                     0.25f, 1.9f, [] { return std::min(HAZE_CULL, g_settings.rockRadius * g_settings.drawDist()); }, 70, 0.6f, -1});
   LAYERS.push_back({L_TREE, 404,
-                    {{"ptree:oak", 0.12f}, {"ptree:maple", 0.10f}, {"ptree:birch", 0.10f}, {"ptree:Pine-cedar", 0.12f}, {"ptree:rhodo", 0.08f},
-                     {"ptree:oak-tall", 0.18f}, {"ptree:Pine-cedar-tall", 0.12f}, {"ptree:maple-tall", 0.18f}},  // tall variants stand among the usual heights
+                    {{"ptree:oak", 0.19f}, {"ptree:maple", 0.16f}, {"ptree:birch", 0.12f}, {"ptree:Pine-cedar", 0.18f}, {"ptree:rhodo", 0.10f},
+                     {"ptree:oak-tall", 0.08f}, {"ptree:Pine-cedar-tall", 0.06f}, {"ptree:maple-tall", 0.08f},
+                     {"ptree:oak-v2", 0.0f}, {"ptree:maple-v2", 0.0f}, {"ptree:birch-v2", 0.0f}, {"ptree:Pine-cedar-v2", 0.0f}, {"ptree:oak-tall-v2", 0.0f}, {"ptree:maple-tall-v2", 0.0f}},  // tall variants stand among the usual heights
                     3,
                     [](float x, float z, float h) -> float {
                       if (h < -0.3f || h > 84 || world::slopeAt(x, z) > 0.85f || world::nearRoute(x, z) < 4.5f) return 0;
@@ -572,7 +585,7 @@ float effScale() { return std::min(g_settings.detailScale, g_budgetScale.load())
 float midNearS(float ds) {
   static const float force = std::getenv("HW_MIDNEAR") ? (float)std::atof(std::getenv("HW_MIDNEAR")) : 0.0f;  // A/B test
   if (force > 0) return force;
-  return clampf(4.0f * g_settings.drawDist(), 9, 12) * (0.6f + 0.4f * ds);
+  return clampf(4.0f * g_settings.drawDist(), 9, 12) * (0.6f + 0.4f * ds);   // v0.9.80: back to 9-12 m
 }  // single-leaf trees only within ~12 m; leaf-cluster cards beyond (Far Cry-style)
 // the 3D/picture switch hardly moves with detail any more (0.85..1x): a ring that slides in and out with the automatic
 // detail made trees visibly swap while the player stood still. Detail now mostly trims the single-leaf radius.
@@ -581,11 +594,11 @@ float impostorNearS(float ds) {
   if (force > 0) return force;
   // trees stay real geometry (the light mid version, ~2-3k triangles) out to ~40-45 m; pictures only take over
   // once a tree is small on screen, where the difference no longer reads. (Was ~24 m: a 250 px tall tree swapped.)
-  return clampf(35 * g_settings.drawDist(), 70.6f, 120) * (0.85f + 0.15f * ds) * 0.78f;   // ~55 m (0.9.59: was ~60, ~15% fewer 3D trees)
+  return clampf(35 * g_settings.drawDist(), 70.6f, 120) * (0.85f + 0.15f * ds) * 0.62f;   // v0.9.79: ~44 m (was ~55)  // ~55 m (0.9.59: was ~60, ~15% fewer 3D trees)
 }
 float midNear() { return midNearS(effScale()); }
 float impostorNear() { return impostorNearS(effScale()); }
-float canopyNear() { return std::min(HAZE_CULL - CANOPY_BAND, clampf(60 * g_settings.drawDist(), 110, 180)) * (1.0f - 0.25f * sky::rainAmount()); }  // 0.9.54: merged crowns take over at ~120 m (were ~280 m), billboards only 60-120 m  // rain: far canopy ends sooner (hidden in the fog)
+float canopyNear() { return std::min(HAZE_CULL - CANOPY_BAND, clampf(78 * g_settings.drawDist(), 145, 235)) * (1.0f - 0.25f * sky::rainAmount()); }  // 0.9.54: merged crowns take over at ~120 m (were ~280 m), billboards only 60-120 m  // rain: far canopy ends sooner (hidden in the fog)
 float impostorOuter() { return canopyNear() + CANOPY_BAND; }
 
 struct LodCfg { float mid, imp, outer; bool canopy; };
@@ -1216,7 +1229,7 @@ layout(location=6) in vec4 a_i0;
 layout(location=7) in float a_i1;
 uniform vec4 u_cell;
 uniform vec4 u_range;
-uniform vec2 u_crop[32];   // per tree type: card trimmed to the part the picture fills (fewer empty pixels shaded)
+uniform vec2 u_crop[40];   // per tree type: card trimmed to the part the picture fills (fewer empty pixels shaded)
 out vec2 v_uv0;
 out vec2 v_uv1;
 out float v_blend;
@@ -1226,7 +1239,7 @@ out float v_depth;
 out vec2 v_fade;
 out vec3 v_q;  // quad x (-0.5..0.5), height (0..1), per-tree variation
 flat out float v_bl;  // this tree type blossoms in spring (broadleaf)
-uniform float u_rowBloom[32];
+uniform float u_rowBloom[40];
 out float v_rad;  // crown radius in metres: lets the flat card be lit and shadowed as the rounded volume it stands for
 void main(){
   float row0 = floor(a_i1 / 6.2831853);
@@ -1328,7 +1341,7 @@ void main(){
   vec3 alb = t.rgb * t.rgb * (1.0 + leafy * 0.45);
   // per-tree tint and brightness (no two cards print the same), darker toward the trunk and lower crown
   float var = v_q.z;
-  alb *= mix(0.9, 1.1, var) * vec3(1.0 + 0.08 * (fract(var * 7.31) - 0.5), 1.0, 1.0 - 0.12 * (fract(var * 3.17) - 0.5));
+  alb *= mix(0.84, 1.14, var) * vec3(1.0 + 0.14 * (fract(var * 7.31) - 0.5), 1.0, 1.0 - 0.2 * (fract(var * 3.17) - 0.5));   // v0.9.85: same per-tree tint as the 3D leaves
   alb *= mix(0.8, 1.04, smoothstep(0.05, 0.75, v_q.y));
   {  // spring blossom per tree, same trees and same pink as the 3D leaves (seasonColor) and the far crowns
     float lSpr = clamp(u_spring * 1.5 - smoothstep(10.0, 160.0, v_wpos.y) * 0.5, 0.0, 1.0);
@@ -1356,7 +1369,7 @@ layout(location=0) in vec3 a_pos;
 layout(location=6) in vec4 a_i0;
 layout(location=7) in float a_i1;
 uniform vec4 u_range;
-uniform vec4 u_oct[32];  // per type: sphere centre above base, radius, 1 / impostor width, unused
+uniform vec4 u_oct[40];  // per type: sphere centre above base, radius, 1 / impostor width, unused
 out vec4 v_f0, v_f1, v_f2;  // per captured view: uv in its cell, cell index
 out vec3 v_w;
 flat out float v_layer;
@@ -1366,6 +1379,7 @@ out vec3 v_toCam;
 flat out float v_R;
 out float v_depth;
 out vec2 v_fade;
+flat out float v_var;
 const float K = 8.0;
 vec3 octDir(vec2 c){ vec2 p = c / (K - 1.0) * 2.0 - 1.0; vec3 d = vec3((p.x + p.y) * 0.5, 0.0, (p.x - p.y) * 0.5); d.y = 1.0 - abs(d.x) - abs(d.z); return normalize(d); }
 vec4 frameUV(vec2 c, vec3 camL, vec3 PL, float R){
@@ -1407,6 +1421,7 @@ void main(){
   v_f1 = frameUV(c1, camL, PL, R);
   v_f2 = frameUV(c2, camL, PL, R);
   v_layer = row;
+  v_var = fract(floor(a_i0.x * 2.0) * 0.6180339 + floor(a_i0.z * 2.0) * 0.7548777);   // same per-tree key as the 3D leaves (v_seed)
   v_rot = vec2(cy, sy);
   v_wpos = P;
   v_toCam = nrm;
@@ -1419,6 +1434,7 @@ void main(){
 )";
 
 const char* OCT_FS = R"(
+flat in float v_var;
 in vec4 v_f0, v_f1, v_f2;
 in vec3 v_w;
 flat in float v_layer;
@@ -1474,6 +1490,7 @@ void main(){
   shT *= mix(1.0, mix(0.22, 1.0, smoothstep(-0.35, 0.5, dot(n, u_sunDir.xyz))), smoothstep(22.0, 32.0, v_depth));
   n = normalize(mix(n, vec3(0.0, 1.0, 0.0), 0.45));
   vec3 alb = alb0 * alb0;
+  alb *= mix(0.84, 1.14, v_var) * vec3(1.0 + 0.14 * (fract(v_var * 7.31) - 0.5), 1.0, 1.0 - 0.2 * (fract(v_var * 3.17) - 0.5));   // v0.9.85: per-tree tint, same as the 3D leaves
   float sh = mix(mix(0.26, 0.95, shT) * mix(0.75, 1.0, smoothstep(0.08, 0.45, u_sunDir.y)), 0.62, 0.42);
   vec3 lit = lambert(alb, n, sh);
   {
@@ -1532,7 +1549,7 @@ void captureImpostors(int only = -1, bool mips = true, int vFrom = 0, int vTo = 
   if (!g_impFbo) {
     int types = 0;
     for (auto& sp : g_slots) if (sp->layer != L_GRASS && !sp->parts.empty()) types++;
-    g_impRows = std::max(1, std::min(32, types));
+    g_impRows = std::max(1, std::min(40, types));   // v0.9.85: 40 picture rows (35 types now: second tree shapes, leafy plants)
     IMP_ATLAS_H = g_impRows * IMP_CELL_H;
     g_impRowRT = gfx::hasS3TC();
     const int RT_H = g_impRowRT ? IMP_CELL_H : IMP_ATLAS_H;
@@ -1878,6 +1895,8 @@ void main(){
   float tj = fract(sin(v_t * 91.7 + floor(v_wpos.x * 0.25) * 1.3 + floor(v_wpos.z * 0.25) * 7.1) * 4375.5);
   alb *= mix(vec3(0.9, 0.95, 0.88), vec3(1.08, 1.06, 0.96), tj);  // tree-to-tree hue / brightness variety
   alb *= 1.12;
+  alb *= mix(0.84, 1.14, bkey) * vec3(1.0 + 0.14 * (fract(bkey * 7.31) - 0.5), 1.0, 1.0 - 0.2 * (fract(bkey * 3.17) - 0.5));   // v0.9.86: per-tree tint as up close
+  alb *= vec3(0.86, 0.96, 0.84);   // v0.9.86: deeper green far forest (reads as a solid wall, not pale)
   float snowP = smoothstep(0.35, 0.75, fract(sin(dot(floor(v_wpos.xz * 0.6), vec2(17.1, 93.7))) * 3758.5));
   alb = mix(alb, vec3(0.8, 0.83, 0.88), u_snow * smoothstep(0.55, 0.95, n.y) * mix(0.15, 0.45, snowP) * (1.0 - 0.5 * pine));
   alb *= (0.62 + 0.3 * n1);
@@ -1927,7 +1946,7 @@ void buildCanopy() {
       for (const Item& it : getCell(tmp, L_TREE, cx, cz)) {
         if (it.file >= slots.size() || !slots[it.file] || blocked(it.x, it.z)) continue;
         int ti = std::max(0, std::min(NT - 1, (int)((it.x + MAP_HALF) / TS))), tj = std::max(0, std::min(NT - 1, (int)((it.z + MAP_HALF) / TS)));
-        float h = slotH[it.file] * it.scale, r = std::max(1.6f, slotR[it.file] * it.scale * 0.95f);
+        float h = slotH[it.file] * it.scale, r = std::max(1.8f, slotR[it.file] * it.scale * 1.12f);   // v0.9.86: fuller far crowns (was 0.95): the far forest closes up
         tiles[(size_t)tj * NT + ti].push_back({it.x, it.z, world::getTerrainHeight(it.x, it.z), h, r, (uint8_t)(slotPine[it.file] ? 1 : 0), (uint8_t)it.file, it.rot});
         ntree++;
       }
@@ -2164,6 +2183,7 @@ void update(const Vec3& cam, const Vec3& fwd) {
   static bool s_maskSeen = false;   // the stony-ground mask arrived: rebuild so grass thins around the rocks
   if (!s_maskSeen && g_rockMaskReady.load(std::memory_order_acquire)) { s_maskSeen = true; g_dirty = true; }
   static unsigned recapAt = 0;
+  if (g_jumped && g_impSig >= 0 && std::fabs(seasonSig() - g_impSig) <= 0.5f && g_capNext < 0) g_jumped = false;   // same season as the pictures already taken: nothing to redo
   if (g_jumped && g_impSig >= 0) {
     g_jumped = false;
     g_capNext = -1;
@@ -2775,18 +2795,18 @@ void drawOpaque() {
       glBindTexture(GL_TEXTURE_2D_ARRAY, g_octNrmC);
       glActiveTexture(GL_TEXTURE0);
       glBindTexture(GL_TEXTURE_2D_ARRAY, g_octTexC);
-      float o[32 * 4] = {};
+      float o[40 * 4] = {};
       for (auto& sp : g_slots)
-        if (sp->imp >= 0 && sp->imp < 32) { float* q = o + sp->imp * 4; q[0] = sp->octCy; q[1] = sp->octR; q[2] = 1.0f / std::max(1e-3f, sp->impW); }
-      glUniform4fv(sh.loc("u_oct"), 32, o);
+        if (sp->imp >= 0 && sp->imp < 40) { float* q = o + sp->imp * 4; q[0] = sp->octCy; q[1] = sp->octR; q[2] = 1.0f / std::max(1e-3f, sp->impW); }
+      glUniform4fv(sh.loc("u_oct"), 40, o);
     } else {
       sh.set1i("u_atlas", 0);
       sh.set1i("u_nrm", 5);
       {
-        float cr[64];
-        for (int i = 0; i < 32; i++) { cr[i * 2] = 1; cr[i * 2 + 1] = 1; }
-        for (auto& sp : g_slots) if (sp->imp >= 0 && sp->imp < 32) { cr[sp->imp * 2] = sp->cropX; cr[sp->imp * 2 + 1] = sp->cropY; }
-        glUniform2fv(sh.loc("u_crop"), 32, cr);
+        float cr[80];
+        for (int i = 0; i < 40; i++) { cr[i * 2] = 1; cr[i * 2 + 1] = 1; }
+        for (auto& sp : g_slots) if (sp->imp >= 0 && sp->imp < 40) { cr[sp->imp * 2] = sp->cropX; cr[sp->imp * 2 + 1] = sp->cropY; }
+        glUniform2fv(sh.loc("u_crop"), 40, cr);
       }
       glActiveTexture(GL_TEXTURE5);
       glBindTexture(GL_TEXTURE_2D, g_impNrmC ? g_impNrmC : g_impNrm);
@@ -2800,10 +2820,10 @@ void drawOpaque() {
       float ib = render::dbgMode == 2 ? 0.01f : impBand(L) * g_bandK * (1.0f - 0.4f * g_denseMove), i0 = render::dbgMode == 2 ? lc.imp + impBand(L) * 0.5f : lc.imp;
       sh.set1i("u_dbg", render::dbgMode);
       {
-        float bloom[32] = {};
+        float bloom[40] = {};
         for (auto& sp : g_slots)
-          if (sp && sp->layer == L_TREE && sp->imp >= 0 && sp->imp < 32 && sp->file.find("Pine") == std::string::npos && sp->file.find("Dead") == std::string::npos) bloom[sp->imp] = 1;
-        glUniform1fv(sh.loc("u_rowBloom"), 32, bloom);
+          if (sp && sp->layer == L_TREE && sp->imp >= 0 && sp->imp < 40 && sp->file.find("Pine") == std::string::npos && sp->file.find("Dead") == std::string::npos) bloom[sp->imp] = 1;
+        glUniform1fv(sh.loc("u_rowBloom"), 40, bloom);
       }
       {
         static float g[3] = {1.75f, 1.9f, 1.15f};

@@ -1,15 +1,7 @@
-Bush.glb is converted from "Cliff Shrub For Terrain" (https://skfb.ly/o7uQ6) by Natural_Disbuster,
-licensed under Creative Commons Attribution 4.0 (http://creativecommons.org/licenses/by/4.0/).
-Changes: node transforms baked, rescaled to 1.25 m, texture resized to 512x512.
-
-Nettle Leaves.glb is converted from "nettle leaves" (https://skfb.ly/oRRZL) by Lin-yan,
-licensed under Creative Commons Attribution 4.0 (http://creativecommons.org/licenses/by/4.0/).
-Changes: each leaf reduced to a single quad (6,111 -> 534 triangles), rescaled to 1.5 m wide and stretched to 0.9 m tall, texture resized to 512x512, alpha blend changed to alpha cutout.
-
 Jalapeno.glb is converted from "Jalapeno Plant" (https://skfb.ly/69PBy) by zvanstone,
 licensed under Creative Commons Attribution 4.0 (http://creativecommons.org/licenses/by/4.0/).
-Changes: stem thickened 2.2x, each leaf reduced to a single quad (2,033 -> 202 triangles), rescaled to 1.6 m, texture resized to 512x512.
+Changes: stem thickened 2.2x, each leaf reduced to a single quad (2,033 -> 202 triangles), rescaled to 1.6 m, texture lightened (greener) and resized to 512x512.
 
-Blueberry.glb is converted from "Blueberry" (https://skfb.ly/6uowU) by rufusrockwell,
-licensed under Creative Commons Attribution 4.0 (http://creativecommons.org/licenses/by/4.0/).
-Changes: each leaf reduced to a single quad (2,267 -> 424 triangles), rescaled to 1.2 m, texture brightened 30% and resized to 512x512.
+Leafy Bush A/B, Leafy Herb A/B and Leafy Clump A/B.glb are new plants assembled from the leaves of
+"Jalapeno Plant" (https://skfb.ly/69PBy) by zvanstone, licensed under Creative Commons Attribution 4.0
+(http://creativecommons.org/licenses/by/4.0/): leaf cards and texture (lightened) taken from that model, arranged on new stems.

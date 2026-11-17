@@ -402,6 +402,8 @@ void resolveStructureCollision(float& px, float& pz, float radius) {
   if (px < bx0 - 10 || px > bx1 + 10 || pz < bz0 - 10 || pz > bz1 + 10) return;
   for (auto& s : A.structures) {
     const float* b = BOX[s.kind];
+    float mb[4];
+    if (modelBox(s.kind, mb)) b = mb;   // v0.9.87: baked homes collide with their real walls (you could walk into them)
     if (b[1] - b[0] < 0.01f) continue;
     float dx = px - s.x, dz = pz - s.z;
     if (dx * dx + dz * dz > 100) continue;

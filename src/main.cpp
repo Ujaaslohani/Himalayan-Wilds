@@ -1836,7 +1836,9 @@ void main(){
         static float over = 0, under = 0;
         // trim detail only when the GPU is what holds the frame back: a hot laptop throttles its CPU (every CPU timer
         // goes up together) and cutting trees then only made the picture worse without getting the fps back
-        bool gpuLimits = fs.gpuMs > budget * 0.85f || (fs.fps < target * 0.9f && fs.gpuMs >= fs.cpuMs);
+        // v0.9.81: a missed frame only counts when the GPU really is busy (>70% of the frame); before, any fps dip with
+        // GPU 12 ms of a 33 ms frame trimmed detail, and the idle card then clocked down
+        bool gpuLimits = fs.gpuMs > budget * 0.85f || (fs.fps < target * 0.9f && fs.gpuMs >= fs.cpuMs && fs.gpuMs >= budget * 0.7f);
         if (gpuLimits) { over += (float)statT; under = 0; }
         else if (fs.gpuMs < budget * 0.6f && fs.fps > target * 0.97f) { under += (float)statT; over = 0; }
         else over = under = 0;
@@ -1857,7 +1859,7 @@ void main(){
         float budget = 1000.0f / (g_settings.fpsLimit > 0 ? std::min(g_settings.fpsLimit, platform::refreshRate()) : platform::refreshRate());
         if (g_settings.eco) budget *= 0.5f;
         float target = g_settings.fpsLimit > 0 ? std::min((float)g_settings.fpsLimit, (float)platform::refreshRate()) : (float)platform::refreshRate();
-        if (fs.gpuMs > budget * 0.85f || (fs.fps < target * 0.9f && fs.gpuMs >= fs.cpuMs)) dSlow += (float)statT, dFast = 0;  // GPU busy (not a throttled CPU)
+        if (fs.gpuMs > budget * 0.85f || (fs.fps < target * 0.9f && fs.gpuMs >= fs.cpuMs && fs.gpuMs >= budget * 0.7f)) dSlow += (float)statT, dFast = 0;  // GPU busy (not a throttled CPU)
         else if (fs.gpuMs < budget * 0.6f && fs.fps > target * 0.97f) dFast += (float)statT, dSlow = 0;
         else dSlow = dFast = 0;
         float& ds = g_settings.detailScale;

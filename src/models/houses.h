@@ -35,3 +35,4 @@ const BuiltModel& structureModel(StructureKind kind, const Look& L);
 void pruneStructureModels(const std::vector<std::pair<StructureKind, Look>>& keep);
 StructureKind kindFromId(const std::string& id);
 void shutdownHouses();
+bool modelBox(int kind, float b[4]);   // collision box of a baked home (local x0, x1, z0, z1); false = use the fixed box

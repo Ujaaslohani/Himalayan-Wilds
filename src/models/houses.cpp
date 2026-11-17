@@ -359,10 +359,30 @@ bool addModel(Shape& b, std::vector<V>& lights, const char* name, const Look& L,
   for (size_t i = 0; i < h.lights.size() && (int)i < maxLights; i++) lights.push_back(h.lights[(i * h.lights.size()) / std::min<size_t>(h.lights.size(), maxLights)] + off);
   return true;
 }
+// v0.9.87: homes sit on a stone plinth (0.4 m above the lowest ground, 1.6 m deep) so a slope never swallows the walls
+bool addHouseModel(Out& m, const char* name, const Look& L) {
+  const HWB& h = hwb(name);
+  if (!h.ok) return false;
+  const float lift = 0.4f;
+  V c{(h.mn.x + h.mx.x) * 0.5f, 0, (h.mn.z + h.mx.z) * 0.5f};
+  m.s.box("6b6760", {c.x, lift - 0.8f, c.z}, {(h.mx.x - h.mn.x) * 0.84f, 1.6f, (h.mx.z - h.mn.z) * 0.84f});
+  addModel(m.s, m.lights, name, L, {0, lift, 0});
+  m.door = {0, 0, h.mx.z + 1.0f};
+  return true;
+}
+// collision box (local x0, x1, z0, z1) of a baked home; false for kinds that keep their own box
+bool modelBoxImpl(int kind, float b[4]) {
+  const char* n = kind == SK_COTTAGE ? "cottage" : kind == SK_RAISED_HOUSE ? "raised_house" : kind == SK_FAMILY_HOUSE ? "family_house" : nullptr;
+  if (!n) return false;
+  const HWB& h = hwb(n);
+  if (!h.ok) return false;
+  b[0] = h.mn.x * 0.84f; b[1] = h.mx.x * 0.84f; b[2] = h.mn.z * 0.84f; b[3] = h.mx.z * 0.84f;
+  return true;
+}
 V modelFront(const char* name) { const HWB& h = hwb(name); return {0, 0, h.ok ? h.mx.z + 1.0f : 3.0f}; }
 
 Out cottage(const Look& L) {
-  { Out m; if (addModel(m.s, m.lights, "cottage", L)) { m.door = modelFront("cottage"); return m; } }
+  { Out m; if (addHouseModel(m, "cottage", L)) return m; }
   Out o;
   Shape& b = o.s;
   float w = 4.2f, d = 3.6f, h = 2.3f, y0 = 0.34f;
@@ -398,7 +418,7 @@ Out cottage(const Look& L) {
 }
 
 Out raisedHouse(const Look& L) {
-  { Out m; if (addModel(m.s, m.lights, "raised_house", L)) { m.door = modelFront("raised_house"); return m; } }
+  { Out m; if (addHouseModel(m, "raised_house", L)) return m; }
   Out o;
   Shape& b = o.s;
   float w = 4.4f, d = 3.8f;
@@ -435,7 +455,7 @@ Out raisedHouse(const Look& L) {
 }
 
 Out familyHouse(const Look& L) {
-  { Out m; if (addModel(m.s, m.lights, "family_house", L)) { m.door = modelFront("family_house"); return m; } }
+  { Out m; if (addHouseModel(m, "family_house", L)) return m; }
   Out o;
   Shape& b = o.s;
   float w = 6, d = 4.6f, h = 3.9f, y0 = 0.34f;
@@ -658,6 +678,7 @@ std::string lookKey(StructureKind k, const Look& L) {
 }
 
 }  // namespace
+bool modelBox(int kind, float b[4]) { return modelBoxImpl(kind, b); }
 
 const BuiltModel& structureModel(StructureKind kind, const Look& L) {
   std::string key = lookKey(kind, L);

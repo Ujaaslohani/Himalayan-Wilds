@@ -438,12 +438,12 @@ void hurtPlayer(Animal* a, float dmg) {
   if (P.hp <= 0) playerDown(a);
 }
 
-void growl(Animal* a) {
+void growl(Animal* a, float minGain = 0.0f, bool chasing = false) {
   if (!PRED(a->sp) && a->sp != SP_BOAR) return;  // predators and boars have a voice
   const Vec3& p = E.player.pos;
-  if (hypot2(p.x - a->x, p.z - a->z) > 35) return;
+  if (hypot2(p.x - a->x, p.z - a->z) > (chasing ? 45.0f : 35.0f)) return;
   // a pack calls once: the first wolf to notice you speaks for the herd, the rest stay quiet for a while
-  if (a->sp == SP_WOLF && a->herd) {
+  if (a->sp == SP_WOLF && a->herd && !chasing) {
     static std::map<const void*, float> lastCall;
     float& t = lastCall[a->herd];
     if (t > 0 && E.clock - t < 12) return;
@@ -452,8 +452,10 @@ void growl(Animal* a) {
   float dd, gain, pan, rate;
   voiceAt(a, dd, gain, pan, rate);
   if (!voiceFree(a, audio::animalVoiceLen(a->sp, 0))) return;
-  audio::animalVoice(a->sp, 0, gain, pan, rate, dd / 343.0f);   // arrives after the time sound takes to travel
+  audio::animalVoice(a->sp, 0, std::max(gain, minGain), pan, rate, dd / 343.0f);   // arrives after the time sound takes to travel
 }
+// v0.9.81: an animal coming for you is heard from the moment it charges, not only once it lands a hit
+void chaseCall(Animal* a) { a->chaseVoiceT = 0; growl(a, 0.35f, true); a->chaseVoiceT = 3.5f + randf() * 2.5f; }
 
 void alertPack(Animal* a, int state) {
   for (Animal* m : a->herd->members) {
@@ -557,7 +559,7 @@ void updatePredator(Animal* a, float dt) {
       a->pitch += (-0.35f - a->pitch) * std::min(1.0f, dt * 5);
       a->t -= dt;
       if (a->t <= 0) {
-        if (!safe && d < sight * 0.95f) { a->state = S_CHASE; a->t = 12; spotted(); actions::notify("A " + lowerName(a->sp) + " is charging! Shoot or get back to the village."); }
+        if (!safe && d < sight * 0.95f) { a->state = S_CHASE; a->t = 12; spotted(); chaseCall(a); actions::notify("A " + lowerName(a->sp) + " is charging! Shoot or get back to the village."); }
         else { a->state = S_WALK; a->t = 12; a->tx = a->herd->ax; a->tz = a->herd->az; }
       }
       break;
@@ -578,6 +580,7 @@ void updatePredator(Animal* a, float dt) {
         } else {
           a->state = S_CHASE;
           a->t = 18;
+          chaseCall(a);
           alertPack(a, S_CHASE);
         }
       }
@@ -602,6 +605,8 @@ void updatePredator(Animal* a, float dt) {
     case S_CHASE: {
       a->pitch += (-0.05f - a->pitch) * std::min(1.0f, dt * 5);
       a->t -= dt;
+      a->chaseVoiceT -= dt;
+      if (a->chaseVoiceT <= 0 && d > D.reach) chaseCall(a);   // keeps calling while it runs at you (every 3.5-6 s)
       if (safe || a->t <= 0 || d > sight * 2.4f) {
         a->state = S_WALK; a->t = 14; a->tx = a->herd->ax; a->tz = a->herd->az;
         break;

@@ -153,6 +153,7 @@ void main(){
   alb = mix(alb, gc * vec3(1.12, 1.15, 1.0), farK * 0.7);  // fade into the ground colour at the ring edge
   vec3 n = normalize(vec3(0.0, 1.0, 0.0) + (u_sunDir.xyz * vec3(1.0, 0.0, 1.0)) * 0.35);
   float sh = u_blade.w > 1.5 ? envLight(vec3(p.x, base, p.y)) : shadowAt(t > 0.5 ? wpos : vec3(p.x, base + 0.3, p.y), vec3(0.0, 1.0, 0.0));  // outer rings skip the shadow map
+  sh *= canopyDapple(vec3(p.x, base, p.y), g_envVis);   // v0.9.89: grass under a closed canopy is shaded too
   vec3 c = outColor(lambert(alb, n, sh) * (0.7 + 0.3 * t));
   v_col = c;
   if (u_tuft > 1.5) v_col = vec3(1.0, 0.0, 0.0);
@@ -788,7 +789,7 @@ void draw() {
   evictTiles();
   glBindVertexArray(0);
   float autK = clampf(season.autumn * 1.1f + season.fall * 0.5f - season.spring * 0.6f - season.dry * 0.4f, 0, 1);
-  float amt = std::max(autK, 0.3f * (1 - season.snow));  // a thin brown carpet under trees all year, thick orange in autumn
+  float amt = std::max(autK, 0.55f * (1 - season.snow));   // v0.9.85: thicker year-round leaf litter (was 0.3)  // a thin brown carpet under trees all year, thick orange in autumn
   float bl = bloom();
   if (bl > 0.03f && false) {   // painted flower cards retired: the 3D flower plants carry spring now
     Shader& f = render::program("flowers", FLOWER_VS, FLOWER_FS);

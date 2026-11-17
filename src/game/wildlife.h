@@ -17,6 +17,7 @@ struct Animal {
   float t, hp, tx, tz, phase, pitch, aware, fall, downT, steerYaw, steerT;
   bool charged;
   float slow, cd;
+  float chaseVoiceT = 0;   // next growl while chasing the player
   Animal* prey;
   float leap, rear, hunger, lunge;
   bool raid;

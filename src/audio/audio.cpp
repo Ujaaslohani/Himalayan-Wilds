@@ -351,8 +351,11 @@ void callback(ma_device*, void* out, const void*, ma_uint32 frames) {
   // hard-saturating it into distortion; tanh only catches what slips through
   static float lim = 1.0f;
   for (ma_uint32 i = 0; i < frames; i++) {
-    float pk = std::max(std::fabs(o[i * 2]), std::fabs(o[i * 2 + 1])) * lim;
-    if (pk > 0.8f) lim *= 0.8f / pk;                    // instant attack
+    // v0.9.90: the gain glides down over ~2 ms instead of jumping each sample: the old instant attack chopped
+    // loud thunder into a crackle (audible as glitching)
+    float pk = std::max(std::fabs(o[i * 2]), std::fabs(o[i * 2 + 1]));
+    float want = pk * lim > 0.8f ? 0.8f / std::max(pk, 1e-6f) : 1.0f;
+    if (want < lim) lim += (want - lim) * 0.01f;
     else lim += (1.0f - lim) * 0.00004f;                 // ~0.5 s release
     o[i * 2] = std::tanh(o[i * 2] * lim);
     o[i * 2 + 1] = std::tanh(o[i * 2 + 1] * lim);
@@ -959,14 +962,16 @@ void ringBell(int strikes, float gap) {
 void thunder(float delay, float dist) {
   if (!g_ok || g_sfxMuted) return;
   double t = now() + delay;
-  float g = 0.28f * (1.1f - dist);
+  // v0.9.90: the storm recordings already carry thunder; the synthetic rumble only adds weight under them, so it is
+  // quieter and swells in softly (its loud noise bursts were what sounded broken)
+  float g = (g_loops[L_STORM].clips.empty() ? 0.22f : 0.1f) * (1.1f - dist);
   float pan = rnd() * 1.2f - 0.6f;
-  if (dist < 0.5f) aburst(t, 2, 1800, 0.7f, 0.25f, g * 0.5f, pan, 0.003f);  // close strike: sharp crack first
+  if (dist < 0.4f) aburst(t, 2, 1400, 0.7f, 0.35f, g * 0.35f, pan, 0.02f);  // close strike: a crack first
   // long low rumble from a few filtered noise rolls, spaced so they don't pile up into one huge peak
   int rolls = 3 + (int)(rnd() * 3);
   for (int k = 0; k < rolls; k++) {
     double at = t + 0.1 + k * (0.55 + rnd() * 0.5);
-    aburst(at, 0, 90 + rnd() * 120, 0.7f, 1.4f + rnd() * 1.4f, g * (1.0f - k * 0.15f), pan + (rnd() - 0.5f) * 0.4f, 0.12f);
+    aburst(at, 0, 70 + rnd() * 90, 0.6f, 1.8f + rnd() * 1.6f, g * (1.0f - k * 0.15f), pan + (rnd() - 0.5f) * 0.4f, 0.35f);
   }
 }
 

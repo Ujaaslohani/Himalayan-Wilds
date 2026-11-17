@@ -20,6 +20,7 @@ uniform mat4 u_bones[52];
 out vec3 v_wpos;
 out vec3 v_nrm;
 out vec3 v_col;
+out float v_eye;
 out vec3 v_bpos;
 out float v_depth;
 void main(){
@@ -29,6 +30,7 @@ void main(){
   v_wpos = wp.xyz;
   v_nrm = mat3(sk) * a_nrm;
   v_col = a_col.rgb;
+  v_eye = 1.0 - a_col.a;   // eye discs carry alpha 0 (added to the wolf and leopard models in v0.9.90)
 #ifdef SHADOW_PASS
   gl_Position = u_shadowMat * wp;
   v_depth = 0.0;
@@ -43,6 +45,7 @@ const char* SKIN_FS = R"(
 in vec3 v_wpos;
 in vec3 v_nrm;
 in vec3 v_col;
+in float v_eye;
 in vec3 v_bpos;
 in float v_depth;
 uniform float u_white;
@@ -81,16 +84,27 @@ void main(){
   if (u_spots > 0.0) {
     float sat = max(max(v_col.r, v_col.g), v_col.b) - min(min(v_col.r, v_col.g), v_col.b);
     float m = smoothstep(0.08, 0.2, sat);           // tan coat only: the white belly and muzzle stay clean
+    m *= 1.0 - v_eye;
     float r = rosette(v_bpos * u_spots);
     alb = mix(alb, alb * vec3(0.10, 0.08, 0.06), clamp(r, 0.0, 1.0) * m);
   }
   alb = mix(alb, vec3(0.80, 0.78, 0.72) * (0.75 + 0.25 * alb.r / max(max(alb.r, alb.g), 0.02)), u_white);
+  // v0.9.90: fur: soft tonal variation in the coat (darker saddle streaks, lighter tufts) so the low-poly colour
+  // patches don't read as flat facets
+  if (v_eye < 0.5) alb *= mix(0.84, 1.1, vnoise(v_bpos.xz * 9.0 + v_bpos.y * 6.0) * 0.6 + vnoise(v_bpos.zy * 23.0) * 0.4);
   float sh = shadowAt(v_wpos, n);
   vec3 lit = lambert(alb, n, sh);
   // soft fur rim, like the hand-built animals
   vec3 V = normalize(u_camPos - v_wpos);
   float rim = pow(1.0 - max(dot(n, V), 0.0), 3.0);
   lit += rim * 0.18 * alb * (u_hemiSky.rgb + u_sunCol.rgb * 0.25);
+  if (v_eye > 0.5) {
+    // eyes: wet and glossy (a sharp catchlight), and at night they shine back (tapetum eyeshine) when looking toward you
+    vec3 R = reflect(-u_sunDir.xyz, n);
+    lit += vec3(1.0) * pow(max(dot(R, V), 0.0), 60.0) * 1.5 * sh + u_hemiSky.rgb * 0.25;
+    float facing = smoothstep(0.2, 0.8, dot(n, V));
+    lit += alb * vec3(1.6, 1.4, 0.8) * u_night * facing * 2.5;
+  }
   vec3 c = outColor(lit);
   c = mix(c, fogTint(v_wpos), fogObject(v_wpos, v_depth));
   fragColor = vec4(c, 1.0);

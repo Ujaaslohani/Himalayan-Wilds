@@ -867,9 +867,10 @@ LeafImg makeLeafCluster(TreeSp sp, int N) {
       }
   } else {
     // a fan of twigs from the base, each carrying alternating leaves: fills the whole card
-    int twigs = sp == T_MAPLE ? 4 : 5;
-    int per = sp == T_OAK ? 4 : sp == T_MAPLE ? 2 : 7;
-    float lenA = sp == T_OAK ? 0.22f : sp == T_MAPLE ? 0.34f : 0.15f;
+    // v0.9.85: ~2x the leaves per card (more, slightly smaller): crowns read full at the same triangle count
+    int twigs = sp == T_MAPLE ? 6 : 7;
+    int per = sp == T_OAK ? 7 : sp == T_MAPLE ? 4 : 10;
+    float lenA = sp == T_OAK ? 0.19f : sp == T_MAPLE ? 0.27f : 0.13f;
     std::vector<std::array<float, 4>> leaves;
     for (int w = 0; w < twigs; w++) {
       float fan = (twigs == 1 ? 0.0f : -0.75f + 1.5f * w / (twigs - 1)) + R.r(-0.08f, 0.08f);
@@ -1194,7 +1195,7 @@ Built growTree(TreeSp sp, uint32_t seed, bool indiv, bool fillIn = true, float t
       // girth along the first stretch, so forks and side branches flow out of their parent like a real collar
       std::vector<Vec3> sp_;
       std::vector<float> sr_;
-      if (lvl == 0) { sp_.push_back(pp - Vec3(0, 0.15f, 0)); sr_.push_back(r0 * 1.45f); sp_.push_back(pp + d * 0.35f); sr_.push_back(r0 * 1.05f); }  // root flare
+      if (lvl == 0) { sp_.push_back(pp - Vec3(0, 0.25f, 0)); sr_.push_back(r0 * 2.0f); sp_.push_back(pp + d * 0.18f); sr_.push_back(r0 * 1.4f); sp_.push_back(pp + d * 0.5f); sr_.push_back(r0 * 1.06f); }  // root flare (v0.9.85: wider, so trunks sit in the ground)
       else { sp_.push_back(pp); sr_.push_back(rj > 0 ? std::max(rj, r0) : r0); }
       for (int i = 0; i < segs; i++) {
         float t0 = (float)i / segs, t1 = (float)(i + 1) / segs;
@@ -1279,7 +1280,7 @@ Built growTree(TreeSp sp, uint32_t seed, bool indiv, bool fillIn = true, float t
   if (indiv && sp != T_CEDAR) {
     // individual leaves on thin twigs: every leaf is its own quad attached to a twig
     float leafL = sp == T_OAK ? 0.62f : sp == T_MAPLE ? 0.72f : sp == T_BIRCH ? 0.45f : 0.52f;
-    int twigsPer = sp == T_OAK ? 6 : 5, leavesPer = sp == T_BIRCH ? 8 : sp == T_MAPLE ? 7 : 9;
+    int twigsPer = sp == T_OAK ? 6 : 5, leavesPer = sp == T_BIRCH ? 9 : sp == T_MAPLE ? 8 : 10;   // v0.9.84: one more leaf per twig
     for (auto& t : tips) {
       for (int w = 0; w < twigsPer; w++) {
         Vec3 td = rotAxis(t.second, anyPerp(t.second), R.r(0.4f, 1.1f));
@@ -1322,7 +1323,7 @@ Built growTree(TreeSp sp, uint32_t seed, bool indiv, bool fillIn = true, float t
   bool broad = sp != T_CEDAR;
   for (auto& t : tips) {
     // broadleaf: more, smaller cluster cards, each turned to face outward from the crown so it is never seen edge-on
-    float per = broad ? S.cardsPer * 1.9f : S.cardsPer;
+    float per = (broad ? S.cardsPer * 1.9f : S.cardsPer) * 1.1f;   // v0.9.84: +10% leaf clusters (paid for by removing the nettle)
     int n = (int)per;
     if (R.f() < per - n) n++;
     for (int c = 0; c < n; c++) {
@@ -1956,12 +1957,13 @@ std::vector<uint8_t> loadImageRGBA(const std::string& rel, int& w, int& h) {
   return out;
 }
 
-std::vector<std::string> procOverrides() { return {"Bush with Flowers.glb", "Rock Medium.glb", "Rock Slab.glb", "Rock Jagged.glb", "Rock Boulder.glb", "Stump.glb", "Stump Broken.glb", "Log Fallen.glb", "Fern.glb", "Flower Group.glb", "Flower Group-LqTljN6Wg2.glb", "Lupin.glb", "Flower Single.glb", "Flower Petal.glb", "Flower Petal-LqvxG9OBOU.glb", "Flower Petal-eVE0j49ux9.glb", "Flower Petal-niuBUEJdvM.glb", "Flower Petal-tzG4JcqYWs.glb"}; }
-std::vector<std::string> procTreeFiles() { return {"ptree:oak", "ptree:maple", "ptree:birch", "ptree:Pine-cedar", "ptree:rhodo", "ptree:oak-tall", "ptree:Pine-cedar-tall", "ptree:maple-tall"}; }
+std::vector<std::string> procOverrides() { return {"Bush.glb", "Bush with Flowers.glb", "Rock Medium.glb", "Rock Slab.glb", "Rock Jagged.glb", "Rock Boulder.glb", "Stump.glb", "Stump Broken.glb", "Log Fallen.glb", "Fern.glb", "Flower Group.glb", "Flower Group-LqTljN6Wg2.glb", "Lupin.glb", "Flower Single.glb", "Flower Petal.glb", "Flower Petal-LqvxG9OBOU.glb", "Flower Petal-eVE0j49ux9.glb", "Flower Petal-niuBUEJdvM.glb", "Flower Petal-tzG4JcqYWs.glb"}; }
+std::vector<std::string> procTreeFiles() { return {"ptree:oak", "ptree:maple", "ptree:birch", "ptree:Pine-cedar", "ptree:rhodo", "ptree:oak-tall", "ptree:Pine-cedar-tall", "ptree:maple-tall",
+    "ptree:oak-v2", "ptree:maple-v2", "ptree:birch-v2", "ptree:Pine-cedar-v2", "ptree:oak-tall-v2", "ptree:maple-tall-v2"}; }   // v0.9.85: a second grown shape per main species
 // species index and height factor of each procedural tree file (tall variants share the species' textures)
 static void procTreeVariant(int i, int& sp, float& tall) {
-  static const int SP[8] = {0, 1, 2, 3, 4, 0, 3, 1};
-  static const float TK[8] = {1, 1, 1, 1, 1, 1.55f, 1.45f, 1.4f};
+  static const int SP[14] = {0, 1, 2, 3, 4, 0, 3, 1, 0, 1, 2, 3, 0, 1};
+  static const float TK[14] = {1, 1, 1, 1, 1, 1.55f, 1.45f, 1.4f, 1, 1, 1, 1, 1.55f, 1.4f};
   sp = SP[i]; tall = TK[i];
 }
 
@@ -2077,7 +2079,7 @@ void buildProcTrees() {
     int vsp; float tallK;
     procTreeVariant(vi, vsp, tallK);
     if (vsp != s) continue;
-    uint32_t seed = 7771 + s * 131 + (tallK > 1 ? 977 : 0);
+    uint32_t seed = 7771 + s * 131 + (tallK > 1 ? 977 : 0) + (vi >= 8 ? 4441 : 0);   // v2 files: same species, a differently grown tree
     Built B = growTree(sp, seed, false, true, tallK);
     // trim leaf cards to the visible leaf area (8-sided hulls) using a 256px alpha map
     std::vector<uint8_t> alpha(256 * 256);
@@ -2173,7 +2175,7 @@ void buildProcTrees() {
     if (std::getenv("HW_TRIS")) std::fprintf(stderr, "procasset %s: %d tris\n", name.c_str(), a->tris);
     g_assets[name] = std::move(a);
   };
-  for (int fl = 1; fl < 2; fl++) {   // plain Bush.glb is now the cliff shrub model
+  for (int fl = 0; fl < 2; fl++) {
     g_leafOverride = Color::hex(fl ? "4f7d33" : "56823a");
     g_flowers = fl ? 9 : 0;
     LeafImg L = makeLeafCluster(T_BIRCH, 512);
