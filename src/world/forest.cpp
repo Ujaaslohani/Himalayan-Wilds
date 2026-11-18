@@ -30,6 +30,7 @@ void hwWritePng(const char* path, int w, int h, const uint8_t* rgb);  // main.cp
 #include <mutex>
 #include <condition_variable>
 
+extern float g_gpuLoad;   // main.cpp: GPU work / frame budget
 namespace {
 
 constexpr float CELL = 16;
@@ -92,13 +93,13 @@ const float TREE_W[B_COUNT][8] = {      // oak, maple, birch, cedar, rhododendro
     {0.06f, 0.05f, 0.30f, 0.10f, 0, 0.12f, 0.27f, 0.10f},      // snow line: birch and (tall) cedar, some hardy oak/maple
     {0.14f, 0.10f, 0, 0, 0.10f, 0.34f, 0, 0.32f},              // fern forest: tall oak and maple dominate
     {0.16f, 0.12f, 0.06f, 0, 0.10f, 0.30f, 0, 0.26f}};         // meadow copses
-const float UNDER_W[B_COUNT][14] = {    // fern, bush, flowering bush, daisies, violets, poppy, lupin, jalapeno,
-                                         // leafy bush A/B, leafy herb A/B, leafy clump A/B (v0.9.84: nettle removed)
-    {0.367f, 0.12f, 0, 0.025f, 0.025f, 0.05f, 0, 0.1f, 0.06f, 0.06f, 0.05f, 0.05f, 0.047f, 0.046f},
-    {0, 0.35f, 0, 0.1f, 0.1f, 0.2f, 0, 0, 0.05f, 0.05f, 0, 0, 0.075f, 0.075f},
-    {0, 1.0f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {0.475f, 0.06f, 0, 0, 0, 0, 0.08f, 0.12f, 0.045f, 0.045f, 0.045f, 0.045f, 0.043f, 0.042f},
-    {0, 0, 0.1f, 0.12f, 0.12f, 0.08f, 0.55f, 0.03f, 0, 0, 0, 0, 0, 0}};
+const float UNDER_W[B_COUNT][16] = {    // fern, bush, flowering bush, daisies, violets, poppy, lupin, jalapeno,
+                                         // leafy bush A/B, leafy herb A/B, leafy clump A/B (v0.9.84: nettle removed), tall shrub A/B (v0.9.94, 2-3 m)
+    {0.207f, 0, 0, 0.025f, 0.025f, 0.05f, 0, 0.1f, 0.06f, 0.06f, 0.05f, 0.05f, 0.047f, 0.046f, 0.14f, 0.14f},
+    {0, 0.04f, 0, 0.1f, 0.1f, 0.2f, 0, 0, 0.05f, 0.05f, 0, 0, 0.075f, 0.075f, 0.155f, 0.155f},
+    {0, 0.6f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.2f, 0.2f},
+    {0.315f, 0, 0, 0, 0, 0, 0.08f, 0.12f, 0.045f, 0.045f, 0.045f, 0.045f, 0.043f, 0.042f, 0.11f, 0.11f},
+    {0, 0, 0.1f, 0.12f, 0.12f, 0.08f, 0.55f, 0.03f, 0, 0, 0, 0, 0, 0, 0, 0}};
 const float ROCK_W[B_COUNT][7] = {      // medium, slab, jagged, boulder, stump, broken stump, log
     {0.28f, 0.11f, 0.06f, 0.43f, 0.03f, 0.03f, 0.06f},
     {0.20f, 0.35f, 0.35f, 0.10f, 0, 0, 0},
@@ -239,7 +240,7 @@ const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
       size_t fi = 0;
       if (biome >= 0 && layer != L_GRASS) {
         const float* W = layer == L_TREE ? TREE_W[biome] : layer == L_UNDER ? UNDER_W[biome] : ROCK_W[biome];
-        const size_t nW = layer == L_TREE ? 8 : L.files.size();   // tree rows weigh the 8 base files; the -v2 shapes are swapped in below
+        const size_t nW = layer == L_TREE ? 8 : layer == L_UNDER ? 16 : L.files.size();   // tree rows weigh the 8 base files; the -v2 shapes are swapped in below
         for (; fi < nW - 1; fi++) {   // rows sum to 1
           acc += W[fi];
           if (pick < acc) break;
@@ -251,6 +252,7 @@ const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
           if (target < acc) break;
         }
       }
+      if (layer == L_UNDER && (fi == 14 || fi == 15) && L.files.size() >= 24) fi = 14 + (size_t)(std::fmod(pick * 97.13f + sc * 13.7f + x * 0.37f + z * 0.53f, 1.0f) * 10.0f) % 10;   // v1.0.0: ten tall shrub designs share the two shrub slots
       float scl = L.scaleLo + sc * (L.scaleHi - L.scaleLo);
       if (layer == L_TREE && fi < 8 && std::fmod(pick * 31.7f + sc * 3.3f, 1.0f) < 0.5f) {   // v0.9.85: half of each main species uses its second shape
         static const int V2[8] = {8, 9, 10, 11, -1, 12, -1, 13};
@@ -292,11 +294,11 @@ const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
       }
       if (layer == L_UNDER && L.files[fi].first.rfind("Flower", 0) == 0) scl *= 1.6f;
       if (layer == L_UNDER && L.files[fi].first.rfind("Lupin", 0) == 0) scl *= 1.4f;   // v0.9.79: lupin 0.6-1.2 m
-      if (layer == L_UNDER && (L.files[fi].first.rfind("Jalapeno", 0) == 0 || L.files[fi].first.rfind("Leafy", 0) == 0)) {
+      if (layer == L_UNDER && (L.files[fi].first.rfind("Jalapeno", 0) == 0 || L.files[fi].first.rfind("Leafy", 0) == 0 || L.files[fi].first.rfind("Tall Shrub", 0) == 0)) {
         float fdn = world::forestDensity(x, z);   // these three belong to the woods: rare outside them
         if (fdn < 0.35f && std::fmod(pick * 13.7f, 1.0f) < 0.85f * (1.0f - fdn / 0.35f)) continue;
       }
-      if (layer == L_UNDER && (L.files[fi].first.rfind("Jalapeno", 0) == 0 || L.files[fi].first.rfind("Leafy", 0) == 0)) scl = 0.92f + 0.16f * sc;   // nettle 0.9 m, jalapeno 1.6 m, blueberry 1.2 m: kept above the grass   // flower clumps: big enough to read in the grass
+      if (layer == L_UNDER && (L.files[fi].first.rfind("Jalapeno", 0) == 0 || L.files[fi].first.rfind("Leafy", 0) == 0 || L.files[fi].first.rfind("Tall Shrub", 0) == 0)) scl = 0.92f + 0.16f * sc;   // nettle 0.9 m, jalapeno 1.6 m, blueberry 1.2 m: kept above the grass   // flower clumps: big enough to read in the grass
       if (layer == L_UNDER) {
         // in the woods, bushes and big plants grow into a 1.5-3 m shrub layer (the gap between grass and canopy)
         const std::string& f = L.files[fi].first;
@@ -471,18 +473,22 @@ void defineLayers() {
                       if (world::riverMask(x, z) > 0.6f || world::lakeAt(x, z) >= 0) return 0;
                       float village = clampf((hypot2(x, z) - 6) / 6, 0, 1);
                       float stony = 1 - 0.85f * sstep(rockMaskAt(x, z), 0.25f, 0.7f);   // grit and stones round the rocks: tufts only
-                      return (1 - world::pathMask(x, z)) * village * stony;
+                      float shadeK = 1 - 0.4f * sstep(world::forestDensity(x, z), 0.55f, 0.85f);   // v0.9.93: grass thins under a closed canopy
+                      return (1 - world::pathMask(x, z)) * village * stony * shadeK;
                     },
                     0.75f, 1.2f, [] { return g_settings.fullMap ? 140.0f : g_settings.grassRadius; }, 12, 0.2f, 0.45f});
   LAYERS.push_back({L_UNDER, 202,
-                    {{"Fern.glb", 0.12f}, {"Bush.glb", 0.03f}, {"Bush with Flowers.glb", 0.08f},
+                    {{"Fern.glb", 0.09f}, {"Bush.glb", 0.002f}, {"Bush with Flowers.glb", 0.08f},
                      {"Flower Group.glb", 0.1f}, {"Flower Group-LqTljN6Wg2.glb", 0.05f}, {"Flower Single.glb", 0.07f},
-                     {"Lupin.glb", 0.0f}, {"Jalapeno.glb", 0.07f}, {"Leafy Bush A.glb", 0.03f}, {"Leafy Bush B.glb", 0.03f}, {"Leafy Herb A.glb", 0.025f}, {"Leafy Herb B.glb", 0.025f}, {"Leafy Clump A.glb", 0.025f}, {"Leafy Clump B.glb", 0.025f}},   // weight 0: only the outer meadows grow it (keeps every plant of the first valley where it was)
+                     {"Lupin.glb", 0.0f}, {"Jalapeno.glb", 0.07f}, {"Leafy Bush A.glb", 0.03f}, {"Leafy Bush B.glb", 0.03f}, {"Leafy Herb A.glb", 0.025f}, {"Leafy Herb B.glb", 0.025f}, {"Leafy Clump A.glb", 0.025f}, {"Leafy Clump B.glb", 0.025f}, {"Tall Shrub 01.glb", 0.059f}, {"Tall Shrub 02.glb", 0.059f}, {"Tall Shrub 03.glb", 0}, {"Tall Shrub 04.glb", 0}, {"Tall Shrub 05.glb", 0}, {"Tall Shrub 06.glb", 0}, {"Tall Shrub 07.glb", 0}, {"Tall Shrub 08.glb", 0}, {"Tall Shrub 09.glb", 0}, {"Tall Shrub 10.glb", 0}},   // weight 0: only the outer meadows grow it (keeps every plant of the first valley where it was)
                     5,
                     [](float x, float z, float h) -> float {
                       if (h < -0.5f || h > 88 || world::pathDistance(x, z) < 3.0f || world::nearRoute(x, z) < 4.2f || hypot2(x, z) < SETTLEMENT_RADIUS || world::slopeAt(x, z) > 0.8f) return 0;
                       if (world::riverMask(x, z) > 0.3f || world::lakeAt(x, z, 1) >= 0) return 0;
-                      return 0.3f + 0.85f * world::forestDensity(x, z);
+                      float fd = world::forestDensity(x, z), pd = world::pathDistance(x, z);
+                      float edge = sstep(fd, 0.12f, 0.35f) * (1 - sstep(fd, 0.55f, 0.8f));   // v0.9.93: light reaches the forest edge: thickets
+                      float pathSide = 1 - sstep(pd, 4.0f, 9.0f);                              // and along paths
+                      return std::min(1.0f, 0.3f + 0.85f * fd + 0.35f * edge + 0.25f * pathSide * sstep(fd, 0.1f, 0.4f));
                     },
                     0.45f, 0.9f, [] { return g_settings.fullMap ? 260.0f : g_settings.undergrowthRadius; }, 32, 0.3f, 0.6f});
   LAYERS.push_back({L_ROCK, 303, {{"Rock Medium.glb", 0.3f}, {"Rock Slab.glb", 0.18f}, {"Rock Jagged.glb", 0.14f}, {"Rock Boulder.glb", 0.18f}, {"Stump.glb", 0.08f}, {"Stump Broken.glb", 0.07f}, {"Log Fallen.glb", 0.12f}}, 3,
@@ -494,7 +500,8 @@ void defineLayers() {
                       if (world::lakeAt(x, z, 1) >= 0) return 0;
                       float sl = world::slopeAt(x, z);
                       if (sl > 1.0f) return 0;   // cliffs are bedrock now (terrain material): no boulders glued to the face
-                      return ((world::pathDistance(x, z) < 6 ? 0.3f : 0.13f) + std::min(0.22f, sl * 0.22f)) * (1.0f - 0.7f * world::forestDensity(x, z));   // far fewer stones/deadwood, fewest in forest: room for trees
+                      float clump = clampf(0.15f + 1.7f * std::max(0.0f, valueNoise(x * 0.045f, z * 0.045f, 77)) + 0.35f * std::max(0.0f, valueNoise(x * 0.2f, z * 0.2f, 78)), 0.0f, 2.2f);   // v0.9.93: stones lie in groups, open ground between
+                      return ((world::pathDistance(x, z) < 6 ? 0.3f : 0.13f) + std::min(0.22f, sl * 0.22f)) * (1.0f - 0.7f * world::forestDensity(x, z)) * clump;   // far fewer stones/deadwood, fewest in forest: room for trees
                     },
                     0.25f, 1.9f, [] { return std::min(HAZE_CULL, g_settings.rockRadius * g_settings.drawDist()); }, 70, 0.6f, -1});
   LAYERS.push_back({L_TREE, 404,
@@ -509,7 +516,7 @@ void defineLayers() {
                       if (world::lakeAt(x, z, 3) >= 0) return 0;
                       if (hypot2(x, z) < SETTLEMENT_RADIUS + 6) return 0;
                       if (hypot2(x - 114, z + 51) < 24) return 0;   // Nanda Overlook: keep the view over the valley open
-                      return 0.05f + world::forestDensity(x, z) * 0.36f;   // +20% in forest (room taken from rocks/deadwood); meadows unchanged
+                      return (0.05f + world::forestDensity(x, z) * 0.36f) * (0.45f + 1.1f * (0.5f + 0.5f * valueNoise(x * 0.034f, z * 0.034f, 91)));   // v0.9.93: groves and glades instead of an even spread   // +20% in forest (room taken from rocks/deadwood); meadows unchanged
                     },
                     0.62f, 1.32f, [] { return std::min(HAZE_CULL, g_settings.treeRadius * g_settings.drawDist()); }, 55, 0.55f, -1});
 }
@@ -995,6 +1002,11 @@ void cullVisible() {
     for (int L = 0; L < 4; L++) if (impDirty[L] && L != L_GRASS) rebuildImpostorMerge(L);
   int budget = g_settings.triBudget;
   if (budget <= 0 || !g_impReady) { g_budgetScale = 1.0f; return; }
+  // v1.0.0: the geometry count alone cut detail to 45% ~10 s in (once the far pictures were ready) on a card that was
+  // idle most of the frame. Now the budget is lifted while the GPU has room; it applies again above 70% load.
+  static bool busy = false;
+  if (g_gpuLoad > 0.7f) busy = true; else if (g_gpuLoad < 0.5f) busy = false;
+  if (!busy) budget = 1 << 30;
   // The walk over every tree around the player used to run in one go every 8th frame (2-3 ms spikes in dense
   // forest). It now runs a slice of ~5000 trees per frame and finishes the count over a few frames; all of it
   // measured from where the camera stood when the pass began.
@@ -2468,12 +2480,14 @@ static void drawBatch(const InstBatch& b) {
   }
   b.draw();
 }
+static float g_instVar = 0;   // v0.9.98: per-instance shape/colour variation strength (undergrowth 1, rocks 0.6, trees 0)
 static void drawPart(PartSlot& p, InstBatch& b, int extra, float f0, float f1, float i0, float i1, bool packed) {
   if (b.count <= 0) return;
   Shader* s;
   if (p.proc) s = &render::object(VFmt::P3C4N4, IM_LITE, SeasonKind::Grass, OF_WIND | OF_DOUBLE | extra);
   else s = &render::objectFor(p.mat, IM_LITE, extra);
   s->set1f("u_packed", packed ? 1.0f : 0.0f);
+  s->set1f("u_instVar", g_instVar);
   if (render::dbgMode == 2) { if (f1 > 0) f0 = f1 = (f0 + f1) * 0.5f, f1 += 0.01f; if (i1 > 0) i0 = i1 = (i0 + i1) * 0.5f, i1 += 0.01f; }
   s->set1i("u_tier", &b == &p.lodBatch ? 1 : 0);
   float bk = g_bandK * (1.0f - 0.4f * g_denseMove);   // dense and moving: shorter overlap where both versions draw
@@ -2687,7 +2701,7 @@ void drawOpaque() {
   for (auto& s : g_slots) {
     if (!solidFirst) break;
     if (noUnder0 && s->layer == L_UNDER) continue;
-    LodCfg lc = lodFor(s->layer);
+    LodCfg lc = lodFor(s->layer); g_instVar = s->layer == L_UNDER ? 1.0f : s->layer == L_ROCK ? 0.6f : 0.0f;
     bool packed = s->layer == L_UNDER;
     bool useImp = imp && s->imp >= 0;
     for (auto& p : s->parts) {
@@ -2712,7 +2726,7 @@ void drawOpaque() {
     glDepthFunc(GL_LEQUAL);
     for (auto& s : g_slots) {
       if (s->layer == L_UNDER && std::getenv("HW_NOUNDER")) continue;
-      LodCfg lc = lodFor(s->layer);
+      LodCfg lc = lodFor(s->layer); g_instVar = s->layer == L_UNDER ? 1.0f : s->layer == L_ROCK ? 0.6f : 0.0f;
       bool packed = s->layer == L_UNDER;
       bool useImp = imp && s->imp >= 0;
       for (auto& p : s->parts) {
@@ -2742,7 +2756,7 @@ void drawOpaque() {
   for (auto& s : g_slots) {
     if (!pre) break;
     if (s->layer == L_GRASS) continue;
-    LodCfg lc = lodFor(s->layer);
+    LodCfg lc = lodFor(s->layer); g_instVar = s->layer == L_UNDER ? 1.0f : s->layer == L_ROCK ? 0.6f : 0.0f;
     bool packed = s->layer == L_UNDER;
     bool useImp = imp && s->imp >= 0;
     for (auto& p : s->parts) {
@@ -2760,7 +2774,7 @@ void drawOpaque() {
   static bool noUnder = std::getenv("HW_NOUNDER") != nullptr;
   for (auto& s : g_slots) {
     if (noUnder && s->layer == L_UNDER) continue;
-    LodCfg lc = lodFor(s->layer);
+    LodCfg lc = lodFor(s->layer); g_instVar = s->layer == L_UNDER ? 1.0f : s->layer == L_ROCK ? 0.6f : 0.0f;
     bool packed = s->layer == L_UNDER;
     bool useImp = imp && s->imp >= 0;
     long long t0_ = gfx::triangles;

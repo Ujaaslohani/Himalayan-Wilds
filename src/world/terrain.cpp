@@ -887,6 +887,12 @@ float baseHeight(float x, float z) {
   float r = hypot2(x, z);
   h = lerpf(h, 0.1f, 1 - sstep(r, SETTLEMENT_RADIUS, SETTLEMENT_RADIUS + 22));
   if (q.rd < 4) h -= (1 - sstep(q.rd, 1.2f, 3.2f)) * 0.1f;
+  {  // v0.9.93 forest floor relief: soft mounds and hollows under the trees (not on paths), and worn trails sunk
+     // a little below their banks
+    float fdn = forestDensity(x, z);
+    if (fdn > 0.02f) h += (valueNoise(x * 0.09f, z * 0.09f, 55) * 0.35f + valueNoise(x * 0.18f, z * 0.18f, 56) * 0.1f) * fdn * sstep(q.td, 3.0f, 8.0f) * sstep(r, SETTLEMENT_RADIUS + 10, SETTLEMENT_RADIUS + 30);
+    if (q.td < 3.2f && q.td < q.rd) h -= (1 - sstep(q.td, 0.9f, 2.8f)) * 0.16f;
+  }
   RiverHit rq = riverQuery(x, z);
   float rqd = rq.d < 1e8f ? std::max(0.0f, rq.d + clampf(bankNoise(x, z), -0.45f * rq.hw, 0.3f * rq.hw)) : rq.d;
   // where a road of the outer lands crosses the river it fords it: a shallow bed and long gentle banks you can walk

@@ -1072,8 +1072,8 @@ struct SpecDef {
   int prim, sec;
 };
 const SpecDef SPD[T_COUNT] = {
-    {7.2f, 0.66f, 0.5f, 0.72f, 0.42f, 0.45f, 1.7f, 4.2f, 8, 4},   // oak: compact rounded crown: wide spreading crown
-    {8.6f, 0.55f, 0.52f, 0.55f, 0.42f, 0.6f, 1.8f, 4.0f, 7, 4},     // maple: rounded, upright
+    {6.6f, 0.44f, 0.5f, 0.72f, 0.42f, 0.45f, 1.7f, 4.2f, 8, 4},   // v0.9.93: taller, slimmer trunk (forest-grown) // oak: compact rounded crown: wide spreading crown
+    {7.1f, 0.38f, 0.52f, 0.55f, 0.42f, 0.6f, 1.8f, 4.0f, 7, 4},     // v0.9.93: taller, slimmer trunk // maple: rounded, upright
     {12.5f, 0.34f, 0.35f, 0.55f, 0.32f, 0.2f, 1.3f, 3.6f, 11, 3},   // birch: tall, slim, light crown
     {17.5f, 0.62f, 0.12f, 1.45f, 0.0f, -0.15f, 2.3f, 2.0f, 16, 0},  // cedar: conical whorls
     {2.6f, 0.26f, 0.2f, 0.75f, 0.95f, 0.5f, 1.3f, 4.0f, 5, 3},      // rhododendron: shrubby small tree
@@ -1172,8 +1172,8 @@ Built growTree(TreeSp sp, uint32_t seed, bool indiv, bool fillIn = true, float t
     struct BP { int leaders, forks, laterals, levels; float trunkFrac, leaderAng, forkAng, latAng, lenRatio, photo, grav, kink, latLen; bool monopodial; };
     BP B;
     switch (sp) {
-      case T_OAK:   B = {3, 2, 1, 4, 0.5f, 0.62f, 0.55f, 0.95f, 0.7f, 0.10f, 0.10f, 0.32f, 0.6f, false}; break;  // wide, gnarled, spreading
-      case T_MAPLE: B = {3, 2, 1, 4, 0.52f, 0.42f, 0.45f, 0.8f, 0.72f, 0.22f, 0.06f, 0.22f, 0.55f, false}; break;  // rounded, upright
+      case T_OAK:   B = {3, 2, 1, 4, 0.7f, 0.38f, 0.45f, 0.85f, 0.74f, 0.18f, 0.06f, 0.2f, 0.6f, false}; break;   // v0.9.93: clear trunk, crown high, limbs rise then spread  // wide, gnarled, spreading
+      case T_MAPLE: B = {3, 2, 1, 4, 0.7f, 0.3f, 0.42f, 0.78f, 0.75f, 0.26f, 0.05f, 0.18f, 0.55f, false}; break;   // v0.9.93: clear trunk, upright leaders  // rounded, upright
       case T_BIRCH: B = {1, 2, 1, 3, 1.0f, 0.0f, 0.4f, 0.72f, 0.62f, 0.22f, 0.02f, 0.18f, 0.45f, true}; break;    // slim leader, thin upswept laterals
       default:      B = {4, 2, 0, 3, 0.18f, 0.55f, 0.55f, 0.85f, 0.7f, 0.2f, 0.08f, 0.3f, 0.6f, false}; break;  // rhododendron: multi-stem shrub
     }
@@ -1323,7 +1323,7 @@ Built growTree(TreeSp sp, uint32_t seed, bool indiv, bool fillIn = true, float t
   bool broad = sp != T_CEDAR;
   for (auto& t : tips) {
     // broadleaf: more, smaller cluster cards, each turned to face outward from the crown so it is never seen edge-on
-    float per = (broad ? S.cardsPer * 1.9f : S.cardsPer) * 1.1f;   // v0.9.84: +10% leaf clusters (paid for by removing the nettle)
+    float per = (broad ? S.cardsPer * 1.9f : S.cardsPer) * 1.1f * (sp == T_OAK || sp == T_MAPLE ? 1.2f : 1.0f);   // v0.9.93: fuller crowns on the slimmer forest-grown oak/maple   // v0.9.84: +10% leaf clusters (paid for by removing the nettle)
     int n = (int)per;
     if (R.f() < per - n) n++;
     for (int c = 0; c < n; c++) {
@@ -2051,6 +2051,26 @@ void buildProcTrees() {
       // atlas 1024x512: left = the single photo leaf (near trees, every leaf its own quad), right = leaf cluster (mid range)
       int sw = photo.empty() ? L.N : pw, sh = photo.empty() ? L.N : ph;
       cluster = composeCluster(rgba, sw, sh, 512, sp, 900 + s);
+      {  // v0.9.92: photographed leaf sprays (10-20 real leaves per card) from "Realistic Trees Collection" by Jungle Jim (CC BY 4.0)
+        const char* spray = sp == T_OAK ? "textures/spray_oak.png" : sp == T_MAPLE ? "textures/spray_maple.png" : sp == T_BIRCH ? "textures/spray_ash.png" : nullptr;
+        int qw = 0, qh = 0;
+        std::vector<uint8_t> sp2 = spray ? loadImageRGBA(spray, qw, qh) : std::vector<uint8_t>();
+        if (qw == 512 && qh == 512) {
+          // tint toward this species' leaf colour so oak / maple / birch still differ
+          Color want = sp == T_OAK ? Color::hex("4f7a2c") : sp == T_MAPLE ? Color::hex("5d8a2e") : Color::hex("74a03a");
+          double sr = 0, sg = 0, sb = 0, n = 0;
+          for (size_t k = 0; k < (size_t)512 * 512; k++) if (sp2[k * 4 + 3] > 128) { sr += sp2[k * 4]; sg += sp2[k * 4 + 1]; sb += sp2[k * 4 + 2]; n++; }
+          if (n > 0) {
+            float kr = want.r * 255.f / (float)(sr / n), kg = want.g * 255.f / (float)(sg / n), kb = want.b * 255.f / (float)(sb / n);
+            for (size_t k = 0; k < (size_t)512 * 512; k++) {
+              sp2[k * 4] = (uint8_t)std::min(255.f, sp2[k * 4] * (0.5f + 0.5f * kr));
+              sp2[k * 4 + 1] = (uint8_t)std::min(255.f, sp2[k * 4 + 1] * (0.5f + 0.5f * kg));
+              sp2[k * 4 + 2] = (uint8_t)std::min(255.f, sp2[k * 4 + 2] * (0.5f + 0.5f * kb));
+            }
+          }
+          cluster = sp2;
+        }
+      }
       std::vector<uint8_t> atlas((size_t)1024 * 512 * 4, 0);
       for (int y = 0; y < 512; y++)
         for (int x = 0; x < 512; x++) {
@@ -2069,7 +2089,7 @@ void buildProcTrees() {
     }
     if (!texW) g_procTex.push_back(std::make_unique<Texture>(uploadTextureRGBA(rgba.data(), L.N, L.N, true, true, true, false)));
     const Texture* leafTex = g_procTex.back().get();
-    const char* barkPhoto[T_COUNT] = {"textures/bark_oak.jpg", "textures/bark_maple.jpg", "", "textures/bark_cedar.jpg", "textures/bark_rhodo.jpg"};
+    const char* barkPhoto[T_COUNT] = {"textures/bark_ez.jpg", "textures/bark_ez.jpg", "", "textures/bark_cedar.jpg", "textures/bark_rhodo.jpg"};   // v0.9.92: oak/maple bark from "Realistic Trees Collection" (CC BY 4.0)
     int bw = 256, bh = 256;
     std::vector<uint8_t> brk = barkPhoto[s][0] ? loadImageRGBA(barkPhoto[s], bw, bh) : std::vector<uint8_t>();
     if (brk.empty()) { brk = makeBark(sp, 256); bw = bh = 256; }

@@ -75,11 +75,11 @@ void main(){
   vec2 dd = (v_uv - u_sun) * vec2(u_aspect, 1.0);
   float r = length(dd);
   float ang = atan(dd.y, dd.x);
-  float core = exp(-r * 110.0) * 1.5 + exp(-r * 26.0) * 0.28 + exp(-r * 6.0) * 0.06;
+  float core = exp(-r * 110.0) * 1.2 + exp(-r * 26.0) * 0.15 + exp(-r * 6.0) * 0.025;   // v0.9.91: tighter, less white haze round the sun
   float rays = pow(abs(cos(ang * 7.0 + u_time * 0.05)), 60.0) + 0.6 * pow(abs(cos(ang * 11.0 - u_time * 0.03 + 1.3)), 90.0);
-  rays *= exp(-r * 8.0) * 0.4;
+  rays *= exp(-r * 8.0) * 0.22;
   float glare = (core + rays) * vis;
-  float wash = vis * u_look * (exp(-r * 4.5) * 0.24 + 0.03);
+  float wash = vis * u_look * (exp(-r * 4.5) * 0.1 + 0.006);   // v0.9.91: was 0.24 + 0.03: looking toward the sun whitened half the screen
   float shaft = texture(u_shaft, v_uv).r * u_shaftK;
   shaft *= 1.0 - 0.65 * smoothstep(0.45, 1.0, v_uv.y);   // beams fade as they climb into the sky (v0.9.77)
   vec3 scol = mix(u_col, vec3(dot(u_col, vec3(0.299, 0.587, 0.114))), 0.55);   // shafts much less saturated than the sun glare
@@ -153,7 +153,7 @@ void computeState() {
   static float canopy = 0;
   if ((tick++ % 30) == 0) { near.clear(); forest::nearTrees(cam.pos.x, cam.pos.z, 16, near, 24); canopy = std::min(1.0f, (near.size() / 4) / 10.0f); }
   float low = 1.0f - sstep(sun.y, 0.15f, 0.6f);
-  g_shaftK = 0.22f + 0.55f * canopy * (0.4f + 0.6f * low);
+  g_shaftK = 0.12f + 0.3f * canopy * (0.4f + 0.6f * low);   // v0.9.94: about half: the forest beams washed the view toward the sun white
   if (volOn()) g_shaftK = 0.6f * (0.45f + 0.5f * canopy) * (0.55f + 0.75f * low);   // v0.9.77: 40% weaker   // beams in the open too, strongest at dawn / dusk
 }
 

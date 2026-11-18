@@ -312,6 +312,7 @@ const HWB& hwb(const char* name) {
   auto it = cache.find(name);
   if (it != cache.end()) return it->second;
   HWB& h = cache[name];
+  if (std::strcmp(name, "market_stall") != 0) return h;   // v0.9.95: homes and halls back to the original code-built designs
   std::vector<uint8_t> b;
   if (!platform::readFile(platform::assetPath(std::string("buildings/") + name + ".hwb"), b) || b.size() < 36 || std::memcmp(b.data(), "HWB1", 4) != 0) return h;
   uint32_t nt, nl, nr;

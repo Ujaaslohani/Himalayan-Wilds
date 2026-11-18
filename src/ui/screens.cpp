@@ -1857,6 +1857,10 @@ void drawOptions(float W, float H) {
           static const float DD[3] = {1.5f, 2.0f, 3.0f}, GR[3] = {26, 32, 36};
           static const int SHS[3] = {1024, 1536, 2048}, MS[3] = {0, 0, 2}, FPS[3] = {45, 60, 60};
           st.drawDistance = DD[i]; st.shadowSize = SHS[i]; st.msaa = MS[i]; st.fxaa = true; st.grassRadius = GR[i]; st.fpsLimit = FPS[i];
+          // v0.9.93: Low really drops the costly extras (vegetation density untouched): no volumetric light or fog,
+          // no water reflections, no ambient occlusion, and the leaf pre-pass forced on
+          if (i == 0) { st.volumetric = false; st.volFog = false; st.waterRefl = false; st.ssao = false; st.leafPrepass = 1; }
+          else if (i == 1) { st.volFog = false; st.ssao = false; st.leafPrepass = 2; }
           dirty();
           actions::notify(std::string(PN[i]) + " quality preset applied. Anti-aliasing changes take effect after a restart.");
         }

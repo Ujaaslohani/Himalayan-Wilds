@@ -92,7 +92,11 @@ The game autosaves to `%APPDATA%\HimalayanWilds\save.json` on Windows and `~/.lo
 
 ## Credits
 
-- "Medieval Houses Asset" (https://skfb.ly/oHnzY) and "Medieval Market Stall Asset 4/4" (https://skfb.ly/oHnC8) by Uğur Yakışık, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/) -> assets/buildings/*.hwb (changes: assets/buildings/LICENSE-Sketchfab.txt)
+- "Medieval Market Stall Asset 4/4" (https://skfb.ly/oHnC8) by Uğur Yakışık, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/) -> assets/buildings/market_stall.hwb (changes: assets/buildings/LICENSE-Sketchfab.txt)
 - "Jalapeno Plant" (https://skfb.ly/69PBy) by zvanstone, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/) -> assets/models/Jalapeno.glb
 - Animal models: see assets/animals/LICENSE-Sketchfab.txt
 - Model changes: see assets/models/LICENSE-Sketchfab.txt
+
+## Tree textures
+- Oak bark (assets/textures/bark_ez.jpg) from "Realistic Trees Collection" (https://skfb.ly/pDzJR) by Jungle Jim, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/). Changes: resized. The tree leaf sprays (spray_oak.png, spray_maple.png, spray_ash.png) are now drawn procedurally for this game.
+- Tall Shrub 01-10.glb: ten hand-designed shrubs (vase, spreading, columnar, broad fan, leaning, thicket, layered, weeping, leggy, dome) with a procedurally drawn leaf-spray texture (made for this game).

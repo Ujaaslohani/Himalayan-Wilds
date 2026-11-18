@@ -144,16 +144,26 @@ vec3 g_lanternC = vec3(0.0), g_lanternL = vec3(0.0, 1.0, 0.0);  // hand lantern 
 vec3 g_wpos = vec3(0.0);   // shaded point, kept for lambert() (canopy dapples)
 // v0.9.89: a closed canopy. Where little sky is visible the crowns overhead take almost all the sun; what gets
 // through lands as small moving dapples (light through leaf gaps), so the forest floor reads as shade with spots
-float canopyDapple(vec3 wp, float envVis){
-  float cover = smoothstep(0.3, 0.75, 1.0 - envVis);
-  cover *= 1.0 - smoothstep(5.0, 12.0, wp.y - envGround(envAt(wp.xz)));   // only below the crowns: the canopy top stays sunlit
-  if (cover < 0.001) return 1.0;
-  vec2 q = wp.xz * 0.85 + wp.y * 0.25 + u_windDir * sin(u_clock * 0.7) * 0.15;
+float g_dapCover = 0.0;   // last canopyDapple() cover, for the warm tint of the sun patches
+float dapNoise(vec2 q){
   vec2 i = floor(q), f = fract(q); f = f * f * (3.0 - 2.0 * f);
   float a = fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5453), b = fract(sin(dot(i + vec2(1, 0), vec2(127.1, 311.7))) * 43758.5453);
   float c = fract(sin(dot(i + vec2(0, 1), vec2(127.1, 311.7))) * 43758.5453), d = fract(sin(dot(i + vec2(1, 1), vec2(127.1, 311.7))) * 43758.5453);
-  float nz = mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-  return mix(1.0, 0.08 + 0.92 * smoothstep(0.68, 0.82, nz), cover);
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+float canopyDapple(vec3 wp, float envVis){
+  float cover = smoothstep(0.25, 0.7, 1.0 - envVis);
+  cover *= 1.0 - smoothstep(5.0, 12.0, wp.y - envGround(envAt(wp.xz)));   // only below the crowns: the canopy top stays sunlit
+  g_dapCover = cover;
+  if (cover < 0.001) return 1.0;
+  // v0.9.92: few, sharp sun patches (0.5-2 m) in deep shade: large gaps in the crowns (low frequency) broken up by
+  // leaf-sized holes, with a hard edge, slowly drifting with the wind
+  vec2 w = u_windDir * sin(u_clock * 0.6) * 0.12;
+  float big = dapNoise(wp.xz * 0.45 + wp.y * 0.2 + w);
+  float small = dapNoise(wp.xz * 2.3 + wp.y * 0.6 + w * 3.0);
+  float nz = big * 0.7 + small * 0.3;
+  float spot = smoothstep(0.66, 0.70, nz);
+  return mix(1.0, 0.03 + 0.97 * spot, cover);
 }
 float envLight(vec3 wp){
   g_wpos = wp;
@@ -179,7 +189,7 @@ float envLight(vec3 wp){
 vec3 lambert(vec3 albedo, vec3 n, float shadow){
   // sky light: darker under the canopy (forest interiors read dark against bright clearings), and slightly cool
   // where the sun does not reach, so sunlit patches look warm against blue-ish shade
-  vec3 irr = mix(u_hemiGround.rgb, u_hemiSky.rgb, 0.5 * n.y + 0.5) * mix(0.3, 1.0, g_envVis);   // v0.9.88: deep forest shade is darker (was 0.42)
+  vec3 irr = mix(u_hemiGround.rgb, u_hemiSky.rgb, 0.5 * n.y + 0.5) * mix(0.17, 1.0, g_envVis * g_envVis);   // v0.9.92: deep forest shade much darker (was 0.3, linear): moody, only sun patches lit
   irr *= mix(vec3(0.66, 0.96, 0.5), vec3(1.0), g_envVis);   // ...and greener the deeper you go (light filtered through more leaves)   // under the canopy the light that reaches you came through leaves: green-tinted (v0.9.85: greener)
   irr *= mix(vec3(0.94, 1.0, 1.0), vec3(1.0), shadow);       // shade green-grey, not blue (was 0.9, 0.97, 1.1)
   irr += g_fireLight;
@@ -188,6 +198,9 @@ vec3 lambert(vec3 albedo, vec3 n, float shadow){
   shadow *= canopyDapple(g_wpos, g_envVis);
 #endif
   vec3 sunC = mix(u_sunCol.rgb, vec3(dot(u_sunCol.rgb, vec3(0.3333))), 0.2);   // v0.9.89: whiter sunlight
+#if !defined(CAPTURE)
+  sunC *= mix(vec3(1.0), vec3(1.25, 1.06, 0.78), g_dapCover);   // v0.9.92: sun patches on the forest floor are warm (light filtered through leaves)
+#endif
   irr += sunC * max(dot(n, u_sunDir.xyz), 0.0) * shadow;
   return albedo * irr * (1.0 / PI);
 }
@@ -265,7 +278,8 @@ vec3 fogTint(vec3 wp){
   float s = max(dot(v, u_sunDir.xyz), 0.0);
   // forward (Mie) scattering: a bright, sun-coloured glow fills the haze looking toward the sun, broad and soft
   float k = (pow(s, 6.0) * 0.9 + pow(s, 2.0) * 0.2) * smoothstep(-0.04, 0.18, u_sunDir.y);
-  vec3 warm = min(u_fogCol.rgb * vec3(1.36, 1.22, 0.96) + vec3(0.09, 0.06, 0.0) + u_sunCol.rgb * 0.04, vec3(1.0));
+  k *= 1.0 - 0.6 * u_forestIn;   // v0.9.94: inside the woods the canopy blocks most of the sun: no white glow filling the haze
+  vec3 warm = min(u_fogCol.rgb * vec3(1.3, 1.16, 0.9) + vec3(0.06, 0.04, 0.0) + u_sunCol.rgb * 0.03, vec3(0.82));   // capped below white
   // far layers go cooler and bluer: depth between mountain ridges
   float far = smoothstep(50.0, 650.0, distance(wp, u_camPos)) * smoothstep(0.08, 0.4, u_daylight);
   vec3 base = mix(u_fogCol.rgb, u_fogCol.rgb * vec3(0.66, 0.86, 1.25) + vec3(0.0, 0.02, 0.07), far);
@@ -372,6 +386,7 @@ out vec2 v_uv;
 #if defined(INST_LITE)
 in vec4 a_i0;
 in float a_i1;
+uniform float u_instVar;   // v0.9.98: per-instance variation (0 = off)
 #elif defined(INST_FULL)
 in vec4 a_i0;
 in vec4 a_i1;
@@ -498,6 +513,17 @@ v_ao = 1.0;
 #endif
   M = u_model * M;
   vec3 sO = M[3].xyz;
+#if defined(INST_LITE)
+  vec4 iv = vec4(0.0);
+  if (u_instVar > 0.0) {   // v0.9.98: no two plants/rocks alike: own height, width, depth, lean and colour per instance
+    iv = fract(sin(vec4(dot(sO.xz, vec2(12.99, 78.23)), dot(sO.xz, vec2(39.35, 11.13)), dot(sO.xz, vec2(73.17, 52.71)), dot(sO.xz, vec2(27.61, 91.37)))) * 43758.55);
+    float k = u_instVar;
+    p.y *= 1.0 + k * (iv.x - 0.5) * 0.4;
+    p.x *= 1.0 + k * (iv.y - 0.5) * 0.34;
+    p.z *= 1.0 + k * (iv.z - 0.5) * 0.34;
+    p.xz += (iv.zw - 0.5) * 0.18 * k * max(p.y, 0.0);
+  }
+#endif
   v_fade = u_fade.y > 0.0 ? 1.0 - smoothstep(mix(u_fade.x, u_fade.y, 0.5), u_fade.y, distance(sO.xz, u_camPos.xz)) : 1.0;
   v_fadeIn = u_fadeIn.y > 0.0 ? smoothstep(u_fadeIn.x, mix(u_fadeIn.x, u_fadeIn.y, 0.5), distance(sO.xz, u_camPos.xz)) : 1.0;
 #if defined(INST_LITE)
@@ -531,6 +557,9 @@ v_ao = 1.0;
   v_nrm = normalize(mat3(M) * n);
   v_seed = fract(floor(sO.x * 2.0) * 0.6180339 + floor(sO.z * 2.0) * 0.7548777);   // same per-tree key as the pictures and the far crowns (blossom trees match at every range)
   vec3 col = srgbToLinear(a_col.rgb) * u_tint.rgb;
+#if defined(INST_LITE)
+  if (u_instVar > 0.0) col *= (0.84 + 0.3 * iv.w) * vec3(1.0 + 0.16 * u_instVar * (iv.x - 0.5), 1.0, 1.0 - 0.22 * u_instVar * (iv.y - 0.5));
+#endif
 #ifdef INST_FULL
 #ifdef TINT_WHITE
   col *= mix(vec3(1.0), srgbToLinear(a_itint.rgb), step(2.97, a_col.r + a_col.g + a_col.b));

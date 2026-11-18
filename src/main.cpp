@@ -361,6 +361,7 @@ struct PassProf {
     return out;
   }
   void publish() {
+    extern double g_clockK;
     // the full-screen post passes do fixed work for a given resolution, so their time is a speedometer for the
     // GPU itself: if they suddenly take 2x+ longer than their best, the card has clocked down (power or heat)
     std::string tag = "GPU ms:";
@@ -371,9 +372,10 @@ struct PassProf {
         static double best = 1e9; static float lastScale = -1;
         if (g_settings.renderScale != lastScale) { best = 1e9; lastScale = g_settings.renderScale; }
         best = std::min(best, fs);
+        g_clockK = best > 0.2 ? std::max(1.0, fs / best) : 1.0;
         if (fs > best * 2.2 && best > 0.2) {
           static char w[96];
-          std::snprintf(w, sizeof w, "GPU CLOCKED DOWN x%.1f (power/heat) |  GPU ms:", fs / best);
+          std::snprintf(w, sizeof w, "GPU CLOCKS LOWER x%.1f (idle or heat) |  GPU ms:", fs / best);
           tag = w;
         }
       }
@@ -382,6 +384,10 @@ struct PassProf {
     gAcc.clear(); cAcc.clear(); frames = 0;
   }
 } g_pp;
+double g_clockK = 1.0;
+}  // namespace
+float g_gpuLoad = 0.0f;
+namespace {   // v0.9.99: how much slower the GPU runs than its best (driver clocked down when lightly loaded)
 #define PROF(x) do { if (g_pp.on && !g_prof) { int i_ = g_pp.open(#x); x; g_pp.close(i_); } else if (g_prof) { glFinish(); double t0_ = platform::time(); long long tr_ = gfx::triangles, dr_ = gfx::drawCalls; x; glFinish(); g_profDraw[#x] += gfx::drawCalls - dr_; g_profMs[#x] += (platform::time() - t0_) * 1000; g_profTri[#x] += gfx::triangles - tr_; } else { x; } } while (0)
 void drawShadows() {
   bool staticRebuilt = false;
@@ -1786,7 +1792,10 @@ void main(){
       // The sleep-based limiter and vsync used to beat against each other: frames landed on 33 or 50 ms, averaging
       // ~38 ms (26 fps) with a 30 fps cap, even when CPU and GPU each needed only ~10 ms
       int every = 0;
-      if (g_settings.vsync && cap > 0 && hz > cap) { int k = (int)std::lround((double)hz / cap); if (k >= 2 && std::abs(hz - k * cap) <= 1) every = k; }   // 59/60/61 Hz all count
+      static int missN = 0, frN = 0; static bool noEvery = false;   // v0.9.99: swap-every-2 turns one late frame into a 50 ms frame
+      if (++frN >= 120) { if (missN > 6) noEvery = true; missN = frN = 0; }
+      if (cap > 0 && platform::time() - t > 1.15 / cap) missN++;
+      if (!noEvery && g_settings.vsync && cap > 0 && hz > cap) { int k = (int)std::lround((double)hz / cap); if (k >= 2 && std::abs(hz - k * cap) <= 1) every = k; }   // 59/60/61 Hz all count
       platform::setSwapInterval(g_settings.vsync ? std::max(1, every) : 0);
       if (every > 0) cap = 0;
       if (cap > 0) {
@@ -1812,6 +1821,14 @@ void main(){
       fs.fps = statFrames / (float)statT;
       fs.ms = (float)(statMs / statFrames * 1000);
       fs.gpuMs = gpuN ? (float)(gpuAcc / gpuN) : 0;
+      // v0.9.99: the tuners judge the work, not the clock: an idle card that clocked itself down reads 2-3x slower and
+      // used to trim detail to the floor at once (and never give it back with Eco on)
+      float gpuEff = fs.gpuMs / (float)g_clockK;
+      static double playT = 0; playT = E.playing ? playT + statT : 0;
+      { float bms = 1000.0f / std::max(30.0f, g_settings.fpsLimit > 0 ? std::min((float)g_settings.fpsLimit, (float)platform::refreshRate()) : (float)platform::refreshRate());
+        if (g_settings.eco) bms *= 0.5f;
+        g_gpuLoad = fs.gpuMs > 0 ? gpuEff / bms : 0.0f; }   // v1.0.0: the triangle budget only bites when the GPU is really busy
+      bool settled = playT > 15.0;   // no tuning while shaders compile and impostors are captured after loading
       fs.cpuMs = (float)(cpuAcc / statFrames);
       fs.renderScale = g_settings.adaptiveQuality ? renderScale : g_settings.renderScale;
       gpuAcc = cpuAcc = 0;
@@ -1838,9 +1855,9 @@ void main(){
         // goes up together) and cutting trees then only made the picture worse without getting the fps back
         // v0.9.81: a missed frame only counts when the GPU really is busy (>70% of the frame); before, any fps dip with
         // GPU 12 ms of a 33 ms frame trimmed detail, and the idle card then clocked down
-        bool gpuLimits = fs.gpuMs > budget * 0.85f || (fs.fps < target * 0.9f && fs.gpuMs >= fs.cpuMs && fs.gpuMs >= budget * 0.7f);
+        bool gpuLimits = settled && gpuEff > budget * 0.85f;
         if (gpuLimits) { over += (float)statT; under = 0; }
-        else if (fs.gpuMs < budget * 0.6f && fs.fps > target * 0.97f) { under += (float)statT; over = 0; }
+        else if (gpuEff < budget * 0.6f) { under += (float)statT; over = 0; }
         else over = under = 0;
         if (over >= 1.0f) {
           over = 0;
@@ -1859,8 +1876,8 @@ void main(){
         float budget = 1000.0f / (g_settings.fpsLimit > 0 ? std::min(g_settings.fpsLimit, platform::refreshRate()) : platform::refreshRate());
         if (g_settings.eco) budget *= 0.5f;
         float target = g_settings.fpsLimit > 0 ? std::min((float)g_settings.fpsLimit, (float)platform::refreshRate()) : (float)platform::refreshRate();
-        if (fs.gpuMs > budget * 0.85f || (fs.fps < target * 0.9f && fs.gpuMs >= fs.cpuMs && fs.gpuMs >= budget * 0.7f)) dSlow += (float)statT, dFast = 0;  // GPU busy (not a throttled CPU)
-        else if (fs.gpuMs < budget * 0.6f && fs.fps > target * 0.97f) dFast += (float)statT, dSlow = 0;
+        if (settled && gpuEff > budget * 0.85f) dSlow += (float)statT, dFast = 0;  // GPU busy (not a throttled CPU)
+        else if (gpuEff < budget * 0.6f) dFast += (float)statT, dSlow = 0;
         else dSlow = dFast = 0;
         float& ds = g_settings.detailScale;
         if (dSlow >= 3.0f && ds > 0.6f) { ds = std::max(0.6f, ds - 0.1f); dSlow = 0; forest::markDirty(); }  // slower, shallower: no detail churn
@@ -1871,8 +1888,8 @@ void main(){
         if (g_settings.eco) budget *= 0.5f;
         // only the GPU's own time decides: a low fps from vsync misses, driver stalls or the CPU no longer
         // makes the picture blurrier (it used to drop render scale to ~68% on frames the GPU finished in 8 ms)
-        if (fs.gpuMs > budget * 0.85f) slowT += (float)statT, fastT = 0;
-        else if (fs.gpuMs < budget * 0.6f) fastT += (float)statT, slowT = 0;
+        if (settled && gpuEff > budget * 0.85f) slowT += (float)statT, fastT = 0;
+        else if (gpuEff < budget * 0.6f) fastT += (float)statT, slowT = 0;
         else slowT = fastT = 0;
         bool gpuBound = fs.gpuMs > fs.cpuMs * 1.2f;
         float floorS = std::min(0.8f, g_settings.renderScale);  // auto never goes below 80% (or the player's own lower setting)
