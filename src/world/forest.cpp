@@ -31,6 +31,7 @@ void hwWritePng(const char* path, int w, int h, const uint8_t* rgb);  // main.cp
 #include <condition_variable>
 
 extern float g_gpuLoad;   // main.cpp: GPU work / frame budget
+extern bool g_resAtFloor;
 namespace {
 
 constexpr float CELL = 16;
@@ -1005,7 +1006,7 @@ void cullVisible() {
   // v1.0.0: the geometry count alone cut detail to 45% ~10 s in (once the far pictures were ready) on a card that was
   // idle most of the frame. Now the budget is lifted while the GPU has room; it applies again above 70% load.
   static bool busy = false;
-  if (g_gpuLoad > 0.7f) busy = true; else if (g_gpuLoad < 0.5f) busy = false;
+  if (g_gpuLoad > 0.7f && g_resAtFloor) busy = true; else if (g_gpuLoad < 0.5f) busy = false;
   if (!busy) budget = 1 << 30;
   // The walk over every tree around the player used to run in one go every 8th frame (2-3 ms spikes in dense
   // forest). It now runs a slice of ~5000 trees per frame and finishes the count over a few frames; all of it

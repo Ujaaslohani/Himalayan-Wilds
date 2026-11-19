@@ -575,6 +575,58 @@ MeshData makeLod(const MeshData& d, bool cutout, bool under, float cellDiv = 14.
   }
   return out;
 }
+
+// v1.0.1: solid inner crown for mid-distance trees. A few closed, opaque blobs sit inside the leaf cards: they fill
+// the see-through gaps (the crown reads full) and, drawn with depth, hide the cards on the far side of the crown, so
+// those cards are rejected before their alpha test runs. Fewer leaf pixels shaded, nothing removed.
+void addCrownShell(MeshData& m, float u, float v) {
+  if (m.idx.empty() || m.vertexCount < 64) return;
+  std::vector<VtxGlb> V((const VtxGlb*)m.verts.data(), (const VtxGlb*)m.verts.data() + m.vertexCount);
+  size_t nv = V.size();
+  const int K = 6;
+  Vec3 c[K];
+  for (int k = 0; k < K; k++) { const VtxGlb& q = V[(nv * (2 * k + 1)) / (2 * K)]; c[k] = Vec3(q.p[0], q.p[1], q.p[2]); }
+  std::vector<int> lab(nv, 0);
+  for (int it = 0; it < 8; it++) {
+    Vec3 sum[K]; int cnt[K] = {0};
+    for (size_t i = 0; i < nv; i++) {
+      Vec3 p(V[i].p[0], V[i].p[1], V[i].p[2]); int b = 0; float bd = 1e30f;
+      for (int k = 0; k < K; k++) { Vec3 d = p - c[k]; float dd = d.x * d.x + d.y * d.y + d.z * d.z; if (dd < bd) { bd = dd; b = k; } }
+      lab[i] = b; sum[b] = sum[b] + p; cnt[b]++;
+    }
+    for (int k = 0; k < K; k++) if (cnt[k]) c[k] = sum[k] * (1.0f / cnt[k]);
+  }
+  // icosahedron
+  const float t = 1.618034f;
+  const float IV[12][3] = {{-1, t, 0}, {1, t, 0}, {-1, -t, 0}, {1, -t, 0}, {0, -1, t}, {0, 1, t}, {0, -1, -t}, {0, 1, -t}, {t, 0, -1}, {t, 0, 1}, {-t, 0, -1}, {-t, 0, 1}};
+  const int IF[20][3] = {{0, 11, 5}, {0, 5, 1}, {0, 1, 7}, {0, 7, 10}, {0, 10, 11}, {1, 5, 9}, {5, 11, 4}, {11, 10, 2}, {10, 7, 6}, {7, 1, 8},
+                         {3, 9, 4}, {3, 4, 2}, {3, 2, 6}, {3, 6, 8}, {3, 8, 9}, {4, 9, 5}, {2, 4, 11}, {6, 2, 10}, {8, 6, 7}, {9, 8, 1}};
+  std::vector<uint32_t> idx;   // shell first: drawn before the cards, it fills depth and the cards behind it are rejected early
+  for (int k = 0; k < K; k++) {
+    Vec3 r{0, 0, 0}; int n = 0; uint32_t col = 0;
+    for (size_t i = 0; i < nv; i++) if (lab[i] == k) { Vec3 d = Vec3(V[i].p[0], V[i].p[1], V[i].p[2]) - c[k]; r = r + Vec3(d.x * d.x, d.y * d.y, d.z * d.z); n++; col = V[i].c; }
+    if (n < 12) continue;
+    r = Vec3(std::sqrt(r.x / n), std::sqrt(r.y / n), std::sqrt(r.z / n)) * 0.75f;   // inside the leaves: gaps show a dark full crown, not a ball
+    uint8_t* cc = (uint8_t*)&col;
+    for (int q = 0; q < 3; q++) cc[q] = (uint8_t)(cc[q] * 0.7f);   // inner crown is in shade
+    uint32_t base = (uint32_t)V.size();
+    for (int j = 0; j < 12; j++) {
+      float l = std::sqrt(IV[j][0] * IV[j][0] + IV[j][1] * IV[j][1] + IV[j][2] * IV[j][2]);
+      float nx = IV[j][0] / l, ny = IV[j][1] / l, nz = IV[j][2] / l;
+      VtxGlb q{};
+      q.p[0] = c[k].x + nx * r.x; q.p[1] = c[k].y + ny * r.y; q.p[2] = c[k].z + nz * r.z;
+      q.n[0] = (int8_t)(nx * 127); q.n[1] = (int8_t)(ny * 127); q.n[2] = (int8_t)(nz * 127); q.n[3] = 0;
+      q.uv[0] = floatToHalf(u); q.uv[1] = floatToHalf(v); q.c = col;
+      V.push_back(q);
+    }
+    for (int f = 0; f < 20; f++) idx.insert(idx.end(), {base + (uint32_t)IF[f][0], base + (uint32_t)IF[f][1], base + (uint32_t)IF[f][2]});
+  }
+  m.verts.resize(V.size() * sizeof(VtxGlb));
+  std::memcpy(m.verts.data(), V.data(), m.verts.size());
+  m.vertexCount = (int)V.size();
+  idx.insert(idx.end(), m.idx.begin(), m.idx.end());
+  m.idx = std::move(idx);
+}
 }  // namespace
 
 namespace assets {
@@ -2047,6 +2099,7 @@ void buildProcTrees() {
     if (!photo.empty()) { L.N = pw; if (sp == T_CEDAR && pw != N) N = pw; }
     std::vector<uint8_t> cluster;
     int texW = 0;
+    float shellU = -1, shellV = 0;
     if (sp != T_CEDAR) {
       // atlas 1024x512: left = the single photo leaf (near trees, every leaf its own quad), right = leaf cluster (mid range)
       int sw = photo.empty() ? L.N : pw, sh = photo.empty() ? L.N : ph;
@@ -2079,6 +2132,16 @@ void buildProcTrees() {
           std::memcpy(&atlas[((size_t)y * 1024 + 512 + x) * 4], &cluster[((size_t)y * 512 + x) * 4], 4);
         }
       rgba = cluster;  // trimming alpha below reads the cluster half
+      {  // v1.0.1: the most solid spot of the leaf spray, for the inner crown shell
+        int best = -1, bx = 256, by = 256;
+        for (int y = 8; y < 504; y += 4)
+          for (int x = 8; x < 504; x += 4) {
+            int sum = 0;
+            for (int dy = -6; dy <= 6; dy += 3) for (int dx = -6; dx <= 6; dx += 3) sum += cluster[((size_t)(y + dy) * 512 + x + dx) * 4 + 3] > 200;
+            if (sum > best) { best = sum; bx = x; by = y; }
+          }
+        shellU = (512.0f + bx + 0.5f) / 1024.0f; shellV = (by + 0.5f) / 512.0f;
+      }
       N = 512;
       texW = 1024;
       g_procTex.push_back(std::make_unique<Texture>(uploadTextureRGBA(atlas.data(), 1024, 512, true, true, true, false)));
@@ -2148,6 +2211,7 @@ void buildProcTrees() {
       MeshData ld = part == 0 ? makeLod(md, false, false, 48.0f) : makeLod(lodSrc, true, false);
       if (part == 1 && !ld.idx.empty()) { int dr = 0; trimCards(ld, alpha, 256, 256, dr); }  // trim mid cards to the leaf area too: far less wasted overdraw
       if (texW && part == 1) { MeshData t = ld; for (int i = 0; i < t.vertexCount; i++) { VtxGlb* v = reinterpret_cast<VtxGlb*>(t.verts.data()) + i; v->uv[0] = floatToHalf(halfToFloatA(v->uv[0]) * 0.5f + 0.5f); } ld = t; }
+      if (part == 1 && shellU >= 0 && !std::getenv("HW_NOSHELL")) addCrownShell(ld, shellU, shellV);
       if (!ld.idx.empty()) ap.lod = uploadMesh(ld);
       ap.mat.name = part == 0 ? "bark_" + std::to_string(s) : matLeaf[s];
       ap.mat.cutout = part == 1;

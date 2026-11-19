@@ -58,6 +58,9 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #endif
 
 namespace platform { void (*loadPump)() = nullptr; }
+float baseScale();
+extern float g_gpuLoad;
+extern bool g_resAtFloor;
 namespace {
 
 struct SceneTarget {
@@ -370,10 +373,10 @@ struct PassProf {
       if (it != gAcc.end()) {
         double fs = it->second / frames;
         static double best = 1e9; static float lastScale = -1;
-        if (g_settings.renderScale != lastScale) { best = 1e9; lastScale = g_settings.renderScale; }
+        if (baseScale() != lastScale) { best = 1e9; lastScale = baseScale(); }
         best = std::min(best, fs);
         g_clockK = best > 0.2 ? std::max(1.0, fs / best) : 1.0;
-        if (fs > best * 2.2 && best > 0.2) {
+        if (fs > best * 2.2 && best > 0.2 && g_gpuLoad < 0.9f) {   // v1.0.1: a buried GPU queues the pass too: that is overload, not clocks
           static char w[96];
           std::snprintf(w, sizeof w, "GPU CLOCKS LOWER x%.1f (idle or heat) |  GPU ms:", fs / best);
           tag = w;
@@ -387,6 +390,13 @@ struct PassProf {
 double g_clockK = 1.0;
 }  // namespace
 float g_gpuLoad = 0.0f;
+bool g_resAtFloor = true;   // forest triangle budget waits until dynamic resolution has nothing left to give
+// v1.0.1: the player's resolution ceiling: a preset height (480p..2160p, above the window = supersampling) or the % slider
+float baseScale() {
+  int h = std::max(1, platform::height());
+  if (g_settings.renderRes > 0) return std::max(0.4f, std::min(2.0f, g_settings.renderRes / (float)h));
+  return g_settings.renderScale;
+}
 namespace {   // v0.9.99: how much slower the GPU runs than its best (driver clocked down when lightly loaded)
 #define PROF(x) do { if (g_pp.on && !g_prof) { int i_ = g_pp.open(#x); x; g_pp.close(i_); } else if (g_prof) { glFinish(); double t0_ = platform::time(); long long tr_ = gfx::triangles, dr_ = gfx::drawCalls; x; glFinish(); g_profDraw[#x] += gfx::drawCalls - dr_; g_profMs[#x] += (platform::time() - t0_) * 1000; g_profTri[#x] += gfx::triangles - tr_; } else { x; } } while (0)
 void drawShadows() {
@@ -1177,7 +1187,7 @@ int main(int argc, char** argv) {
   int gpuN = 0;
   SceneTarget scene;
   g_scene = &scene;
-  float renderScale = g_settings.renderScale;
+  float renderScale = baseScale();
 
   // shader warm-up: draw the world once from a few spots (and seasons) during loading so every shader variant
   // is compiled now instead of hitching the first time it appears in play
@@ -1294,7 +1304,7 @@ int main(int argc, char** argv) {
     ambience::update(dt);
 
     if (screens::takeSettingsChanged()) {
-      renderScale = g_settings.renderScale;
+      renderScale = baseScale();
       baseGrass = g_settings.grassRadius;
       forest::markDirty();
     }
@@ -1327,7 +1337,7 @@ int main(int argc, char** argv) {
     if (!hold) frozenValid = false;
     bool skipWorld = hold && frozenValid && frozenW == W && frozenH == H && (freeze || unfocused || (render::frameNo & 1));
     if (!skipWorld && (sky::shadowNeedsUpdate() || sky::shadowStaticDirty())) PROF(drawShadows());
-    float rs = clampf(g_settings.adaptiveQuality ? renderScale : g_settings.renderScale, 0.4f, 1.0f);
+    float rs = clampf(g_settings.adaptiveQuality ? renderScale : baseScale(), 0.4f, 2.0f);
     bool taa = g_settings.temporalUpscale && (!test || std::getenv("HW_TAA"));
     if (taa) rs = std::max(0.5f, rs * 0.9f);  // temporal upscaling rebuilds the rest of the detail over a few frames
     if (const char* e = std::getenv("HW_RS")) rs = (float)std::atof(e);
@@ -1828,9 +1838,10 @@ void main(){
       { float bms = 1000.0f / std::max(30.0f, g_settings.fpsLimit > 0 ? std::min((float)g_settings.fpsLimit, (float)platform::refreshRate()) : (float)platform::refreshRate());
         if (g_settings.eco) bms *= 0.5f;
         g_gpuLoad = fs.gpuMs > 0 ? gpuEff / bms : 0.0f; }   // v1.0.0: the triangle budget only bites when the GPU is really busy
-      bool settled = playT > 15.0;   // no tuning while shaders compile and impostors are captured after loading
+      bool settled = playT > 15.0;
+      g_resAtFloor = !g_settings.adaptiveQuality || renderScale <= std::max(0.4f, 480.0f / std::max(1, platform::height())) + 0.01f;   // no tuning while shaders compile and impostors are captured after loading
       fs.cpuMs = (float)(cpuAcc / statFrames);
-      fs.renderScale = g_settings.adaptiveQuality ? renderScale : g_settings.renderScale;
+      fs.renderScale = g_settings.adaptiveQuality ? renderScale : baseScale();
       gpuAcc = cpuAcc = 0;
       gpuN = 0;
       fs.drawCalls = gfx::drawCalls / std::max(1, statFrames);
@@ -1855,7 +1866,8 @@ void main(){
         // goes up together) and cutting trees then only made the picture worse without getting the fps back
         // v0.9.81: a missed frame only counts when the GPU really is busy (>70% of the frame); before, any fps dip with
         // GPU 12 ms of a 33 ms frame trimmed detail, and the idle card then clocked down
-        bool gpuLimits = settled && gpuEff > budget * 0.85f;
+        bool resLeft = g_settings.adaptiveQuality && renderScale > std::max(0.4f, 480.0f / std::max(1, platform::height())) + 0.01f;   // v1.0.1: resolution goes first
+        bool gpuLimits = settled && !resLeft && gpuEff > budget * 0.85f;
         if (gpuLimits) { over += (float)statT; under = 0; }
         else if (gpuEff < budget * 0.6f) { under += (float)statT; over = 0; }
         else over = under = 0;
@@ -1876,7 +1888,8 @@ void main(){
         float budget = 1000.0f / (g_settings.fpsLimit > 0 ? std::min(g_settings.fpsLimit, platform::refreshRate()) : platform::refreshRate());
         if (g_settings.eco) budget *= 0.5f;
         float target = g_settings.fpsLimit > 0 ? std::min((float)g_settings.fpsLimit, (float)platform::refreshRate()) : (float)platform::refreshRate();
-        if (settled && gpuEff > budget * 0.85f) dSlow += (float)statT, dFast = 0;  // GPU busy (not a throttled CPU)
+        bool resLeft2 = g_settings.adaptiveQuality && renderScale > std::max(0.4f, 480.0f / std::max(1, platform::height())) + 0.01f;
+        if (settled && !resLeft2 && gpuEff > budget * 0.85f) dSlow += (float)statT, dFast = 0;  // GPU busy (not a throttled CPU)
         else if (gpuEff < budget * 0.6f) dFast += (float)statT, dSlow = 0;
         else dSlow = dFast = 0;
         float& ds = g_settings.detailScale;
@@ -1892,20 +1905,21 @@ void main(){
         else if (gpuEff < budget * 0.6f) fastT += (float)statT, slowT = 0;
         else slowT = fastT = 0;
         bool gpuBound = fs.gpuMs > fs.cpuMs * 1.2f;
-        float floorS = std::min(0.8f, g_settings.renderScale);  // auto never goes below 80% (or the player's own lower setting)
+        // v1.0.1: resolution gives way first (down to a 480p-tall view, never lower) so the foliage itself is never cut
+        float floorS = std::min(baseScale(), std::max(0.4f, 480.0f / std::max(1, platform::height())));
         if (renderScale < floorS) renderScale = floorS;
         if (slowT > 3 && gpuBound && renderScale > floorS) {
           renderScale = std::max(floorS, renderScale - 0.05f);
           slowT = 0;
-        } else if (slowT > 2 && g_settings.undergrowthRadius > baseUnder * 0.6f) {
+        } else if (false && slowT > 2 && g_settings.undergrowthRadius > baseUnder * 0.6f) {   // v1.0.1: foliage is no longer trimmed
           // the grass radius itself is never touched any more: shrinking it pulled the dense near grass in to ~8 m
           // (and was saved to config.ini, so it stayed small next session). Only undergrowth and the far grass trim.
           g_settings.undergrowthRadius *= 0.88f;
           g_settings.grassAuto = std::max(0.6f, g_settings.grassAuto - 0.1f);
           forest::markDirty();
           slowT = 0;
-        } else if (fastT > 3 && renderScale < g_settings.renderScale) {
-          renderScale = std::min(g_settings.renderScale, renderScale + 0.1f);
+        } else if (fastT > 3 && renderScale < baseScale()) {
+          renderScale = std::min(baseScale(), renderScale + 0.1f);
           fastT = 0;
         } else if (fastT > 8 && g_settings.undergrowthRadius < baseUnder) {
           g_settings.undergrowthRadius = std::min(baseUnder, g_settings.undergrowthRadius * 1.08f);

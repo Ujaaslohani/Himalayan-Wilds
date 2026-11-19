@@ -33,6 +33,7 @@ struct Settings {
   int triBudget = 300000;
   float uiScale = 1.0f;
   float renderScale = 1.0f;
+  int renderRes = 0;         // v1.0.1: render resolution preset (height in pixels); 0 = native, use renderScale
   float drawDistance = 3.0f;
   bool fullMap = false;
   int fpsLimit = 60;

@@ -1829,6 +1829,12 @@ void drawOptions(float W, float H) {
     if (optSwitch(o, "VSync", st.vsync, "Match the frame rate to the monitor. Removes tearing; can add a little input delay.")) { platform::setVsync(!st.vsync); dirty(); }
     if (optSlider(o, "Field of view", st.fov, 60, 100, "%.0f", 1, "How wide the view is. Wider shows more but makes distant things smaller.")) dirty();
     if (optSlider(o, "Interface size", st.uiScale, 0.8f, 1.4f, "%.2f", 1, "Scales every menu and the on-screen display.")) dirty();
+    {  // v1.0.1: render resolution presets; above the window size the view is supersampled (sharper, costs more)
+      static const int RR[8] = {0, 480, 600, 720, 900, 1080, 1440, 2160};
+      int ri = 0; for (int k = 0; k < 8; k++) if (RR[k] == st.renderRes) ri = k;
+      std::string lb = ri == 0 ? std::string("Native (slider)") : std::to_string(RR[ri]) + "p";
+      if (int d = optChoice(o, "Render resolution", lb, "Draw the 3D view at this height and scale it to the window. 480p-900p: faster. Above your screen: supersampled, sharper but slower. Native uses the slider below.")) { st.renderRes = RR[(ri + d + 8) % 8]; dirty(); }
+    }
     if (optSlider(o, st.adaptiveQuality ? "Resolution scale (upper limit)" : "Resolution scale", st.renderScale, 0.5f, 1.0f, "%.0f%%", 100, "Render the 3D view below screen resolution for speed. With dynamic resolution on, this is the ceiling.")) dirty();
     if (optSwitch(o, "Edge-aware upscaling", st.edgeUpscale, "Below 100% resolution scale, rebuild edges sharply (FSR 1 style) instead of a plain blur. ~0.3-0.6 ms.")) { st.edgeUpscale = !st.edgeUpscale; dirty(); }
     {
