@@ -134,6 +134,8 @@ void main(){
   vec3 tip = gc * vec3(1.35, 1.3, 0.95) + vec3(0.02, 0.025, 0.0);
   tip = mix(tip, vec3(0.62, 0.5, 0.22), 0.35 * u_dry + 0.25 * u_autumn);
   tip = mix(tip, vec3(0.85, 0.88, 0.92), u_snow * 0.7);
+  // v1.1.0: hoar frost on the blade tips in the cold low-sun hours of autumn and early winter
+  tip = mix(tip, vec3(0.78, 0.84, 0.9), (1.0 - smoothstep(0.22, 0.55, u_daylight)) * clamp(u_autumn * 0.6 + u_snow * 0.3, 0.0, 0.55) * (1.0 - u_rain));
   // per-clump hue and dry tips
   float clump = vnoise(p * 0.18);
   float patchN = vnoise(p * 0.045 + 3.7);   // broad drifts: sun-dried straw here, lush dark growth there

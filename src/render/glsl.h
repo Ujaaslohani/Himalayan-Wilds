@@ -192,6 +192,9 @@ vec3 lambert(vec3 albedo, vec3 n, float shadow){
   vec3 irr = mix(u_hemiGround.rgb, u_hemiSky.rgb, 0.5 * n.y + 0.5) * mix(0.17, 1.0, g_envVis * g_envVis);   // v0.9.92: deep forest shade much darker (was 0.3, linear): moody, only sun patches lit
   irr *= mix(vec3(0.66, 0.96, 0.5), vec3(1.0), g_envVis);   // ...and greener the deeper you go (light filtered through more leaves)   // under the canopy the light that reaches you came through leaves: green-tinted (v0.9.85: greener)
   irr *= mix(vec3(0.94, 1.0, 1.0), vec3(1.0), shadow);       // shade green-grey, not blue (was 0.9, 0.97, 1.1)
+  // v1.1.0: bounce light under the canopy: sun patches and sunlit leaves throw a warm green fill into the shade,
+  // mostly onto trunk sides and the undersides of leaves (they face away from the sky light)
+  irr += u_sunCol.rgb * vec3(0.55, 0.64, 0.33) * 0.1 * (1.0 - g_envVis) * smoothstep(0.0, 0.3, u_sunDir.y) * (0.65 - 0.35 * n.y);
   irr += g_fireLight;
   irr += g_lanternC * (0.3 + 0.7 * max(dot(n, g_lanternL), 0.0));
 #if !defined(CAPTURE)
@@ -256,6 +259,12 @@ float hazeAmt(vec3 wp, float depth){
     float drift = 0.55 + 0.45 * vnoise(wp.xz * 0.035 + u_windDir * (u_clock * 0.04));
     float mist = m * exp(-above / 2.4) * drift * (1.0 - exp(-depth * 0.05)) * mix(0.5, 0.95, max(tw, u_rain));
     haze = 1.0 - (1.0 - haze) * (1.0 - mist);
+  }
+  {  // v1.1.0: valley fog pools in the low ground at dawn and dusk (and in rain): you look down onto a layer of it
+    float tw2 = 1.0 - smoothstep(0.35, 0.85, u_daylight);
+    float pool = exp(-max(wp.y - 14.0, 0.0) / 9.0) * (0.75 + 0.25 * vnoise(wp.xz * 0.012 + u_windDir * (u_clock * 0.01)));
+    float vf = pool * max(tw2, 0.6 * u_rain) * 0.7 * (1.0 - exp(-depth * 0.012)) * smoothstep(20.0, 80.0, depth);
+    haze = 1.0 - (1.0 - haze) * (1.0 - vf);
   }
   return haze;
 }
@@ -419,7 +428,11 @@ vec3 windAt(vec3 p, mat4 M, float T_){
   vec3 sO = M[3].xyz;
   vec2 sWo = sO.xz;
   vec3 sWd = transpose(mat3(M)) * vec3(u_windDir.x, 0.0, u_windDir.y) / max(1e-4, dot(M[0].xyz, M[0].xyz));
-  float sGust = u_windS * (0.6 + 0.4 * sin(T_ * 0.9 + sWo.x * 0.045 + sWo.y * 0.035));
+  // v1.1.0: gusts travel across the land as waves along the wind (grass and canopy bow in moving bands)
+  float gAlong = dot(sWo, u_windDir), gAcross = dot(sWo, vec2(-u_windDir.y, u_windDir.x));
+  float gw = 0.5 + 0.5 * sin(gAlong * 0.055 - T_ * 1.5 + 2.0 * sin(gAcross * 0.021 + T_ * 0.13));
+  gw *= 0.55 + 0.45 * sin(gAlong * 0.013 - T_ * 0.35 + gAcross * 0.009);
+  float sGust = u_windS * (0.45 + 0.95 * gw * gw);
   float sSw = 0.55 + 0.45 * sin(T_ * 1.4 + sWo.x * 0.11 + sWo.y * 0.09);
 #if defined(K_GRASS)
   { float b = min(p.y * p.y * 4.0, 1.4);
@@ -925,6 +938,9 @@ void main(){
   {
     // translucency: leaves glow when the sun shines through them toward the viewer
     lit += sc * vec3(1.05, 1.15, 0.6) * u_sunCol.rgb * v_thru * mix(0.25, 0.75, sh) * 0.55;
+    // v1.1.0: a broad glow too: any leaf between you and the sun lets yellow-green light through, not just near the disc
+    { vec3 Vt = normalize(v_wpos - u_camPos); float bt = max(dot(Vt, u_sunDir.xyz), 0.0);
+      lit += sc * vec3(0.95, 1.2, 0.45) * u_sunCol.rgb * (bt * bt * 0.32) * mix(0.35, 1.0, sh) * smoothstep(-0.02, 0.2, u_sunDir.y); }
   }
 #endif
 #ifdef SOFT

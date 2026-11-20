@@ -1804,6 +1804,12 @@ MeshData buildBushLeaves(uint32_t seed, float R0, float H, int cards, float card
     Vec3 pos = Vec3(dir.x * R0 * R.r(0.45f, 1.0f), std::max(0.05f, dir.y * H * R.r(0.5f, 0.95f)), dir.z * R0 * R.r(0.45f, 1.0f));
     Vec3 up = (dir + Vec3(0, 0.7f, 0) + Vec3(R.r(-0.3f, 0.3f), 0, R.r(-0.3f, 0.3f))).normalized();
     Vec3 side = rotAxis(anyPerp(up), up, R.r(0, TAU));
+    if (i % 3 == 0 && dir.y > 0.45f) {   // v1.1.0: top sprays lie almost flat, so the bush reads as leaves from above too
+      float a2 = az + R.r(-0.5f, 0.5f);
+      up = Vec3(std::cos(a2), R.r(0.1f, 0.35f), std::sin(a2)).normalized();
+      side = Vec3(-std::sin(a2), 0, std::cos(a2));
+      pos.y = std::max(pos.y, H * R.r(0.75f, 0.95f));
+    }
     float sz = cardSize * R.r(0.8f, 1.2f);
     Vec3 base = pos - up * sz * 0.3f;
     Vec3 nn = ((pos - c).normalized() + Vec3(0, 0.7f, 0)).normalized();
@@ -2266,10 +2272,10 @@ void buildProcTrees() {
     g_leafOverride = Color{-1, 0, 0};
     g_flowers = 0;
     std::vector<uint8_t> rgba = toRGBA(L);
-    if (!fl) {
+    {  // v1.1.0: the drawn leaf sprays (as on the tall shrubs); the flowering bush has blossoms painted on them
       int bw = 0, bh = 0;
-      std::vector<uint8_t> leaf = loadImageRGBA("textures/leaf_bush.png", bw, bh);  // photographed leaf (LeafSet024)
-      if (!leaf.empty()) rgba = composeCluster(leaf, bw, bh, 512, T_BIRCH, 4711);
+      std::vector<uint8_t> sp = loadImageRGBA(fl ? "textures/spray_bush_flower.png" : "textures/spray_bush.png", bw, bh);
+      if (!sp.empty() && bw == 512 && bh == 512) rgba = sp;
     }
     g_procTex.push_back(std::make_unique<Texture>(uploadTextureRGBA(rgba.data(), 512, 512, true, true, true, false)));
     std::vector<uint8_t> alpha(256 * 256);
@@ -2280,7 +2286,7 @@ void buildProcTrees() {
     m.cutout = true;
     m.tex = g_procTex.back().get();
     m.kind = SeasonKind::Leaf;
-    addAsset(fl ? "Bush with Flowers.glb" : "Bush.glb", {{buildBushLeaves(31 + fl, 0.85f, 1.25f, 60, 0.55f), m}}, true, &alpha);
+    addAsset(fl ? "Bush with Flowers.glb" : "Bush.glb", {{buildBushLeaves(31 + fl, 0.85f, 1.25f, 72, 0.6f), m}}, true, &alpha);
   }
   {
     AssetMaterial m;

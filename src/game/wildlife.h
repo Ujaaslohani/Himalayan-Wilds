@@ -51,5 +51,6 @@ int whiteDeer(float& x, float& y, float& z);   // 0 none, 1 alive, 2 down
 void forEachWounded(const std::function<void(float, float, float, int)>& cb);  // x, z, yaw, id of hurt animals on the move
 void snapshot();          // remember positions before a fixed simulation step
 void setAlpha(float a);   // 0..1 blend between previous and current step for drawing
+float nearestPredator(float x, float z);
 int nearPositions(float x, float z, float r, float* out, int maxN);  // (x, z, radius) triples
 }

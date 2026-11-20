@@ -3,6 +3,7 @@
 #include "game/extras.h"
 #include "game/events.h"
 #include "game/relics.h"
+#include "game/tracks.h"
 #include "game/secrets.h"
 #include "core/crashlog.h"
 #include "core/version.h"
@@ -711,6 +712,7 @@ void drawWorld(float dt, bool viewModel) {
   PROF(forest::drawOpaque());
   PROF(props::draw());
   PROF(relics::draw());
+  PROF(tracks::draw());
   PROF(secrets::draw());
   PROF(extras::draw());
   PROF(events::drawCaravan());

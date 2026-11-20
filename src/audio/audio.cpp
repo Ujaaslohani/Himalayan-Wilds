@@ -8,6 +8,7 @@
 #include "../platform/platform.h"
 #include "../game/engine.h"
 #include "../game/season.h"
+#include "../game/wildlife.h"
 #include "../world/terrain.h"
 #include <mutex>
 #include <map>
@@ -961,6 +962,13 @@ void ringBell(int strikes, float gap) {
 
 void thunder(float delay, float dist) {
   if (!g_ok || g_sfxMuted) return;
+  // v1.1.0: a recorded-style thunder clip (crack + long rolling rumble with mid-band grit, audible on small speakers)
+  float tp = rnd() * 1.0f - 0.5f, tg = std::min(1.0f, 0.95f * (1.15f - dist));
+  if (audio::playClip("thunder", tg, tp, delay)) {
+    // the valley throws the rumble back off the mountainsides: a later, softer copy from the other side
+    audio::playClip("thunder", tg * 0.3f, -tp * 0.8f, delay + 0.9 + rnd() * 0.8);
+    return;
+  }
   double t = now() + delay;
   // v0.9.90: the storm recordings already carry thunder; the synthetic rumble only adds weight under them, so it is
   // quieter and swells in softly (its loud noise bursts were what sounded broken)
@@ -977,7 +985,8 @@ void thunder(float delay, float dist) {
 
 void howl(float dist) {
   if (!g_ok || g_sfxMuted) return;
-  if (audio::playClip("wolf_howl_night", std::max(0.04f, 0.5f * (1 - std::min(1.0f, dist / 260))), rnd() * 1.2f - 0.6f)) return;
+  { float hg = std::max(0.04f, 0.5f * (1 - std::min(1.0f, dist / 260))), hp = rnd() * 1.2f - 0.6f;
+    if (audio::playClip("wolf_howl_night", hg, hp)) { audio::playClip("wolf_howl_night", hg * 0.22f, -hp, 0.45 + rnd() * 0.3); return; } }   // v1.1.0: valley echo
   float g = std::max(0.01f, 0.07f * (1 - std::min(1.0f, dist / 220)));
   double t = now();
   float pan = rnd() * 1.4f - 0.7f;
@@ -1043,8 +1052,15 @@ void update(float dt) {
     // recorded beds: day birdsong outdoors, birds by the water, the stream near the river, rain (night) and storm
     float day = sstep(E.daylight, 0.2f, 0.5f), dry = 1 - std::min(1.0f, rain * 2.5f), cold = 1 - 0.7f * std::min(1.0f, season.snow);
     float out = 1 - 0.8f * in;
-    g_loops[L_DAY].target = 0.22f * day * dry * cold * out * on;
-    g_loops[L_BIRDSWATER].target = (nearAmt + lakeAmt) * 0.4f * day * dry * cold * out;
+    // v1.1.0: the birds go quiet when a predator is about (they come back a while after it leaves), and the deep
+    // forest is a little hushed compared to its sunny edges
+    static float hush = 0;
+    float pd = wildlife::nearestPredator(p.x, p.z);
+    float want = 1 - sstep(pd, 35.0f, 80.0f);
+    hush += (want - hush) * std::min(1.0f, dt * (want > hush ? 0.8f : 0.08f));
+    float deep = sstep(canopy, 0.55f, 0.9f);
+    g_loops[L_DAY].target = 0.22f * day * dry * cold * out * on * (1 - 0.85f * hush) * (1 - 0.3f * deep);
+    g_loops[L_BIRDSWATER].target = (nearAmt + lakeAmt) * 0.4f * day * dry * cold * out * (1 - 0.85f * hush);
     g_loops[L_STREAM].target = std::min(0.6f, nearAmt * 0.55f) * out;
     g_loops[L_RAINNIGHT].target = rain * (1 - day) * 0.45f * (1 - 0.5f * in);
     g_loops[L_STORM].target = rain * day * 0.42f * (1 - 0.5f * in);

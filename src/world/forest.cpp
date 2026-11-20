@@ -214,6 +214,7 @@ const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
     for (int sz = 0; sz < n; sz++) {
       float jx = rng.next(), jz = rng.next(), roll = rng.next(), pick = rng.next(), rot = rng.next(), sc = rng.next(), keep = rng.next();
       if (layer == L_TREE) { jx = 0.375f + 0.25f * jx; jz = 0.375f + 0.25f * jz; }   // trees keep to the middle of their slot: >= 4 m between trunks
+      else if (layer == L_UNDER) { jx = 0.2f + 0.6f * jx; jz = 0.2f + 0.6f * jz; }   // v1.1.0: plants >= 1.3 m apart (were free to touch at slot edges)
       float x = cx * CELL + (sx + jx) * slot;
       float z = cz * CELL + (sz + jz) * slot;
       if (std::fabs(x) > MAP_HALF - 3 || std::fabs(z) > MAP_HALF - 3) continue;
@@ -254,6 +255,11 @@ const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
         }
       }
       if (layer == L_UNDER && (fi == 14 || fi == 15) && L.files.size() >= 24) fi = 14 + (size_t)(std::fmod(pick * 97.13f + sc * 13.7f + x * 0.37f + z * 0.53f, 1.0f) * 10.0f) % 10;   // v1.0.0: ten tall shrub designs share the two shrub slots
+      bool clutter = false;
+      if (layer == L_UNDER && fi == 0 && L.files.size() >= 27 && std::fmod(pick * 53.1f + jx * 7.7f, 1.0f) < 0.4f && world::forestDensity(x, z) > 0.35f) {
+        fi = 24 + (size_t)(std::fmod(sc * 31.3f + jz * 5.1f, 1.0f) * 3.0f) % 3;   // v1.1.0: forest floor clutter: dead leaves, fallen twigs, cones
+        clutter = true;
+      }
       float scl = L.scaleLo + sc * (L.scaleHi - L.scaleLo);
       if (layer == L_TREE && fi < 8 && std::fmod(pick * 31.7f + sc * 3.3f, 1.0f) < 0.5f) {   // v0.9.85: half of each main species uses its second shape
         static const int V2[8] = {8, 9, 10, 11, -1, 12, -1, 13};
@@ -308,8 +314,37 @@ const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
           if (fd > 0.3f) scl *= 1.3f + 0.9f * sc * std::min(1.0f, (fd - 0.3f) * 2.5f);
         }
       }
+      if (clutter) scl = 0.85f + 0.45f * sc;
       items.push_back({x, y, z, rot * TAU, scl, keep, (uint16_t)fi});
     }
+  if (layer == L_UNDER && !items.empty()) {
+    // v1.1.0: spacing. Big plants (tall shrubs, bushes) keep 3 m from each other; nothing grows within 1.4 m of a
+    // trunk (big plants 2.4 m); small plants keep out of a big plant's crown (1.5 m)
+    auto big = [&](const Item& it) { const std::string& f = L.files[it.file].first; return f.rfind("Tall Shrub", 0) == 0 || f.rfind("Bush", 0) == 0 || f.rfind("Leafy Bush", 0) == 0; };
+    std::vector<std::pair<float, float>> trunks;
+    for (int dz = -1; dz <= 1; dz++)
+      for (int dx = -1; dx <= 1; dx++) {
+        std::vector<Item> t = getCell(C, L_TREE, cx + dx, cz + dz);   // copy: the cache may drop the cell on the next call
+        for (auto& q : t) trunks.push_back({q.x, q.z});
+      }
+    std::vector<Item> kept;
+    kept.reserve(items.size());
+    auto d2 = [](float ax, float az, float bx, float bz) { return (ax - bx) * (ax - bx) + (az - bz) * (az - bz); };
+    for (int pass = 0; pass < 2; pass++)   // big plants first, then the small ones fit around them
+      for (auto& it : items) {
+        bool b = big(it);
+        if ((pass == 0) != b) continue;
+        float tr = b ? 2.4f : 1.4f;
+        bool ok = true;
+        for (auto& t : trunks) if (d2(it.x, it.z, t.first, t.second) < tr * tr) { ok = false; break; }
+        for (size_t k = 0; ok && k < kept.size(); k++) {
+          float need = b ? 3.0f : big(kept[k]) ? 1.5f : 1.2f;
+          if (d2(it.x, it.z, kept[k].x, kept[k].z) < need * need) ok = false;
+        }
+        if (ok) kept.push_back(it);
+      }
+    items.swap(kept);
+  }
   items.shrink_to_fit();
   C.lru.push_back(key);
   CellEntry e;
@@ -481,7 +516,7 @@ void defineLayers() {
   LAYERS.push_back({L_UNDER, 202,
                     {{"Fern.glb", 0.09f}, {"Bush.glb", 0.002f}, {"Bush with Flowers.glb", 0.08f},
                      {"Flower Group.glb", 0.1f}, {"Flower Group-LqTljN6Wg2.glb", 0.05f}, {"Flower Single.glb", 0.07f},
-                     {"Lupin.glb", 0.0f}, {"Jalapeno.glb", 0.07f}, {"Leafy Bush A.glb", 0.03f}, {"Leafy Bush B.glb", 0.03f}, {"Leafy Herb A.glb", 0.025f}, {"Leafy Herb B.glb", 0.025f}, {"Leafy Clump A.glb", 0.025f}, {"Leafy Clump B.glb", 0.025f}, {"Tall Shrub 01.glb", 0.059f}, {"Tall Shrub 02.glb", 0.059f}, {"Tall Shrub 03.glb", 0}, {"Tall Shrub 04.glb", 0}, {"Tall Shrub 05.glb", 0}, {"Tall Shrub 06.glb", 0}, {"Tall Shrub 07.glb", 0}, {"Tall Shrub 08.glb", 0}, {"Tall Shrub 09.glb", 0}, {"Tall Shrub 10.glb", 0}},   // weight 0: only the outer meadows grow it (keeps every plant of the first valley where it was)
+                     {"Lupin.glb", 0.0f}, {"Jalapeno.glb", 0.07f}, {"Leafy Bush A.glb", 0.03f}, {"Leafy Bush B.glb", 0.03f}, {"Leafy Herb A.glb", 0.025f}, {"Leafy Herb B.glb", 0.025f}, {"Leafy Clump A.glb", 0.025f}, {"Leafy Clump B.glb", 0.025f}, {"Tall Shrub 01.glb", 0.059f}, {"Tall Shrub 02.glb", 0.059f}, {"Tall Shrub 03.glb", 0}, {"Tall Shrub 04.glb", 0}, {"Tall Shrub 05.glb", 0}, {"Tall Shrub 06.glb", 0}, {"Tall Shrub 07.glb", 0}, {"Tall Shrub 08.glb", 0}, {"Tall Shrub 09.glb", 0}, {"Tall Shrub 10.glb", 0}, {"Ground Litter.glb", 0}, {"Ground Twigs.glb", 0}, {"Ground Cones.glb", 0}},   // weight 0: only the outer meadows grow it (keeps every plant of the first valley where it was)
                     5,
                     [](float x, float z, float h) -> float {
                       if (h < -0.5f || h > 88 || world::pathDistance(x, z) < 3.0f || world::nearRoute(x, z) < 4.2f || hypot2(x, z) < SETTLEMENT_RADIUS || world::slopeAt(x, z) > 0.8f) return 0;
@@ -1557,6 +1592,17 @@ void rebuildImpostorMerge(int layer) {
   g_impAll[layer].upload(g_impTmp.data(), g_impTmp.size());
 }
 
+// v1.1.0: who gets a far picture when there are more types than the 40 atlas rows: every tree first, then rocks,
+// then the undergrowth tallest first. Ground clutter never does (flat on the ground, gone with distance anyway).
+// Before this the 8 second-shape trees came last and got no pictures: they were drawn in full 3D at every distance.
+std::vector<FileSlot*> impOrder() {
+  std::vector<FileSlot*> o;
+  for (auto& sp : g_slots) if (sp->layer != L_GRASS && !sp->parts.empty() && sp->file.find("Ground ") == std::string::npos) o.push_back(sp.get());
+  auto rank = [](const FileSlot* s) { return s->layer == L_TREE ? 0 : s->layer == L_ROCK ? 1 : 2; };
+  auto hgt = [](const FileSlot* s) { float h = 0; for (auto& p : s->parts) h = std::max(h, p.mesh->bmax.y - p.mesh->bmin.y); return h; };
+  std::stable_sort(o.begin(), o.end(), [&](const FileSlot* a, const FileSlot* b) { int ra = rank(a), rb = rank(b); if (ra != rb) return ra < rb; return ra == 2 && hgt(a) > hgt(b); });
+  return o;
+}
 void captureImpostors(int only = -1, bool mips = true, int vFrom = 0, int vTo = 16) {
   g_impMergeDirty = true;
   if (!g_impFbo) {
@@ -1625,7 +1671,7 @@ void captureImpostors(int only = -1, bool mips = true, int vFrom = 0, int vTo = 
   FrameUBO saved = render::frame;
   render::frame.season2[3] = 0;
   int t = 0;
-  for (auto& sp : g_slots) {
+  for (FileSlot* sp : impOrder()) {
     if (only < 0) platform::pumpLoad();
     if (sp->layer == L_GRASS || sp->parts.empty() || t >= g_impRows) continue;
     if (only >= 0 && t != only) { t++; continue; }
@@ -1749,7 +1795,7 @@ void captureOct(int only, bool mips, int vFrom, int vTo) {
   render::frame.season2[3] = 0;
   const char* dump = std::getenv("HW_OCTDUMP");
   int t = 0;
-  for (auto& sp : g_slots) {
+  for (FileSlot* sp : impOrder()) {
     if (only < 0) platform::pumpLoad();
     if (sp->layer == L_GRASS || sp->parts.empty() || t >= g_octLayers) continue;
     if (only >= 0 && t != only) { t++; continue; }

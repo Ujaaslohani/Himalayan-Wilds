@@ -966,6 +966,15 @@ void forEachWounded(const std::function<void(float, float, float, int)>& cb) {
     cb(a->x, a->z, a->yaw, a->id);
   }
 }
+float nearestPredator(float x, float z) {   // v1.1.0: metres to the closest living predator (birds fall silent)
+  float best = 1e9f;
+  for (auto& a : animals) {
+    if (!isPredator(a->sp) || a->hp <= 0) continue;
+    float dx = a->x - x, dz = a->z - z;
+    best = std::min(best, dx * dx + dz * dz);
+  }
+  return std::sqrt(best);
+}
 int nearPositions(float x, float z, float r, float* out, int maxN) {
   int n = 0;
   for (auto& a : animals) {

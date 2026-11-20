@@ -1,4 +1,5 @@
 #include "skills.h"
+#include "tracks.h"
 #include "extras.h"
 #include <filesystem>
 #include <atomic>
@@ -1100,7 +1101,7 @@ void update(float dt) {
   E.uiOpen = uiOpen();
   if (A.victoryAt > 0 && E.clock >= A.victoryAt) { A.victoryAt = -1; A.status = Status::Victory; }
   if (A.status != Status::Playing) return;
-  if (!A.menuOpen) { tutorial::update(dt); relics::update(dt); secrets::update(dt); extras::update(dt); }
+  if (!A.menuOpen) { tutorial::update(dt); relics::update(dt); tracks::update(dt); secrets::update(dt); extras::update(dt); }
   if (!A.menuOpen) {
     A.secAcc += dt;
     while (A.secAcc >= 1) {
