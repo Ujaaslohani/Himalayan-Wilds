@@ -13,6 +13,7 @@ namespace water {
 CaveFrame caveFrame();
 void init();
 void draw();
+unsigned reflection();   // v1.1.4: the half-res scene copy (heat shimmer reads it too)
 void setReflection(unsigned tex);   // half-res scene colour (rgb) + linear depth (a) for screen-space reflections; 0 = off
 void drawParticles();
 // a disturbance on the water surface: expanding ripple rings, plus a burst of droplets when splash > 0

@@ -21,6 +21,8 @@ void footstepWood();
 void footstepStone();
 void footstepGrass();
 void footstepSnow();
+void footstepLeaves();   // v1.1.11: dry leaf litter crunch (autumn)
+void footstepMud();      // v1.1.11: wet squelch on the river bank / after rain
 void footstepWater();
 bool dangerSting();  // true if it played (rate-limited)
 void setIndoor(float k);  // 0 outside .. 1 under a roof: muffles rain and wind

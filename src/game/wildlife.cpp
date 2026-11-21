@@ -20,6 +20,7 @@
 #include "../world/forest.h"
 #include "../models/models.h"
 #include "../render/render.h"
+#include "../models/shape.h"
 #include "../audio/audio.h"
 #include <memory>
 #include <algorithm>
@@ -1098,6 +1099,8 @@ struct SkinState {
   skinned::Pose pose;
   float poseClock = -1, hitClock = -1;
   Vec3 head, b0, b1;
+  float wet = 0;          // v1.1.11: coat soaked from the river, dries over ~2 minutes
+  float hy = 0, hp = 0;   // v1.1.1: head turned towards the player (radians, smoothed)
 };
 static std::unordered_map<int, SkinState> g_skin;
 
@@ -1338,12 +1341,12 @@ static const skinned::Model* skinFor(const Animal* a, float& scale) {
     init = true;
     M[0] = skinned::load("animals/deer.anim");
     M[1] = skinned::load("animals/stag.anim");
-    M[2] = skinned::load("animals/wolf.anim");            // "Grey Wolf Rebuilt" by kenchoo (CC BY 4.0)
+    M[2] = skinned::load("animals/wolf.anim");            // "wolf animated" by Paleo Modelist (CC BY 4.0)
     M[3] = skinned::load("animals/boar.anim");
     M[4] = skinned::load("animals/bear.anim");            // "Bear" by Nyilonelycompany (CC BY 4.0)
     M[6] = skinned::load("animals/goat.anim");     // "himalayan mountain goat" by all of life (CC BY 4.0), auto-rigged with tools/rig2anim.py
-    M[7] = skinned::load("animals/leopard.anim");  // "Leopard" by planeta-elefante (CC BY 4.0)
-    if (M[7]) M[7]->spots = 13.0f / M[7]->height;    // ~7 cm rosettes on a 0.85 m-tall cat
+    M[7] = skinned::load("animals/leopard.anim");  // "Leopard Animation Run" by GremorySaiyan (CC BY 4.0)
+    if (M[7] && !M[7]->tex) M[7]->spots = 13.0f / M[7]->height;   // procedural rosettes only without a painted coat    // ~7 cm rosettes on a 0.85 m-tall cat
     M[5] = skinned::load("animals/stag_realistic.anim");  // "Deer Idle" by kenchoo (CC BY 4.0)  // "Boar" by anru97580 (CC BY 4.0), converted with tools/fbx2anim.py
   }
   if (a->sp == SP_DEER) {
@@ -1360,6 +1363,13 @@ static const skinned::Model* skinFor(const Animal* a, float& scale) {
   if (a->sp == SP_LEOPARD && M[7]) { scale = 0.85f / M[7]->height; return M[7]; }
   return nullptr;
 }
+// v1.1.3: the sentinel: one grazing member of a prey herd at a time (taking turns every ~25 s) stands head-up
+static bool isSentinel(const Animal* a) {
+  if (!a->herd || a->herd->members.size() < 2 || a->sp >= SP_WOLF) return false;
+  auto& mb = a->herd->members;
+  size_t k = (size_t)(E.clock / 25.0) % mb.size();
+  return mb[k] == a;
+}
 static int chooseClip(const skinned::Model* m, const Animal* a, float& rate) {
   float v = a->gaitV;
   bool pred = a->sp == SP_WOLF || a->sp == SP_LEOPARD;
@@ -1369,6 +1379,8 @@ static int chooseClip(const skinned::Model* m, const Animal* a, float& rate) {
   else if (a->lunge > 0.2f || a->state == S_ATTACK || a->state == S_POUNCE) c = m->clip(pred ? "Attack" : "Attack_Headbutt");
   else if (v > 3.2f) { rate = clampf(v / (pred ? 7.5f : 6.8f), 0.7f, 1.7f); c = m->clip("Gallop"); }  // deer: ~2.6 strides/s at full flight, so hooves don't skate
   else if (v > 0.15f) { rate = clampf(v / (pred ? 1.6f : 1.3f), 0.5f, 2.2f); c = m->clip("Walk"); }
+  else if (pred && (a->state == S_STALK || a->state == S_CHARGE)) c = m->clip("Snarl");   // v1.1.1: the wolf bares its teeth while it sizes you up
+  else if (a->state == S_GRAZE && isSentinel(a)) c = m->clip("Idle");   // v1.1.3: one of a grazing herd keeps its head up and watches
   else if (a->state == S_GRAZE || a->state == S_FEED) c = m->clip("Eating");
   if (c < 0) c = m->clip("Idle");
   return c < 0 ? 0 : c;
@@ -1395,8 +1407,38 @@ static void drawSkinList(std::vector<SkinDraw>& L, bool shadow) {
   for (auto& d : L) {
     SkinState& s = g_skin[d.a->id];
     if (s.cur < 0) stepSkin(d.a, d.m, 0);
-    if (s.poseClock != E.clock) {
+    // v1.1.5: animation LOD: past 40 m the skeleton is re-posed every 2nd frame, past 80 m every 4th (staggered by
+    // animal so the work spreads evenly); the step is invisible at that size on screen
+    bool due = true;
+    if (s.poseClock >= 0) {
+      float dx = d.a->x - E.player.pos.x, dz = d.a->z - E.player.pos.z, dd = dx * dx + dz * dz;
+      int every = dd > 80.0f * 80.0f ? 4 : dd > 40.0f * 40.0f ? 2 : 1;
+      static int frameNo = 0; static double lastClk = -1;
+      if (E.clock != lastClk) { frameNo++; lastClk = E.clock; }
+      due = ((frameNo + d.a->id) % every) == 0;
+    }
+    if (s.poseClock != E.clock && due) {
       skinned::evaluate(*d.m, s.cur, s.t, s.prev, s.tp, 1 - s.blend, s.pose);
+      {  // v1.1.1: an animal that has noticed you turns its head and watches you (prey when alert, predators stalking)
+        int nk = d.m->joint("Neck1");
+        if (nk < 0) nk = d.m->joint("Head");
+        const Animal* a = d.a;
+        bool watch = a->hp > 0 && ((a->state == S_GRAZE && isSentinel(a) && hypot2(a->x - E.player.pos.x, a->z - E.player.pos.z) < 70) || a->state == S_ALERT || a->state == S_STALK || a->state == S_CHARGE || (a->state == S_GRAZE && a->rear > 0.2f)) && a->gaitV < 1.5f;
+        float ty = 0, tpch = 0;
+        if (watch && nk >= 0) {
+          Mat4 inv = d.xf.inverse();
+          const Vec3& P = E.player.pos;
+          Vec3 q = inv.transformPoint(P);
+          Vec3 nkp{s.pose.world[nk].m[12], s.pose.world[nk].m[13], s.pose.world[nk].m[14]};
+          Vec3 dv = q - nkp;
+          ty = clampf(std::atan2(dv.x, dv.z), -1.1f, 1.1f);
+          tpch = clampf(std::atan2(dv.y, std::sqrt(dv.x * dv.x + dv.z * dv.z)), -0.45f, 0.45f);
+          if (std::fabs(std::atan2(dv.x, dv.z)) > 2.2f) ty = tpch = 0;   // right behind: don't wrench the neck round
+        }
+        float k = std::min(1.0f, std::max(0.0f, E.clock - s.poseClock) * 4.0f);
+        s.hy += (ty - s.hy) * k; s.hp += (tpch - s.hp) * k;
+        if (nk >= 0) skinned::aimHead(*d.m, s.pose, nk, s.hy, s.hp);
+      }
       s.poseClock = E.clock;
       auto at = [&](const char* jn, Vec3& out) {
         int j = d.m->joint(jn);
@@ -1408,6 +1450,7 @@ static void drawSkinList(std::vector<SkinDraw>& L, bool shadow) {
       s.hitClock = E.clock;
     }
     skinned::setWhite(d.a->id == g_whiteId ? 1.0f : 0.0f);
+    skinned::setWet(s.wet);
     skinned::draw(*d.m, s.pose, d.xf, shadow);
   }
   glEnable(GL_CULL_FACE);
@@ -1443,7 +1486,24 @@ static void fill(bool shadow) {
     {
       float sc = 1;
       if (const skinned::Model* sm = skinFor(a, sc)) {
-        Mat4 xf = Mat4::compose({a->x, a->y + a->leap + a->rear * 0.25f, a->z}, Quat::axisAngle({0, 1, 0}, a->yaw), {sc, sc, sc});
+        // v1.1.11: the body follows the ground: pitched along slopes, rolled across them (from the terrain under the
+        // fore and hind feet and either flank), so legs no longer float or sink on hillsides
+        float tp = 0, tr = 0;
+        if (a->state != S_DOWNED && a->leap < 0.05f) {
+          float L = std::max(0.35f, M.shadowRadius * 0.9f), W = L * 0.45f;
+          float fx_ = std::sin(a->yaw), fz_ = std::cos(a->yaw);
+          auto H = [](float x, float z) { return world::getTerrainHeight(x, z); };
+          float hf = H(a->x + fx_ * L, a->z + fz_ * L), hb = H(a->x - fx_ * L, a->z - fz_ * L);
+          float hr = H(a->x + fz_ * W, a->z - fx_ * W), hl = H(a->x - fz_ * W, a->z + fx_ * W);
+          tp = clampf(-std::atan2(hf - hb, 2 * L) * 0.85f, -0.4f, 0.4f);
+          tr = clampf(std::atan2(hr - hl, 2 * W) * 0.6f, -0.22f, 0.22f);
+        }
+        if (!shadow) {   // wet coat: wading soaks it, then it dries
+          SkinState& ss = g_skin[a->id];
+          bool inW = world::waterHeightAt(a->x, a->z) > a->y + 0.15f;
+          ss.wet = inW ? std::min(1.0f, ss.wet + dt * 2) : std::max(0.0f, ss.wet - dt / 120.0f);
+        }
+        Mat4 xf = Mat4::compose({a->x, a->y + a->leap + a->rear * 0.25f, a->z}, Quat::axisAngle({0, 1, 0}, a->yaw) * Quat::axisAngle({1, 0, 0}, tp) * Quat::axisAngle({0, 0, 1}, tr), {sc, sc, sc});
         if (shadow) g_skinShadow.push_back({a, sm, xf});
         else {
           stepSkin(a, sm, dt);
@@ -1592,6 +1652,90 @@ static void interpEnd() {
   for (size_t i = 0; i < animals.size() && i < g_saved.size(); i++) { Animal* a = animals[i].get(); const Saved& s = g_saved[i]; a->x = s.x; a->y = s.y; a->z = s.z; a->yaw = s.yaw; a->phase = s.phase; }
 }
 
+// v1.1.4: scavengers: a while after a kill, crows come down to the carcass and hop about it pecking.
+// v1.1.6: walk up close and they burst up and fly AWAY (they used to fly towards you and hover), wings beating,
+// climbing and banking off; they come back only after you have left the kill alone for a while.
+static void drawScavengers() {
+  static Mesh crow[4];   // 0 folded (on the ground), 1 wings up, 2 level, 3 down
+  if (!crow[0].valid()) {
+    for (int f = 0; f < 4; f++) {
+      Shape c;
+      const char* blk = "#141418"; const char* sheen = "#1d2030";
+      c.ball(blk, {0, 0.11f, 0}, {0.075f, 0.08f, 0.16f}, {0.12f, 0, 0});                 // body, chest up a little
+      c.ball(sheen, {0, 0.135f, 0.02f}, {0.06f, 0.05f, 0.11f});                          // glossy back
+      c.ball(blk, {0, 0.18f, 0.135f}, {0.048f, 0.05f, 0.058f});                          // head
+      c.cone("#2b2b30", {0, 0.178f, 0.18f}, 0.02f, 0.07f, 5, {PI * 0.5f, 0, 0}, {1, 0.75f, 1});   // heavy beak
+      c.ball("#cfa040", {0.03f, 0.19f, 0.15f}, {0.008f, 0.008f, 0.008f});                // eye glint
+      c.ball("#cfa040", {-0.03f, 0.19f, 0.15f}, {0.008f, 0.008f, 0.008f});
+      c.box(blk, {0, 0.115f, -0.2f}, {0.09f, 0.012f, 0.12f}, {-0.15f, 0, 0});            // wedge tail
+      float up = f == 1 ? 0.9f : f == 2 ? 0.05f : f == 3 ? -0.55f : 0;
+      for (int sd = -1; sd <= 1; sd += 2) {
+        if (f == 0) { c.ball(blk, {sd * 0.068f, 0.125f, -0.03f}, {0.016f, 0.05f, 0.13f}); continue; }   // folded at the sides
+        // spread wing: inner arm and outer hand with fingered primaries
+        float a = sd * up;
+        Vec3 sh{sd * 0.06f, 0.14f, 0.0f};
+        Vec3 el{sh.x + sd * 0.16f * std::cos(up), sh.y + 0.16f * std::sin(up), 0.0f};
+        c.ball(blk, {(sh.x + el.x) * 0.5f, (sh.y + el.y) * 0.5f, -0.005f}, {0.09f, 0.012f, 0.075f}, {0, 0, a});
+        for (int k = 0; k < 4; k++) {
+          float sp = (k - 1.5f) * 0.035f;
+          Vec3 tip{el.x + sd * 0.17f * std::cos(up), el.y + 0.17f * std::sin(up), sp - 0.03f};
+          c.rod(blk, el, tip, 0.016f, 0.006f, 3);
+        }
+      }
+      if (f == 0) for (int sd = -1; sd <= 1; sd += 2) c.rod("#2e2e33", {sd * 0.025f, 0.05f, 0.01f}, {sd * 0.025f, 0, 0.02f}, 0.006f, 0.006f, 3);
+      crow[f] = uploadMesh(c.build(true));
+    }
+  }
+  struct Flock { double flushT = -1, leftT = -1; };
+  static std::unordered_map<int, Flock> flocks;
+  Shader* sh = nullptr;
+  const Vec3& P = E.player.pos;
+  for (auto& up : animals) {
+    Animal* a = up.get();
+    if (a->state != S_DOWNED || a->downT < 25) { flocks.erase(a->id); continue; }
+    float dx = a->x - P.x, dz = a->z - P.z, d2 = dx * dx + dz * dz;
+    Flock& fl = flocks[a->id];
+    float pd = std::sqrt(d2);
+    if (fl.flushT < 0 && pd < 14) fl.flushT = E.clock;                       // spooked
+    if (fl.flushT >= 0) {                                                    // gone until you have left it 25 s
+      if (pd > 35) { if (fl.leftT < 0) fl.leftT = E.clock; else if (E.clock - fl.leftT > 25) fl = Flock(); }
+      else fl.leftT = -1;
+    }
+    if (d2 > 90.0f * 90.0f) continue;
+    float ft = fl.flushT >= 0 ? (float)(E.clock - fl.flushT) : -1;
+    if (ft > 9) continue;                                                    // flown off out of sight
+    float ax = dx / std::max(pd, 0.1f), az = dz / std::max(pd, 0.1f);       // away from the player (carcass minus player)
+    int n = 2 + (int)(std::fmod(std::fabs(a->x * 3.7f + a->z), 1.0f) * 3);
+    for (int i = 0; i < n; i++) {
+      float ph = i * 2.1f + a->x;
+      float ang = ph + 0.25f * std::sin((float)E.clock * 0.7f + i);
+      float r = 0.9f + 0.4f * std::sin(ph * 1.7f);
+      float x = a->x + std::cos(ang) * r, z = a->z + std::sin(ang) * r;
+      float y = world::getTerrainHeight(x, z);
+      float yaw = ang + PI * 0.5f, pitch = 0, roll = 0;
+      int f = 0;
+      if (ft < 0) y += std::max(0.0f, std::sin((float)E.clock * 5.0f + ph * 3.0f)) * 0.06f;   // hopping and pecking
+      else {
+        float t = std::max(0.0f, ft - i * 0.15f);                            // they lift off one after another
+        float spread = (i - n * 0.5f) * 0.5f;
+        float dist = 7.0f * t + 1.2f * t * t;
+        float bank = std::sin(t * 0.9f + ph) * 0.6f;
+        Vec3 dir(ax * std::cos(spread * 0.3f + bank * 0.4f) - az * std::sin(spread * 0.3f + bank * 0.4f), 0,
+                 az * std::cos(spread * 0.3f + bank * 0.4f) + ax * std::sin(spread * 0.3f + bank * 0.4f));
+        x += dir.x * dist; z += dir.z * dist;
+        y += std::min(1.0f, t * 2.5f) * (1.0f + 2.2f * t) + spread * 0.4f;
+        yaw = std::atan2(dir.x, dir.z); pitch = -0.25f; roll = -bank * 0.5f;
+        float beat = (float)E.clock * (t < 1.2f ? 14.0f : 9.0f) + i;   // fast flapping at take-off
+        f = 1 + ((int)beat % 3);
+      }
+      if (!render::sphereVisible({x, y, z}, 0.6f)) continue;
+      if (!sh) { sh = &render::object(VFmt::P3C4N4, IM_NONE, SeasonKind::None, 0); render::setEmissive(*sh, Color(0, 0, 0), 0); }
+      Quat q = Quat::axisAngle({0, 1, 0}, yaw) * Quat::axisAngle({1, 0, 0}, pitch) * Quat::axisAngle({0, 0, 1}, roll);
+      render::setModel(*sh, Mat4::compose({x, y, z}, q, {1.35f, 1.35f, 1.35f}));
+      crow[f].draw();
+    }
+  }
+}
 void draw() {
   interpBegin();
   fill(false);
@@ -1599,6 +1743,7 @@ void draw() {
   glEnable(GL_CULL_FACE);
   drawBatches(g_batch, SP_COUNT * 2);
   drawSkinList(g_skinDraw, false);
+  drawScavengers();
 }
 
 void drawShadow() {

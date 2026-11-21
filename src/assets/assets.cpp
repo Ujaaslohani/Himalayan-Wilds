@@ -2282,7 +2282,7 @@ void buildProcTrees() {
     for (int y = 0; y < 256; y++)
       for (int x = 0; x < 256; x++) alpha[(size_t)y * 256 + x] = rgba[(((size_t)(y * 2) * 512) + x * 2) * 4 + 3];
     AssetMaterial m;
-    m.name = "leaves_bush";
+    m.name = "bush_foliage";   // v1.1.10: a plant, not tree leaves: stays green in autumn
     m.cutout = true;
     m.tex = g_procTex.back().get();
     m.kind = SeasonKind::Leaf;

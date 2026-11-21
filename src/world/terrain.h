@@ -79,6 +79,7 @@ float outerWeight(float x, float z);                 // 0 in the first valley an
 void biomeWeights(float x, float z, float* w);       // B_COUNT weights, summing to outerWeight
 float corePathDistance(float x, float z);            // distance to the first map's roads only
 extern std::vector<Summit> SUMMITS;
+extern std::vector<Vec3> BACKDROP_PEAKS;
 extern std::vector<Road> ROADS;
 extern std::vector<Route> ROUTES;
 extern std::vector<Step> STEPS;

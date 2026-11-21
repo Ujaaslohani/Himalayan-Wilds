@@ -40,6 +40,7 @@ uniform vec3 u_sunTint;
 uniform float u_cover;
 uniform float u_storm;   // 0..1 rain strength
 uniform float u_flash;   // lightning
+uniform float u_bow;     // rainbow strength
 out vec4 fragColor;
 void main(){
   vec3 d = normalize(v_dir);
@@ -71,6 +72,26 @@ void main(){
     col = mix(col, mc * mix(0.75, 1.15, night), disc * mix(0.35, 1.0, night) * sunVis);
   }
   col += vec3(0.55, 0.65, 0.85) * (pow(max(md, 0.0), 400.0) * 0.22 + pow(max(md, 0.0), 40.0) * 0.05) * night * hz;
+  {  // v1.1.3: the Milky Way: a faint, mottled band with dark dust lanes, only on clear nights away from the moon
+    vec3 mwN = normalize(vec3(0.42, 0.5, 0.76));
+    float bd = dot(d, mwN);
+    float core = exp(-bd * bd * 30.0), wide = exp(-bd * bd * 7.0);
+    vec3 bt = normalize(cross(mwN, vec3(0.0, 1.0, 0.0)));
+    vec2 bp = vec2(dot(d, bt), bd) * 9.0;
+    float mott = vnoise(bp * 1.7) * 0.6 + vnoise(bp * 4.3) * 0.4;
+    float dust = smoothstep(0.45, 0.75, vnoise(bp * vec2(2.5, 6.0) + 7.0)) * exp(-bd * bd * 120.0);
+    float mw = (core * (0.55 + 0.9 * mott) + wide * 0.25) * (1.0 - 0.75 * dust);
+    float clear = (1.0 - u_cover) * (1.0 - u_storm) * (1.0 - 0.7 * pow(max(md, 0.0), 6.0));
+    col += vec3(0.13, 0.135, 0.17) * mw * smoothstep(0.55, 0.95, night) * clear * smoothstep(0.02, 0.25, d.y);
+  }
+  if (u_bow > 0.01) {   // v1.1.4: primary bow at 42 deg round the antisolar point (red outside), faint secondary at 51 deg (reversed)
+    float a = acos(clamp(dot(d, -u_sun), -1.0, 1.0));
+    float x1 = (a - 0.70) / 0.035, x2 = (0.91 - a) / 0.05;
+    vec3 c1 = clamp(vec3(1.5 - abs(x1 - 0.9) * 2.0, 1.5 - abs(x1 - 0.45) * 2.0, 1.5 - abs(x1) * 2.0), 0.0, 1.0);
+    vec3 c2 = clamp(vec3(1.5 - abs(x2 - 0.9) * 2.0, 1.5 - abs(x2 - 0.45) * 2.0, 1.5 - abs(x2) * 2.0), 0.0, 1.0);
+    float inside = smoothstep(0.73, 0.55, a) * 0.05;   // the sky inside the bow is brighter
+    col += (c1 * 0.12 + c2 * 0.04 + inside) * u_bow * smoothstep(-0.01, 0.06, d.y) * u_daylight;
+  }
   if (d.y > 0.0) {
     vec2 uv = d.xz / (d.y + 0.15) * 1.35 + vec2(u_clock * 0.004, u_clock * 0.0017);
     // pre-baked fbm: 2 texture reads instead of 7 noise taps per sky pixel
@@ -134,19 +155,26 @@ void main(){
 const char* STAR_VS = R"(
 in vec3 a_pos;
 out float v_tw;
+out vec3 v_tint;
 void main(){
   vec4 vp = u_view * vec4(u_camPos + a_pos * 110.0, 1.0);
   gl_Position = u_proj * vp;
   gl_Position.z = gl_Position.w;
-  v_tw = 0.7 + 0.3 * sin(u_clock * 2.0 + a_pos.x * 50.0);
-  gl_PointSize = 2.0 * (u_viewH / 900.0) + 0.5;
+  // v1.1.3: every star its own brightness, size and tint; they dim and twinkle more near the horizon
+  float hs = fract(sin(dot(a_pos, vec3(12.99, 78.23, 37.71))) * 43758.5);
+  float mag = hs * hs * hs;
+  float lowK = smoothstep(0.02, 0.35, a_pos.y);
+  v_tw = (0.25 + 0.75 * mag) * (0.75 + 0.25 * sin(u_clock * (2.0 + 4.0 * (1.0 - lowK)) + a_pos.x * 50.0)) * (0.35 + 0.65 * lowK);
+  v_tint = mix(vec3(1.0, 0.86, 0.72), vec3(0.78, 0.86, 1.0), fract(hs * 7.31));
+  gl_PointSize = (1.2 + 2.2 * mag) * (u_viewH / 900.0) + 0.4;
 }
 )";
 const char* STAR_FS = R"(
 in float v_tw;
+in vec3 v_tint;
 uniform float u_op;
 out vec4 fragColor;
-void main(){ fragColor = vec4(0.973, 0.98, 0.988, u_op * v_tw); }
+void main(){ vec2 q = gl_PointCoord * 2.0 - 1.0; float r = 1.0 - smoothstep(0.3, 1.0, length(q)); fragColor = vec4(v_tint, u_op * v_tw * r); }
 )";
 
 const char* MIST_VS = R"(
@@ -464,11 +492,69 @@ Mat4 g_builtMat, g_prevMat;
 float g_mixT = 1.0f;
 bool g_haveBuilt = false;
 float g_cover = 0.4f;
+// v1.1.5: lightning bolts: a jagged channel with a couple of forks, drawn for the instant of the flash
+std::vector<Vec3> g_bolt;   // directions from the camera (sky at infinity); w kept in a separate list
+std::vector<float> g_boltW;
+float g_boltT = 0;
+const char* BOLT_VS = R"(
+uniform vec4 u_bp[48];   // xyz direction, w width (0 = break between strands)
+out float v_a;
+out float v_e;
+void main(){
+  int seg = gl_VertexID / 6, k = gl_VertexID % 6;
+  vec4 a = u_bp[seg], b = u_bp[seg + 1];
+  if (a.w <= 0.0 || b.w <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); v_a = 0.0; v_e = 0.0; return; }
+  vec4 ca = u_proj * u_view * vec4(u_camPos + a.xyz * 2400.0, 1.0);
+  vec4 cb = u_proj * u_view * vec4(u_camPos + b.xyz * 2400.0, 1.0);
+  vec2 sa = ca.xy / ca.w, sb = cb.xy / cb.w;
+  vec2 dir = normalize(sb - sa + vec2(1e-6));
+  vec2 nrm = vec2(-dir.y, dir.x) * vec2(u_proj[0][0] / u_proj[1][1], 1.0);
+  float side = (k == 0 || k == 3 || k == 5) ? -1.0 : 1.0;
+  bool useB = (k == 2 || k == 4 || k == 5);
+  vec4 c = useB ? cb : ca;
+  float w = (useB ? b.w : a.w) * 3.5 / u_viewH;
+  c.xy += nrm * side * w * c.w;
+  c.z = c.w * 0.99999;
+  gl_Position = c;
+  v_a = 1.0; v_e = side;
+}
+)";
+const char* BOLT_FS = R"(
+in float v_a;
+in float v_e;
+uniform float u_op;
+out vec4 fragColor;
+void main(){
+  float core = 1.0 - abs(v_e);
+  fragColor = vec4(mix(vec3(0.65, 0.7, 1.0), vec3(1.0), core * core) * 3.0, v_a * u_op * (0.25 + 0.75 * core));
+}
+)";
+void makeBolt(float seedA) {
+  g_bolt.clear(); g_boltW.clear();
+  float az = seedA * TAU, el = 0.34f + 0.12f * std::fmod(seedA * 7.3f, 1.0f);
+  auto dir = [](float a, float e) { return Vec3(std::cos(a) * std::cos(e), std::sin(e), std::sin(a) * std::cos(e)); };
+  uint32_t rs = (uint32_t)(seedA * 1e6f) | 1;
+  auto rnd = [&]() { rs ^= rs << 13; rs ^= rs >> 17; rs ^= rs << 5; return (rs & 0xffffff) / 16777216.0f; };
+  float a = az, e = el;
+  std::vector<std::pair<float, float>> main;
+  for (int i = 0; i < 26; i++) { main.push_back({a, e}); a += (rnd() - 0.5f) * 0.03f; e -= (el - 0.0f) / 26 * (0.6f + 0.8f * rnd()); if (e < -0.01f) break; }
+  for (size_t i = 0; i < main.size(); i++) { g_bolt.push_back(dir(main[i].first, main[i].second)); g_boltW.push_back(2.2f - 1.2f * i / main.size()); }
+  for (int f = 0; f < 2; f++) {   // forks
+    g_bolt.push_back({0, 1, 0}); g_boltW.push_back(0);
+    size_t at = 4 + (size_t)(rnd() * (main.size() / 2));
+    if (at >= main.size()) continue;
+    float fa = main[at].first, fe = main[at].second, sgn = f ? 1.0f : -1.0f;
+    for (int i = 0; i < 8 && g_bolt.size() < 47; i++) { g_bolt.push_back(dir(fa, fe)); g_boltW.push_back(1.0f - i / 9.0f); fa += sgn * (0.008f + rnd() * 0.02f); fe -= 0.012f + rnd() * 0.02f; }
+  }
+  if (g_bolt.size() > 48) { g_bolt.resize(48); g_boltW.resize(48); }
+  g_boltT = 0.28f;
+}
 float g_rain = 0, g_wet = 0, g_flash = 0, g_thunderT = 0, g_blizzard = 0, g_fogBank = 0;
 struct Bird { Vec3 p, v; float ph, life; };
 std::vector<Bird> g_birds;
 float g_birdCheck = 0;
 GLuint g_rainVao = 0;
+GLsizei g_starN = 260;
 GLuint g_starVao = 0, g_starVbo = 0, g_mistVao = 0, g_mistIbo = 0, g_snowVao = 0, g_snowVbo = 0, g_leafVao = 0, g_leafSeedVbo = 0, g_leafEmitVbo = 0;
 int g_mistCount = 0;
 const int LEAF_EMIT = 40, LEAF_PER = 32;   // 1280 slots; only ~60% fly at once (see u_leafAmt scale below)
@@ -508,11 +594,22 @@ void init() {
     float th = rng.next() * TAU, ph = std::acos(rng.next() * 0.85f + 0.15f);
     stars.insert(stars.end(), {std::sin(ph) * std::cos(th), std::cos(ph), std::sin(ph) * std::sin(th)});
   }
+  {  // v1.1.3: 900 faint stars crowded into the Milky Way band
+    Vec3 nb = Vec3(0.42f, 0.5f, 0.76f).normalized();
+    Vec3 t1 = nb.cross({0, 1, 0}).normalized(), t2 = nb.cross(t1);
+    for (int i = 0; i < 900; i++) {
+      float a = rng.next() * TAU, off = (rng.next() + rng.next() + rng.next() - 1.5f) * 0.22f;
+      Vec3 v = (t1 * std::cos(a) + t2 * std::sin(a) + nb * off).normalized();
+      if (v.y < 0.02f) continue;
+      stars.insert(stars.end(), {v.x, v.y, v.z});
+    }
+  }
   glGenVertexArrays(1, &g_starVao);
   glBindVertexArray(g_starVao);
   glGenBuffers(1, &g_starVbo);
   glBindBuffer(GL_ARRAY_BUFFER, g_starVbo);
   glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(stars.size() * 4), stars.data(), GL_STATIC_DRAW);
+  g_starN = (GLsizei)(stars.size() / 3);
   glEnableVertexAttribArray(0);
   glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 12, nullptr);
 
@@ -638,12 +735,14 @@ void update(float dt) {
     sunI *= 1.0f - 0.5f * std::min(1.0f, g_rain * 2.5f);  // overcast: sunlight drops with the first drops
     // thunderstorms in heavy rain: lightning flash now, thunder arrives 1-4 s later (sound travels slower)
     g_flash = std::max(0.0f, g_flash - dt * 7.0f);
+    g_boltT = std::max(0.0f, g_boltT - dt);
     if (g_rain > 0.6f && dt > 0) {
       g_thunderT -= dt;
       if (g_thunderT <= 0) {
         g_thunderT = 9 + valueNoise(E.clock * 0.37f, 1.3f, 77) * 25;
         float dist = 0.3f + valueNoise(E.clock * 0.53f, 4.1f, 78) * 0.7f;  // 0 near .. 1 far
         g_flash = 1.0f - 0.6f * dist;
+        makeBolt(valueNoise(E.clock * 0.91f, 2.7f, 79) * 0.5f + 0.5f);
         ambience::thunder(1.0f + dist * 3.0f, dist);
       }
     }
@@ -731,7 +830,12 @@ void update(float dt) {
   Color fogC = g_hor.lerp(Color::hex("66728c"), clampf((0.35f - daylight) / 0.3f, 0, 1) * (1 - g_blizzard));
   // winter: colder, bluer haze that stands out against white snow, and it closes in like autumn's
   fogC = fogC.lerp(Color::hex("8a9ab4"), season.snow * 0.45f * daylight * (1 - g_blizzard));
-  float seasonFog = season.snow;  // winter: 35 m / 160 m (autumn keeps the open 60 m / 260 m range)
+  // v1.1.3: seasonal air: a soft blue summer haze on the far ridges (a warm afternoon thickens it), crisp clear
+  // autumn air reaching further, winter as before
+  float summer = clampf(1 - season.snow - season.autumn - season.spring * 0.5f, 0, 1);
+  float pm = clampf((float)(E.time - 12) / 4.0f, 0, 1);
+  fogC = fogC.lerp(Color::hex("9fb6d6"), summer * 0.25f * daylight);
+  float seasonFog = season.snow + summer * (0.15f + 0.15f * pm) - season.autumn * 0.18f * (1 - season.snow);   // winter: 35 m / 160 m
   // mist starts close: ~25 m (winter 15 m) and is thick by ~170 m (winter 110 m)
   setv(F.fogCol, fogC, (25 - 10 * seasonFog) * g_settings.drawDist() * rainFog);
   F.fogParam[0] = (170 - 60 * seasonFog) * g_settings.drawDist() * rainFog;
@@ -799,6 +903,12 @@ void drawSky() {
   s.set3c("u_sunTint", g_sunTint);
   s.set1f("u_cover", g_cover);
   s.set1f("u_storm", std::min(1.0f, g_rain * 2.5f));
+  {  // v1.1.4: a rainbow while the ground is still wet and the shower has passed, with the sun low behind you
+    static float bow = 0;
+    float want = sstep(g_wet, 0.2f, 0.5f) * (1 - sstep(g_rain, 0.05f, 0.2f)) * sstep(g_sunDir.y, 0.03f, 0.12f) * (1 - sstep(g_sunDir.y, 0.45f, 0.65f)) * (1 - season.snow) * (1 - g_cover * 0.7f);
+    bow += (want - bow) * std::min(1.0f, 0.02f);
+    s.set1f("u_bow", bow);
+  }
   s.set1f("u_flash", g_flash);
   s.set1i("u_cloudTex", 12);
   {
@@ -833,7 +943,26 @@ void drawSky() {
     Shader& st = render::program("stars", STAR_VS, STAR_FS);
     st.set1f("u_op", op);
     glBindVertexArray(g_starVao);
-    glDrawArrays(GL_POINTS, 0, 260);
+    glDrawArrays(GL_POINTS, 0, g_starN);
+    gfx::drawCalls++;
+    glDisable(GL_BLEND);
+  }
+  if (g_boltT > 0 && g_bolt.size() > 1) {
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    static GLuint vao = 0;
+    if (!vao) glGenVertexArrays(1, &vao);
+    float u[48 * 4];
+    for (size_t i = 0; i < 48; i++) {
+      if (i < g_bolt.size()) { u[i * 4] = g_bolt[i].x; u[i * 4 + 1] = g_bolt[i].y; u[i * 4 + 2] = g_bolt[i].z; u[i * 4 + 3] = g_boltW[i]; }
+      else { u[i * 4] = 0; u[i * 4 + 1] = 1; u[i * 4 + 2] = 0; u[i * 4 + 3] = 0; }
+    }
+    Shader& bs = render::program("bolt", BOLT_VS, BOLT_FS);
+    glUniform4fv(glGetUniformLocation(bs.prog, "u_bp"), 48, u);
+    float t = 0.28f - g_boltT;   // flickers: bright, dim, bright again
+    bs.set1f("u_op", (t < 0.06f ? 1.0f : t < 0.1f ? 0.25f : t < 0.16f ? 0.9f : 1.0f - (t - 0.16f) / 0.12f));
+    glBindVertexArray(vao);
+    glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(g_bolt.size() - 1) * 6);
     gfx::drawCalls++;
     glDisable(GL_BLEND);
   }

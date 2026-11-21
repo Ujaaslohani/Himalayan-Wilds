@@ -260,6 +260,10 @@ const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
         fi = 24 + (size_t)(std::fmod(sc * 31.3f + jz * 5.1f, 1.0f) * 3.0f) % 3;   // v1.1.0: forest floor clutter: dead leaves, fallen twigs, cones
         clutter = true;
       }
+      if (layer == L_UNDER && L.files.size() >= 28) {   // v1.1.1: reeds stand along the river edge, in the shallows and on the bank
+        float rm = world::riverMask(x, z);
+        if (rm > 0.3f) { fi = 27; clutter = false; }   // only reeds in the bank strip
+      }
       float scl = L.scaleLo + sc * (L.scaleHi - L.scaleLo);
       if (layer == L_TREE && fi < 8 && std::fmod(pick * 31.7f + sc * 3.3f, 1.0f) < 0.5f) {   // v0.9.85: half of each main species uses its second shape
         static const int V2[8] = {8, 9, 10, 11, -1, 12, -1, 13};
@@ -315,6 +319,7 @@ const std::vector<Item>& getCell(CellCache& C, int layer, int cx, int cz) {
         }
       }
       if (clutter) scl = 0.85f + 0.45f * sc;
+      if (fi == 27 && layer == L_UNDER) scl = 0.8f + 0.5f * sc;
       items.push_back({x, y, z, rot * TAU, scl, keep, (uint16_t)fi});
     }
   if (layer == L_UNDER && !items.empty()) {
@@ -516,11 +521,12 @@ void defineLayers() {
   LAYERS.push_back({L_UNDER, 202,
                     {{"Fern.glb", 0.09f}, {"Bush.glb", 0.002f}, {"Bush with Flowers.glb", 0.08f},
                      {"Flower Group.glb", 0.1f}, {"Flower Group-LqTljN6Wg2.glb", 0.05f}, {"Flower Single.glb", 0.07f},
-                     {"Lupin.glb", 0.0f}, {"Jalapeno.glb", 0.07f}, {"Leafy Bush A.glb", 0.03f}, {"Leafy Bush B.glb", 0.03f}, {"Leafy Herb A.glb", 0.025f}, {"Leafy Herb B.glb", 0.025f}, {"Leafy Clump A.glb", 0.025f}, {"Leafy Clump B.glb", 0.025f}, {"Tall Shrub 01.glb", 0.059f}, {"Tall Shrub 02.glb", 0.059f}, {"Tall Shrub 03.glb", 0}, {"Tall Shrub 04.glb", 0}, {"Tall Shrub 05.glb", 0}, {"Tall Shrub 06.glb", 0}, {"Tall Shrub 07.glb", 0}, {"Tall Shrub 08.glb", 0}, {"Tall Shrub 09.glb", 0}, {"Tall Shrub 10.glb", 0}, {"Ground Litter.glb", 0}, {"Ground Twigs.glb", 0}, {"Ground Cones.glb", 0}},   // weight 0: only the outer meadows grow it (keeps every plant of the first valley where it was)
+                     {"Lupin.glb", 0.0f}, {"Jalapeno.glb", 0.07f}, {"Leafy Bush A.glb", 0.03f}, {"Leafy Bush B.glb", 0.03f}, {"Leafy Herb A.glb", 0.025f}, {"Leafy Herb B.glb", 0.025f}, {"Leafy Clump A.glb", 0.025f}, {"Leafy Clump B.glb", 0.025f}, {"Tall Shrub 01.glb", 0.059f}, {"Tall Shrub 02.glb", 0.059f}, {"Tall Shrub 03.glb", 0}, {"Tall Shrub 04.glb", 0}, {"Tall Shrub 05.glb", 0}, {"Tall Shrub 06.glb", 0}, {"Tall Shrub 07.glb", 0}, {"Tall Shrub 08.glb", 0}, {"Tall Shrub 09.glb", 0}, {"Tall Shrub 10.glb", 0}, {"Ground Litter.glb", 0}, {"Ground Twigs.glb", 0}, {"Ground Cones.glb", 0}, {"Reeds.glb", 0}},   // weight 0: only the outer meadows grow it (keeps every plant of the first valley where it was)
                     5,
                     [](float x, float z, float h) -> float {
                       if (h < -0.5f || h > 88 || world::pathDistance(x, z) < 3.0f || world::nearRoute(x, z) < 4.2f || hypot2(x, z) < SETTLEMENT_RADIUS || world::slopeAt(x, z) > 0.8f) return 0;
-                      if (world::riverMask(x, z) > 0.3f || world::lakeAt(x, z, 1) >= 0) return 0;
+                      { float rm = world::riverMask(x, z); if (rm > 0.3f) return rm < 0.75f ? 0.9f : 0.0f; }   // v1.1.1: the bank strip takes reeds
+                      if (world::lakeAt(x, z, 1) >= 0) return 0;
                       float fd = world::forestDensity(x, z), pd = world::pathDistance(x, z);
                       float edge = sstep(fd, 0.12f, 0.35f) * (1 - sstep(fd, 0.55f, 0.8f));   // v0.9.93: light reaches the forest edge: thickets
                       float pathSide = 1 - sstep(pd, 4.0f, 9.0f);                              // and along paths

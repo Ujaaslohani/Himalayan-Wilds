@@ -21,6 +21,7 @@ struct Model {
   mutable float spots = 0;  // procedural leopard rosettes (cells per model unit), 0 = none
   bool ok = false;
   unsigned vao = 0, vbo = 0, ebo = 0;
+  unsigned uvbo = 0, tex = 0;   // v1.1.8: optional real texture (UV trailer + <name>_tex.png)
   int nIdx = 0, nJ = 0;
   std::vector<int> parent;
   std::vector<Mat4> ibm, pre;
@@ -39,6 +40,9 @@ const Model* load(const std::string& assetPath);  // cached; nullptr if missing
 
 // draw one posed model; `xf` places it in the world (translation * yaw * scale)
 void draw(const Model& m, const Pose& p, const Mat4& xf, bool shadow);
+// v1.1.1: turn the neck (and everything after it: head, ears, jaw) by yaw/pitch radians about the neck joint
+void aimHead(const Model& m, Pose& p, int neckJoint, float yaw, float pitch);
+void setWet(float w);   // v1.1.11: 0..1 soaked coat (this animal waded or swam)
 void setWhite(float w);  // 0..1 pale coat (the white deer)
 void beginDraw(bool shadow);
 }

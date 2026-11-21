@@ -603,6 +603,18 @@ void footstepSnow() {
   for (int i = 0; i < 4; i++) aburst(t + i * 0.012, 2, 1700 * v + i * 260, 2.0f, 0.03f, 0.04f, (rnd() * 2 - 1) * 0.3f, 0.002f);
   aburst(t, 0, 260 * v, 0.7f, 0.1f, 0.035f, 0, 0.01f);
 }
+void footstepLeaves() {
+  float v = vary(0.15f);
+  double t = now();
+  for (int i = 0; i < 5; i++) aburst(t + i * 0.009 + rnd() * 0.006, 2, 2600 * v + rnd() * 1800, 2.4f, 0.02f, 0.03f, (rnd() * 2 - 1) * 0.3f, 0.001f);
+  aburst(t, 1, 3800 * v, 0.8f, 0.08f, 0.02f, 0, 0.004f);
+}
+void footstepMud() {
+  float v = vary(0.12f);
+  double t = now();
+  aburst(t, 0, 300 * v, 0.9f, 0.09f, 0.06f, 0, 0.004f);
+  aburst(t + 0.05, 2, 650 * v, 1.6f, 0.12f, 0.035f, (rnd() * 2 - 1) * 0.2f, 0.008f);   // the suck as the boot lifts
+}
 void footstepWater() {
   float v = vary(0.12f);
   double t = now();
@@ -692,6 +704,14 @@ void bowRelease(float g, float pan) {
   aburst(t, 2, 900 * vary(0.08f), 0.7f, 0.04f, 0.26f * g, pan, 0.002f);
   aburst(t, 0, 160, 0.7f, 0.1f, 0.5f * g, pan, 0.003f);
   sweep(t + 0.005, 1700, 600, 0.9f, 0.22f, 0.09f * g * hi, pan, 0.03f);
+  {  // v1.1.11: out in the open the slap comes back off the valley walls, softer and later
+    const Vec3& p = E.player.pos;
+    float open = envmap::openAt(p.x, p.z) * (1 - g_indoor.load()) * (1 - 0.6f * envmap::canopyAt(p.x, p.z));
+    if (open > 0.25f) {
+      aburst(t + 0.32, 2, 700, 0.6f, 0.08f, 0.07f * g * open, -pan, 0.004f);
+      aburst(t + 0.61, 2, 600, 0.5f, 0.1f, 0.035f * g * open, pan * 0.5f, 0.006f);
+    }
+  }
 }
 void arrowWhiz(float g, float pan) {
   if (g <= 0.002f) return;
@@ -1003,6 +1023,7 @@ void update(float dt) {
   float on = E.playing ? 1.0f : 0.3f;
   const Vec3& p = E.player.pos;
   float gust = 0.6f + 0.4f * std::sin(E.clock * 0.23f) * std::sin(E.clock * 0.071f + 1);
+  gust *= 0.55f + 0.45f * std::min(2.2f, wind.strength);   // v1.1.11: the weather's wind (the one bending the trees) drives the bed
   float w = (0.025f + 0.07f * season.snow + 0.06f * season.fall + std::max(0.0f, (p.y - 40) / 80) * 0.06f) * gust * on;
   w *= 1 + 3.0f * sky::blizzard();  // blizzard wind roar
   g_beds[0].target = w;
@@ -1048,6 +1069,19 @@ void update(float dt) {
   g_beds[6].target = rain * (0.1f + canopy * 0.08f) * (1 - 0.35f * in);
   g_beds[6].freqTarget = 700 - 350 * in;
   g_beds[0].target *= 1 - 0.7f * in;
+  {  // v1.1.11: leaves keep dripping for a minute or two after the rain stops; strong gusts set the canopy rustling
+    static float wetT = 0, dripT = 0, rustT = 0;
+    wetT = rain > 0.1f ? 1.0f : std::max(0.0f, wetT - dt / 100.0f);
+    dripT -= dt; rustT -= dt;
+    if (rain < 0.05f && wetT > 0.02f && canopy > 0.3f && in < 0.5f && dripT <= 0) {
+      dripT = (0.15f + rnd() * 0.6f) / (wetT * canopy);
+      aburst(now(), 2, 900 + rnd() * 900, 3.0f, 0.05f, 0.02f * wetT, rnd() * 1.6f - 0.8f, 0.001f);
+    }
+    if (gust * wind.strength > 1.15f && canopy > 0.25f && in < 0.5f && rustT <= 0 && E.playing) {
+      rustT = 2.5f + rnd() * 4;
+      audio::playClip("foliage", std::min(0.35f, 0.12f * wind.strength * canopy) * vary(0.1f), (rnd() * 2 - 1) * 0.6f);
+    }
+  }
   if (hasLoops()) {
     // recorded beds: day birdsong outdoors, birds by the water, the stream near the river, rain (night) and storm
     float day = sstep(E.daylight, 0.2f, 0.5f), dry = 1 - std::min(1.0f, rain * 2.5f), cold = 1 - 0.7f * std::min(1.0f, season.snow);

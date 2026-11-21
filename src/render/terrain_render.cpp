@@ -23,7 +23,7 @@ vec3 groundShade(vec3 sc, vec3 wp, float ny, float road){
   float sN1 = 0.5 + 0.5 * sin(wp.x * 2.7 + sin(wp.z * 2.1)) * sin(wp.z * 3.1 + sin(wp.x * 1.9));
   float sN2 = 0.5 + 0.5 * sin(wp.x * 0.21 + sin(wp.z * 0.17) * 2.0) * sin(wp.z * 0.19 + 1.3);
   vec3 sAu = mix(vec3(0.42, 0.26, 0.07), vec3(0.5, 0.18, 0.05), sN2);
-  sc = mix(sc, sAu * (0.9 + 0.2 * sN1), lAut * sG * 0.45);
+  // v1.1.10: the ground's grass no longer turns orange in autumn (only tree leaves do)
   sc = mix(sc, sc * vec3(0.88, 1.18, 0.82), lSpr * sG);
   sc = mix(sc, sc * vec3(1.25, 1.05, 0.6), u_dry * sG * (0.35 + 0.45 * sN2));
 #ifndef GROUND_BAKE
@@ -59,12 +59,15 @@ vec3 groundShade(vec3 sc, vec3 wp, float ny, float road){
     float f1 = vnoise(wp.xz * 0.045), f2 = vnoise(wp.xz * 0.21 + 3.0), f3 = sNear ? vnoise(wp.xz * 0.9 + 7.0) : 0.5;
     float field = f1 * 0.45 + f2 * 0.33 + 0.11 + sFlat * 0.3 - (1.0 - ny) * 0.45;   // no near-only term: snow cover must not change as you walk up
     float cover = clamp(u_snow, 0.0, 1.0) * 0.72 * sDry;          // even deep winter leaves bare patches (~25% of flats)
+    // v1.1.6: autumn's light dusting (season snow 0.25) belongs on the high ground, not the valley floor: the village
+    // square kept tipping into white patches whenever anything nudged its normals or flatness
+    cover *= mix(1.0, smoothstep(55.0, 130.0, wp.y), clamp(u_autumn, 0.0, 1.0));
     float thr = 1.15 - cover;
     sAmt = smoothstep(thr, thr + 0.16, field);
     float fringe = sAmt * (1.0 - sAmt) * 4.0;                      // where the snow thins
     vec3 sCol = mix(vec3(0.70, 0.75, 0.83), vec3(0.9, 0.92, 0.96), f2) * (0.92 + 0.08 * sN1);
     sCol = mix(sCol, vec3(0.5, 0.48, 0.45), fringe * 0.45);       // slushy, earthy edge
-    vec3 bare = mix(sc, mix(vec3(0.3, 0.25, 0.18), vec3(0.42, 0.38, 0.24), f3), 0.85 * clamp(u_snow * 1.5, 0.0, 1.0));  // no summer-green between drifts  // frozen earth and dead grass between drifts
+    vec3 bare = mix(sc, mix(vec3(0.3, 0.25, 0.18), vec3(0.42, 0.38, 0.24), f3), 0.85 * clamp(u_snow * 1.5, 0.0, 1.0) * mix(1.0, smoothstep(55.0, 130.0, wp.y), clamp(u_autumn, 0.0, 1.0)));  // no summer-green between drifts  // frozen earth and dead grass between drifts
     sc = mix(bare, sCol, sAmt);
   }
   return sc;
@@ -425,7 +428,7 @@ void terrainMaterial(vec3 wp, vec3 n, vec2 cell, float fd, out vec3 sc, out vec3
     {
       if (wForest > 0.01 && fadeG > 0.01) {
         float k = smoothstep(0.35, 0.65, vnoise(wp.xz * 0.21));  // patches of fresh litter among the older floor
-        vec3 f = mix(texture(u_ground, vec3(uv, 0.0)).rgb, texture(u_ground, vec3(wp.xz * 0.6, 5.0)).rgb, k) * mix(1.0, 1.15, u_autumn);
+        vec3 f = mix(texture(u_ground, vec3(uv, 0.0)).rgb, texture(u_ground, vec3(wp.xz * 0.6, 5.0)).rgb, k) * 1.0;
         sc = mix(sc, f * macro, wForest * 0.85 * fadeG);
       }
       if (wMud > 0.01) sc = mix(sc, texture(u_ground, vec3(uv, 1.0)).rgb * macro, wMud * 0.8 * fadeG);
@@ -556,6 +559,17 @@ void main(){
   if (wetG > 0.01) {
     sc *= 1.0 - 0.3 * wetG;
   }
+  {  // v1.1.4: frozen puddles: on winter mornings the hollows on trails hold a skin of grey-white ice
+    float ice = smoothstep(0.45, 0.7, u_snow) * smoothstep(0.1, 0.6, u_sunDir.x) * (1.0 - smoothstep(30.0, 40.0, fd));
+    if (ice > 0.01) {
+      float pm = gdet(v_wpos).a;
+      float pk = smoothstep(0.66, 0.7, pm + road * 0.06) * smoothstep(0.85, 0.97, n.y) * ice;   // small hollows only
+      float crack = smoothstep(0.02, 0.0, abs(vnoise(v_wpos.xz * 3.0) - 0.5)) * 0.35;
+      sc = mix(sc, vec3(0.62, 0.68, 0.74) * (1.0 - crack), pk * 0.85);
+      nb = normalize(mix(nb, vec3(0.0, 1.0, 0.0), pk));
+      puddle = max(puddle, pk * 0.6);   // the sky sheen below makes it glint
+    }
+  }
   if (wetG > 0.01 && fd < 35.0) {  // puddles within 35 m (ripple rings stay within 15 m)
     float pm = gdet(v_wpos).a;
     puddle = smoothstep(0.62, 0.7, pm + road * 0.18) * smoothstep(0.85, 0.97, n.y) * wetG * (1.0 - smoothstep(27.0, 35.0, fd));
@@ -606,6 +620,7 @@ void main(){
     litT = mix(litT, skyR * 0.6, puddle * (0.35 + 0.6 * fr));
     litT += u_sunCol.rgb * pow(max(dot(reflect(-u_sunDir.xyz, nb), Vt), 0.0), 60.0) * sh * (0.15 + puddle) * wetG * 0.3;
   }
+  if (wetG <= 0.01 && puddle > 0.01) { vec3 Vt = normalize(u_camPos - v_wpos); litT += u_sunCol.rgb * pow(max(dot(reflect(-u_sunDir.xyz, nb), Vt), 0.0), 40.0) * sh * puddle * 0.5; }   // ice glints
   vec3 c = outColor(litT);
   c = mix(c, fogTint(v_wpos), fogGround(v_wpos, v_depth));
   if (fd > 32.0) c = mix(c, v_farCol, smoothstep(32.0, 40.0, fd));  // full procedural detail ends at 40 m (was 50): ~1/3 fewer expensive pixels

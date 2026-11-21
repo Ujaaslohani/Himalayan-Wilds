@@ -51,6 +51,7 @@ layout(std140) uniform Frame {
 #define u_rain u_shadowMix.y
 #define u_volFog u_shadowMix.z
 #define u_forestIn u_shadowMix.w
+#define u_exposure u_taa.y   // v1.1.5: eye adaptation (0 = off)
 #define PI 3.141592653589793
 #define FADE_NOISE_STATIC() fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy), vec2(0.06711056, 0.00583715))))
 #define FADE_NOISE() fract(52.9829189 * fract(dot(floor(gl_FragCoord.xy) + 5.588238 * mod(floor(u_clock * 60.0), 64.0), vec2(0.06711056, 0.00583715))))
@@ -194,7 +195,9 @@ vec3 lambert(vec3 albedo, vec3 n, float shadow){
   irr *= mix(vec3(0.94, 1.0, 1.0), vec3(1.0), shadow);       // shade green-grey, not blue (was 0.9, 0.97, 1.1)
   // v1.1.0: bounce light under the canopy: sun patches and sunlit leaves throw a warm green fill into the shade,
   // mostly onto trunk sides and the undersides of leaves (they face away from the sky light)
-  irr += u_sunCol.rgb * vec3(0.55, 0.64, 0.33) * 0.1 * (1.0 - g_envVis) * smoothstep(0.0, 0.3, u_sunDir.y) * (0.65 - 0.35 * n.y);
+  // v1.1.2: only in the forest (u_forestIn), and never more than the sky fill: out in the open g_envVis is not
+  // set up for every shader (people, props), so this lit villagers bright orange
+  irr += u_sunCol.rgb * vec3(0.55, 0.64, 0.33) * 0.06 * u_forestIn * clamp(1.0 - g_envVis, 0.0, 1.0) * smoothstep(0.0, 0.3, u_sunDir.y) * (0.65 - 0.35 * n.y);
   irr += g_fireLight;
   irr += g_lanternC * (0.3 + 0.7 * max(dot(n, g_lanternL), 0.0));
 #if !defined(CAPTURE)
@@ -208,7 +211,7 @@ vec3 lambert(vec3 albedo, vec3 n, float shadow){
   return albedo * irr * (1.0 / PI);
 }
 vec3 outColor(vec3 lit){
-  vec3 a = aces(lit);
+  vec3 a = aces(lit * (u_exposure > 0.0 ? u_exposure : 1.0));
   {  // v0.9.85 grade: a little less contrast, soft highlights, muted blues (film-like, not "game green")
     a = a * 0.94 + 0.01;
     a -= max(a - 0.78, 0.0) * 0.35;
@@ -263,7 +266,7 @@ float hazeAmt(vec3 wp, float depth){
   {  // v1.1.0: valley fog pools in the low ground at dawn and dusk (and in rain): you look down onto a layer of it
     float tw2 = 1.0 - smoothstep(0.35, 0.85, u_daylight);
     float pool = exp(-max(wp.y - 14.0, 0.0) / 9.0) * (0.75 + 0.25 * vnoise(wp.xz * 0.012 + u_windDir * (u_clock * 0.01)));
-    float vf = pool * max(tw2, 0.6 * u_rain) * 0.7 * (1.0 - exp(-depth * 0.012)) * smoothstep(20.0, 80.0, depth);
+    float vf = pool * max(tw2, 0.6 * u_rain) * 0.45 * (1.0 - exp(-depth * 0.012)) * smoothstep(20.0, 80.0, depth);
     haze = 1.0 - (1.0 - haze) * (1.0 - vf);
   }
   return haze;
@@ -434,6 +437,9 @@ vec3 windAt(vec3 p, mat4 M, float T_){
   gw *= 0.55 + 0.45 * sin(gAlong * 0.013 - T_ * 0.35 + gAcross * 0.009);
   float sGust = u_windS * (0.45 + 0.95 * gw * gw);
   float sSw = 0.55 + 0.45 * sin(T_ * 1.4 + sWo.x * 0.11 + sWo.y * 0.09);
+  // v1.1.10: storms bend whole trees: in strong wind the trunk leans downwind and rocks in slow heavy beats
+  float stK = smoothstep(0.95, 1.8, u_windS);
+  float stLean = stK * (0.9 + 0.6 * gw + 0.35 * sin(T_ * 0.85 + sWo.x * 0.05 + sWo.y * 0.04));
 #if defined(K_GRASS)
   { float b = min(p.y * p.y * 4.0, 1.4);
     p += sWd * ((0.25 + sSw) * 0.32 * sGust * b) + vec3(sin(T_ * 3.1 + sWo.x * 0.8 + a_pos.x * 9.0), 0.0, cos(T_ * 2.7 + sWo.y * 0.8)) * 0.07 * sGust * b; }
@@ -443,7 +449,7 @@ vec3 windAt(vec3 p, mat4 M, float T_){
 #elif defined(K_FLOWER)
   { float h = clamp(p.y, 0.0, 1.5); p += sWd * ((0.2 + sSw) * 0.3 * sGust * h * h) + vec3(sin(T_ * 3.3 + sWo.x * 2.0), 0.0, cos(T_ * 2.9 + sWo.y * 2.0)) * 0.04 * sGust * h; }
 #elif defined(K_BARK)
-  { float h = max(p.y, 0.0) / 12.0; p += sWd * ((0.2 + sSw) * 1.1 * sGust * h * h); }
+  { float h = max(p.y, 0.0) / 12.0; p += sWd * ((0.2 + sSw) * 1.1 * sGust * h * h + stLean * 1.4 * h * h); }
 #elif defined(K_LEAF)
   { float h = max(p.y, 0.0) / 12.0;
 #ifdef VF_GLB
@@ -451,10 +457,10 @@ vec3 windAt(vec3 p, mat4 M, float T_){
     { float tip = clamp(1.0 - a_uv.y, 0.0, 1.0); float ph = T_ * 6.3 + dot(a_pos, vec3(3.1, 2.3, 2.7)) + sWo.x;
       p += vec3(sin(ph), 0.6 * sin(ph * 1.3 + 1.1), cos(ph * 0.9 + 0.7)) * 0.09 * (0.35 + sGust) * tip * tip; }
 #endif
-    p += sWd * ((0.2 + sSw) * 1.1 * sGust * h * h)
+    p += sWd * ((0.2 + sSw) * 1.1 * sGust * h * h + stLean * 1.4 * h * h)
       + vec3(sin(T_ * 4.3 + a_pos.x * 1.7 + sWo.x), sin(T_ * 5.1 + a_pos.y * 2.3) * 0.5, cos(T_ * 3.9 + a_pos.z * 1.9 + sWo.y)) * 0.11 * sGust * clamp(h * 1.5, 0.3, 1.5); }
 #elif defined(K_PINE)
-  { float h = max(p.y, 0.0) / 12.0; p += sWd * ((0.2 + sSw) * 0.9 * sGust * h * h)
+  { float h = max(p.y, 0.0) / 12.0; p += sWd * ((0.2 + sSw) * 0.9 * sGust * h * h + stLean * 1.4 * h * h)
       + vec3(sin(T_ * 3.7 + a_pos.y * 2.0 + sWo.x), 0.0, cos(T_ * 3.3 + a_pos.y * 1.7 + sWo.y)) * 0.06 * sGust * clamp(h * 1.5, 0.0, 1.2); }
 #elif defined(K_BUILD)
   { float wv = a_col.a < 0.999 ? a_col.a * (255.0 / 254.0) : 0.0;
@@ -651,19 +657,20 @@ vec3 seasonColor(vec3 sc, vec3 wp, float ny, float seed){
 #elif defined(K_PLANT)
   float sL = clamp(dot(sc, vec3(0.3, 0.59, 0.11)) * 3.0, 0.4, 1.2);
   vec3 sAu = mix(vec3(0.75, 0.38, 0.06), vec3(0.55, 0.16, 0.04), seed);
-  sc = mix(sc, sAu * sL, lAut * 0.85);
+  // v1.1.10: only tree leaves turn in autumn: plants stay green (a little drier)
+  sc = mix(sc, sc * vec3(1.03, 0.98, 0.86), lAut * 0.35);
   sc = mix(sc, sc * vec3(0.9, 1.2, 0.85), lSpr);
   sc = mix(sc, sc * vec3(1.15, 1.05, 0.7), u_dry * 0.4);
   sc = mix(sc, SNOWC, u_snow * SNOWK * (0.55 + 0.45 * smoothstep(0.0, 0.6, ny)));
 #elif defined(K_GRASS)
   float sL = clamp(dot(sc, vec3(0.3, 0.59, 0.11)) * 3.0, 0.45, 1.2);
-  sc = mix(sc, vec3(0.62, 0.42, 0.12) * sL, lAut * 0.75);
+  sc = mix(sc, sc * vec3(1.03, 0.98, 0.86), lAut * 0.3);   // v1.1.10: grass stays green in autumn
   sc = mix(sc, sc * vec3(0.92, 1.22, 0.85), lSpr);
   sc = mix(sc, sc * vec3(1.3, 1.08, 0.55), u_dry * 0.55);
   sc = mix(sc, SNOWC, u_snow * 0.85);
 #elif defined(K_FLOWER)
   sc = mix(sc, sc * 1.25, lSpr);
-  sc = mix(sc, sc * vec3(0.7, 0.5, 0.35), lAut * 0.6);
+  // v1.1.10: flowers keep their colour in autumn
 #elif defined(K_BARK)
   sc = mix(sc, SNOWC, u_snow * smoothstep(0.45, 0.9, ny) * 0.9);
 #elif defined(K_ROCK)
@@ -824,8 +831,10 @@ void main(){
       float lich = smoothstep(0.58, 0.78, vnoise(vec2(v_wpos.x + v_wpos.z, v_wpos.y) * 9.0)) * bd * (1.0 - u_snow);
       base.rgb *= mix(vec3(1.0), vec3(1.12, 1.16, 1.0), lich * 0.5);
       n = normalize(mix(n, nk, bd));
-      float moss = smoothstep(0.5, 0.75, vnoise(v_wpos.xz * 1.3 + v_wpos.y * 0.5)) * smoothstep(-0.1, 0.7, -n.x) * bd * (1.0 - u_snow);
+      float moss = smoothstep(0.5, 0.75, vnoise(v_wpos.xz * 1.3 + v_wpos.y * 0.5)) * smoothstep(-0.1, 0.7, -n.z) * bd * (1.0 - u_snow);   // v1.1.4: moss and lichen on the north (shady) side
       base.rgb = mix(base.rgb, dot(base.rgb, vec3(0.5)) * vec3(0.55, 1.0, 0.3) + vec3(0.006, 0.016, 0.0), moss * 0.6);
+    // v1.1.4: hoar frost clinging to the north side of the trunk on cold mornings
+    base.rgb = mix(base.rgb, vec3(0.7, 0.74, 0.78), smoothstep(-0.1, 0.6, -n.z) * smoothstep(0.1, 0.6, u_sunDir.x) * clamp(u_autumn * 0.4 + u_snow * 0.8, 0.0, 0.7) * (1.0 - u_rain) * smoothstep(0.35, 0.6, vnoise(v_wpos.xz * 4.0 + v_wpos.y * 3.0)));
     }
   }
 #endif
@@ -841,7 +850,7 @@ void main(){
     base.rgb *= mix(vec3(1.0), alb, rd);
     n = normalize(mix(n, nr, rd));
     base.rgb *= 1.0 - 0.25 * smoothstep(0.7, 0.85, vnoise(v_wpos.xz * 7.0 + v_wpos.y * 5.0)) * rd;   // pits and dark flecks
-    float moss = smoothstep(0.45, 0.85, n.y) * smoothstep(0.3, 0.6, vnoise(v_wpos.xz * 0.9) * 0.7 + vnoise(v_wpos.xz * 3.1) * 0.3 * rd) * mix(0.75, 1.0, rd);  // far rocks keep their moss: no pale dots on the hills
+    float moss = smoothstep(0.45, 0.85, n.y) * smoothstep(0.3, 0.6, vnoise(v_wpos.xz * 0.9) * 0.7 + vnoise(v_wpos.xz * 3.1) * 0.3 * rd) * mix(0.75, 1.0, rd) * (0.55 + 0.6 * smoothstep(-0.4, 0.5, -n.z));  // v1.1.4: more on the north side   // far rocks keep their moss: no pale dots on the hills
     {  // sedimentary layering: warm and cool bands with dark seams between them, tilted a little per rock
       float sy = v_wpos.y * 1.4 + dot(v_wpos.xz, vec2(0.21, -0.17)) * (fract(v_seed * 3.7) - 0.5) + vnoise(v_wpos.xz * 0.6) * 0.7;
       float band = fract(sy);
@@ -849,6 +858,11 @@ void main(){
       base.rgb *= 1.0 - 0.32 * (1.0 - smoothstep(0.0, 0.07, band)) * (1.0 - smoothstep(0.45, 0.85, n.y));
     }
     base.rgb = mix(base.rgb, (base.rgb * 0.5 + 0.5 * dot(base.rgb, vec3(0.33))) * vec3(0.62, 1.05, 0.3) + vec3(0.012, 0.03, 0.0), moss * 0.85 * (1.0 - u_snow));
+    {  // v1.1.4: lichen crusts (pale grey-green rosettes) and morning frost on the shaded north faces of rocks
+      float lich = smoothstep(0.62, 0.7, vnoise(v_wpos.xz * 2.7 + v_wpos.y * 2.1)) * smoothstep(-0.2, 0.6, -n.z) * (1.0 - u_snow) * (1.0 - moss);
+      base.rgb = mix(base.rgb, vec3(0.42, 0.46, 0.36), lich * 0.55);
+      base.rgb = mix(base.rgb, vec3(0.72, 0.76, 0.8), smoothstep(-0.1, 0.6, -n.z) * smoothstep(0.1, 0.6, u_sunDir.x) * clamp(u_autumn * 0.4 + u_snow * 0.8, 0.0, 0.7) * (1.0 - u_rain) * 0.7);
+    }
 #ifndef SHADOW_PASS
     // ground blend: the lowest ~0.4-1.1 m of a rock takes on the soil it sits in (ragged, noise-driven edge),
     // its normal tips up so it is lit like the ground, and a dark crease marks where stone meets earth.
@@ -941,6 +955,19 @@ void main(){
     // v1.1.0: a broad glow too: any leaf between you and the sun lets yellow-green light through, not just near the disc
     { vec3 Vt = normalize(v_wpos - u_camPos); float bt = max(dot(Vt, u_sunDir.xyz), 0.0);
       lit += sc * vec3(0.95, 1.2, 0.45) * u_sunCol.rgb * (bt * bt * 0.32) * mix(0.35, 1.0, sh) * smoothstep(-0.02, 0.2, u_sunDir.y); }
+    // v1.1.10: waxy leaf shine: a soft sun highlight on leaves turned to catch it, stronger on wet leaves
+    { vec3 Vw = normalize(u_camPos - v_wpos);
+      float sp = pow(max(dot(reflect(-u_sunDir.xyz, n), Vw), 0.0), 14.0);
+      float nearK = 1.0 - smoothstep(25.0, 60.0, v_depth);
+      lit += u_sunCol.rgb * sp * (0.07 + 0.22 * u_wet) * sh * nearK * smoothstep(0.0, 0.15, u_sunDir.y);
+      // v1.1.10: dew: in the first hours after sunrise, tiny drops on the leaves glitter in the low sun
+      float dew = smoothstep(0.15, 0.55, u_sunDir.x) * (1.0 - smoothstep(0.25, 0.55, u_sunDir.y)) * (1.0 - u_snow) * (1.0 - u_rain) * (1.0 - smoothstep(6.0, 14.0, v_depth));
+      if (dew > 0.01) {
+        float h = fract(sin(dot(floor(v_wpos * 38.0), vec3(12.99, 78.23, 37.71))) * 43758.5);
+        float g = step(0.992, h) * pow(max(dot(reflect(-u_sunDir.xyz, n), Vw), 0.0), 4.0);
+        lit += vec3(1.0, 0.98, 0.92) * u_sunCol.rgb * g * dew * 2.5 * sh;
+      }
+    }
   }
 #endif
 #ifdef SOFT

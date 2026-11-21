@@ -592,7 +592,56 @@ void main(){
 GLuint g_smokeVao = 0, g_smokeVbo = 0;
 struct Chimney { Vec3 p; };
 std::vector<Chimney> g_chim;
+std::vector<Mat4> g_racks;   // v1.1.3: drying racks beside the homes
+Mesh g_rackMesh;
+struct Icicles { Mat4 xf; Mesh mesh; };
+std::vector<Icicles> g_ice;   // v1.1.5: icicles along each home's eaves (shown in winter)
 size_t g_chimSig = 0;
+// v1.1.8: roof ridge points for perching birds (the chimney tops of the homes)
+void roofPerches(std::vector<Vec3>& out) { out.clear(); for (auto& c : g_chim) out.push_back(c.p); }
+void drawRacks() {
+  if (season.snow > 0.35f && !g_ice.empty()) {   // icicles in winter
+    Shader& sh = render::object(VFmt::P3C4N4, IM_NONE, SeasonKind::None, 0);
+    render::setEmissive(sh, Color(0.05f, 0.06f, 0.08f), 0.4f);   // a little glassy brightness
+    const Vec3& p = E.player.pos;
+    for (auto& q : g_ice) {
+      float dx = q.xf.m[12] - p.x, dz = q.xf.m[14] - p.z;
+      if (dx * dx + dz * dz > 70.0f * 70.0f || !render::sphereVisible({q.xf.m[12], q.xf.m[13] + 3, q.xf.m[14]}, 7)) continue;
+      render::setModel(sh, q.xf);
+      q.mesh.draw();
+    }
+  }
+  if (g_racks.empty()) return;
+  if (!g_rackMesh.valid()) {
+    // Himalayan drying rack: two posts and poles; strings of red chillies, yellow maize cobs tied by their husks,
+    // and a bundle of herbs hung to dry
+    Shape r;
+    for (int sd = -1; sd <= 1; sd += 2) r.rod("#5a4128", {sd * 0.8f, 0, 0}, {sd * 0.8f, 1.9f, 0}, 0.045f, 0.04f, 5);
+    r.rod("#6b4c2e", {-0.9f, 1.82f, 0}, {0.9f, 1.82f, 0}, 0.035f, 0.035f, 5);
+    r.rod("#6b4c2e", {-0.9f, 1.25f, 0}, {0.9f, 1.25f, 0}, 0.03f, 0.03f, 5);
+    for (int k = 0; k < 5; k++) {   // chilli strings from the top pole
+      float x = -0.6f + k * 0.3f;
+      r.rod("#8a7a5a", {x, 1.82f, 0}, {x, 1.3f, 0}, 0.005f, 0.005f, 3);
+      for (int j = 0; j < 7; j++) r.cone(j % 3 ? "#b3261e" : "#8e1c16", {x + 0.02f * ((j & 1) ? 1 : -1), 1.78f - j * 0.07f, 0.02f * ((j % 3) - 1)}, 0.025f, 0.09f, 4, {PI, 0, 0.3f * ((j & 1) ? 1 : -1)});
+    }
+    for (int k = 0; k < 4; k++) {   // maize cobs hanging from the lower pole
+      float x = -0.55f + k * 0.37f;
+      r.ball(k % 2 ? "#e0b23a" : "#d49a2a", {x, 1.07f, 0}, {0.05f, 0.14f, 0.05f});
+      r.ball("#cdbf8a", {x, 1.22f, 0.02f}, {0.04f, 0.05f, 0.025f});
+    }
+    r.ball("#5f7a3a", {0.62f, 1.62f, 0.02f}, {0.09f, 0.16f, 0.08f});   // herb bundle
+    g_rackMesh = uploadMesh(r.build(true));
+  }
+  Shader& sh = render::object(VFmt::P3C4N4, IM_NONE, SeasonKind::None, 0);
+  render::setEmissive(sh, Color(0, 0, 0), 0);
+  const Vec3& p = E.player.pos;
+  for (auto& m : g_racks) {
+    float dx = m.m[12] - p.x, dz = m.m[14] - p.z;
+    if (dx * dx + dz * dz > 120.0f * 120.0f || !render::sphereVisible({m.m[12], m.m[13] + 1, m.m[14]}, 1.5f)) continue;
+    render::setModel(sh, m);
+    g_rackMesh.draw();
+  }
+}
 void drawSmoke() {
   // chimney tops: the highest point of each home's model, turned and placed like the house
   size_t sig = A.structures.size() * 131;
@@ -600,6 +649,9 @@ void drawSmoke() {
   if (sig != g_chimSig) {
     g_chimSig = sig;
     g_chim.clear();
+    g_racks.clear();
+    for (auto& q : g_ice) q.mesh.destroy();
+    g_ice.clear();
     for (auto& st : A.structures) {
       if (KINDS[st.kind].group != KG_HOME) continue;
       const BuiltModel& bm = structureModel(st.kind, st.look);
@@ -616,6 +668,41 @@ void drawSmoke() {
       if (!n) continue;
       sx /= n; sz /= n;
       float c = std::cos(st.rot), sn = std::sin(st.rot);
+      {  // drying rack against the side wall: just past the model's +x side, halfway along
+        float mx = -1e9f, mnz = 1e9f, mxz = -1e9f;
+        for (int i = 0; i < md.vertexCount; i++) { const float* v = (const float*)&md.verts[i * stride]; mx = std::max(mx, v[0]); mnz = std::min(mnz, v[2]); mxz = std::max(mxz, v[2]); }
+        float lx = mx + 0.55f, lz = (mnz + mxz) * 0.5f;
+        float wx = st.x + lx * c + lz * sn, wz = st.z - lx * sn + lz * c;
+        g_racks.push_back(Mat4::compose({wx, gy(wx, wz), wz}, Quat::axisAngle({0, 1, 0}, st.rot + PI * 0.5f), {1, 1, 1}));
+      }
+      {  // icicles: along every side whose outermost edge is up in the air (a roof overhang, not a wall foot)
+        float mnx = 1e9f, mxx = -1e9f, mnz = 1e9f, mxz = -1e9f;
+        for (int i = 0; i < md.vertexCount; i++) { const float* v = (const float*)&md.verts[i * stride]; mnx = std::min(mnx, v[0]); mxx = std::max(mxx, v[0]); mnz = std::min(mnz, v[2]); mxz = std::max(mxz, v[2]); }
+        Shape ic;
+        int nIc = 0;
+        uint32_t rs = (uint32_t)(st.x * 131 + st.z * 71) | 1;
+        auto rnd = [&]() { rs ^= rs << 13; rs ^= rs >> 17; rs ^= rs << 5; return (rs & 0xffff) / 65536.0f; };
+        for (int side = 0; side < 4; side++) {
+          bool alongZ = side < 2;
+          float edge = side == 0 ? mxx : side == 1 ? mnx : side == 2 ? mxz : mnz;
+          float lo = 1e9f;
+          for (int i = 0; i < md.vertexCount; i++) {
+            const float* v = (const float*)&md.verts[i * stride];
+            float k = alongZ ? v[0] : v[2];
+            if (std::fabs(k - edge) < 0.06f) lo = std::min(lo, v[1]);
+          }
+          if (lo < 1.3f || lo > 6.0f) continue;
+          float a0 = alongZ ? mnz : mnx, a1 = alongZ ? mxz : mxx;
+          for (float t = a0 + 0.2f; t < a1 - 0.15f; t += 0.22f + rnd() * 0.2f) {
+            float len = 0.08f + rnd() * rnd() * 0.5f;
+            float in = edge + (edge > 0 ? -0.04f : 0.04f);
+            Vec3 at = alongZ ? Vec3(in, lo - 0.01f, t) : Vec3(t, lo - 0.01f, in);
+            nIc++;
+            ic.cone(rnd() < 0.5f ? "#dfe9f2" : "#c8d8e6", at, 0.022f + len * 0.05f, len, 5, {PI, 0, 0});
+          }
+        }
+        if (nIc) g_ice.push_back({Mat4::compose({st.x, st.y, st.z}, Quat::axisAngle({0, 1, 0}, st.rot), {1, 1, 1}), uploadMesh(ic.build(true))});
+      }
       g_chim.push_back({{st.x + sx * c + sz * sn, st.y + top + 0.1f, st.z - sx * sn + sz * c}});
     }
   }

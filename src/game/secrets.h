@@ -8,6 +8,8 @@ void reset();
 void update(float dt);
 void draw();
 void drawShadow();
+void roofPerches(std::vector<Vec3>& out);   // v1.1.8: home roof tops (birds perch there)
+void drawRacks();                                  // v1.1.3: chilli / maize drying racks beside homes
 void drawSmoke();                                  // chimney smoke (transparent pass)
 void drawCave();                                   // after the terrain: the tunnel behind the falls
 bool bridgeDeck(float x, float z, float feetY, float& y);  // plank bridges over the outer river crossings

@@ -1,3 +1,5 @@
+#include <unordered_map>
+#include "../game/engine.h"
 #include "mhuman.h"
 #include "render.h"
 #include "../gfx/gfx.h"
@@ -28,6 +30,15 @@ out float v_depth;
 void main(){
   mat4 sk = u_bones[a_joints.x] * a_w.x + u_bones[a_joints.y] * a_w.y + u_bones[a_joints.z] * a_w.z + u_bones[a_joints.w] * a_w.w;
   vec4 wp = sk * vec4(a_pos, 1.0);
+  // v1.1.10: wind in the clothes: skirt and coat hems lift and ripple downwind, more the further from the waist
+  if (a_uv.x < -0.5 && a_uv.y < -1.0) {
+    float low = clamp(-1.0 - a_uv.y, 0.0, 1.0);
+    float ph = u_clock * 3.1 + dot(wp.xz, vec2(1.7, 2.3)) + a_pos.y * 9.0;
+    vec2 wd = normalize(u_windDir + vec2(1e-4));
+    float k = low * low * 0.05 * (0.4 + u_windS) * (0.7 + 0.3 * sin(u_clock * 0.9 + wp.x * 0.3));
+    wp.xz += wd * k * (1.0 + 0.5 * sin(ph));
+    wp.y += k * 0.35 * sin(ph * 1.3 + 0.8);
+  }
   v_wpos = wp.xyz;
   v_nrm = mat3(sk) * a_nrm;
   v_uv = a_uv;
@@ -186,8 +197,8 @@ void addSkirt(std::vector<Vtx>& V, std::vector<uint32_t>& I, const Shape& s, uin
     Vtx o{};
     o.p[0] = v.p.x; o.p[1] = v.p.y; o.p[2] = v.p.z;
     o.n[0] = v.n.x; o.n[1] = v.n.y; o.n[2] = v.n.z;
-    o.uv[0] = -1; o.uv[1] = -1;
     float low = clampf((yTop - 0.04f - v.p.y) / std::max(0.05f, yTop - yHem), 0, 1);   // 0 at the waist, 1 at the hem
+    o.uv[0] = -1; o.uv[1] = -1.0f - low;   // v1.1.10: uv.y below -1 carries how far down the garment this is (wind)
     // the garment rings were centred on a round waist; the body's real waist is ~0.26 m wide and sits forward (back
     // at z -0.04, front +0.135): pull the upper part onto it so there is no 6-7 cm ledge across the back
     float fit = 1.0f - low / 0.3f; fit = fit <= 0 ? 0 : fit >= 1 ? 1 : fit * fit * (3 - 2 * fit);

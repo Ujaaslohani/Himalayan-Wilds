@@ -176,6 +176,10 @@ void main(){
     float wash = (1.0 - smoothstep(0.0, 0.05, depth)) * smoothstep(0.5, 0.75, vnoise(v_wpos.xz * 2.5 + vec2(t * 0.3, 0.0)));
     foam = max(foam, wash * 0.5);
   }
+  if (u_lake < 0.5 && u_ice < 0.3) {   // v1.1.11: foam broken off the rapids drifts downstream in thin, wandering streaks
+    float streak = smoothstep(0.72, 0.9, vnoise(vec2(fp.x * 0.5 + n1 * 0.6, fp.y * 9.0 + n3 * 1.5))) * smoothstep(0.7, 0.95, vnoise(vec2(fp.x * 0.12, fp.y * 1.3)));
+    foam = max(foam, streak * 0.45 * (1.0 - smoothstep(25.0, 60.0, v_depth)));
+  }
   col = mix(col, vec3(0.94, 0.97, 0.98), foam * 0.85);
   col += vec3(0.5, 0.55, 0.6) * rainDots * 0.18 * (0.3 + 0.7 * u_daylight);   // each ring catches a little light
   vec3 H = normalize(u_sunDir.xyz + V);
@@ -603,6 +607,7 @@ void draw() {
 }
 
 void setReflection(unsigned tex) { g_reflTex = tex; }
+unsigned reflection() { return g_reflTex; }
 void ripple(float x, float y, float z, float strength, float splash) {
   if (render::cam.pos.distanceTo({x, y, z}) > 90) return;
   float* r = g_rip[g_ripHead]; g_ripHead = (g_ripHead + 1) % 16;

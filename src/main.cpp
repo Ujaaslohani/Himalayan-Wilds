@@ -4,6 +4,7 @@
 #include "game/events.h"
 #include "game/relics.h"
 #include "game/tracks.h"
+#include "game/critters.h"
 #include "game/secrets.h"
 #include "core/crashlog.h"
 #include "core/version.h"
@@ -230,10 +231,19 @@ std::string timestampName() {
   return platform::saveDir() + "/" + b;
 }
 
+// v1.1.12: every launch writes its loading stage times to load_times.txt in the save folder (so a slow load can be diagnosed)
+static void loadLog(const char* m) {
+  static FILE* f = nullptr; static bool tried = false; static double t0 = platform::time(), tl = t0;
+  if (!tried) { tried = true; f = std::fopen((platform::saveDir() + "/load_times.txt").c_str(), "w"); }
+  if (!f) return;
+  double t = platform::time(); std::fprintf(f, "%7.2fs (+%6.2fs) %s\n", t - t0, t - tl, m); std::fflush(f); tl = t;
+}
+static void loadMark(const char* m) { loadLog(m); static const bool lp = std::getenv("HW_LOADPROF") != nullptr; static double tl = platform::time(); if (lp) { double t = platform::time(); std::printf("MARK +%.2fs %s\n", t - tl, m); std::fflush(stdout); tl = t; } }
 const char* g_loadMsg = "";
 float g_loadFrac = 0;
 void loadingFrame(const char* msg, float frac = -1) {
   { static double t0 = platform::time(), tl = t0; static const bool lp = std::getenv("HW_LOADPROF") != nullptr; if (lp && msg) { double t = platform::time(); std::printf("LOAD %6.2fs (+%.2fs) %s\n", t - t0, t - tl, msg); std::fflush(stdout); tl = t; } }
+  if (msg) loadLog(msg);
   if (msg) g_loadMsg = msg;
   if (frac >= 0) g_loadFrac = frac;
   int W = platform::width(), H = platform::height();
@@ -393,6 +403,10 @@ double g_clockK = 1.0;
 float g_gpuLoad = 0.0f;
 bool g_resAtFloor = true;   // forest triangle budget waits until dynamic resolution has nothing left to give
 // v1.0.1: the player's resolution ceiling: a preset height (480p..2160p, above the window = supersampling) or the % slider
+float baseScale();
+// v1.1.12: below this render scale the detail level starts dropping too (was only at the 480p floor, so detail never
+// moved while resolution sank to ~58%)
+float detailFloorScale() { float f480 = std::max(0.4f, 480.0f / std::max(1, platform::height())); return std::min(baseScale(), std::max(f480, 0.8f * baseScale())); }
 float baseScale() {
   int h = std::max(1, platform::height());
   if (g_settings.renderRes > 0) return std::max(0.4f, std::min(2.0f, g_settings.renderRes / (float)h));
@@ -708,11 +722,13 @@ void drawWorld(float dt, bool viewModel) {
   envmap::setCameraHeight(render::cam.pos.y);
   envmap::hazeCullDistance(render::cam.pos.x, render::cam.pos.z, dt);
   PROF(render::bindShadow());
-  PROF(grass::draw());
+  PROF(grass::draw());   // (moving this after the forest changed the ground's season uniforms: left first)
   PROF(forest::drawOpaque());
   PROF(props::draw());
   PROF(relics::draw());
   PROF(tracks::draw());
+  PROF(critters::draw());
+  PROF(secrets::drawRacks());
   PROF(secrets::draw());
   PROF(extras::draw());
   PROF(events::drawCaravan());
@@ -1201,7 +1217,9 @@ int main(int argc, char** argv) {
     int W = std::max(1, std::min(640, platform::width() / 3)), H = std::max(1, std::min(360, platform::height() / 3));
     scene.ensure(W, H);
     struct Spot { float x, z, yaw; };
+    loadMark("warm start");
     sky::warmPrograms();
+    loadMark("sky programs");
     grass::setPreload(true);
     Spot spots[3] = {{savePos.x, savePos.z, saveYaw}, {0, 14, 0}, {world::SHRINES.empty() ? 40 : world::SHRINES[0].x - 20, world::SHRINES.empty() ? -60 : world::SHRINES[0].z, 1.57f}};   // 3 spots cover every shader (was 5)
     for (auto& sp : spots) {
@@ -1214,17 +1232,22 @@ int main(int argc, char** argv) {
       forest::update(render::cam.pos, render::cam.forward());
       glBindFramebuffer(GL_FRAMEBUFFER, scene.drawFbo());
       glViewport(0, 0, scene.w, scene.h);
+      if (std::getenv("HW_LOADPROF")) { g_profMs.clear(); g_prof = true; }
       drawWorld(0.016f, false);
       glFinish();
+      if (g_prof) { for (auto& kv : g_profMs) if (kv.second > 200) std::printf("prof %8.1f ms %s\n", kv.second, kv.first.c_str()); g_prof = false; }
+      loadMark("warm day");
       pumpLoading();
       // second pass at night: compiles lamp/glow/firefly paths too
       float t0 = E.time;
       E.time = 22.0f; sky::update(0.016f); render::uploadFrame();
       drawWorld(0.016f, false);
       glFinish();
+      loadMark("warm night");
       E.time = t0;
     }
     grass::setPreload(false);
+    loadMark("warm done");
     sky::update(0.016f);
     // let the forest worker finish building the cells around the start position before play begins
     for (int i = 0; i < 40; i++) { player::updateCamera((float)W / H); forest::update(savePos, render::cam.forward()); pumpLoading(); std::this_thread::sleep_for(std::chrono::milliseconds(10)); }
@@ -1361,6 +1384,16 @@ int main(int argc, char** argv) {
       std::memcpy(render::frame.vpNoJit, vpPlain.m, 64);
       std::memcpy(render::frame.prevVP, (haveLast ? lastVP : vpPlain).m, 64);
       render::frame.taa[0] = haveLast ? lastWind : render::frame.season2[2];
+      {  // v1.1.5: eye adaptation. Under a thick canopy the eye opens up (up to +25%); step out into the open and
+        // the meadow glares for a moment, then settles. Opening up is slow (~3 s), closing down faster (~1 s).
+        static float expo = 1.0f;
+        const Vec3& cp = render::cam.pos;
+        float can = envmap::canopyAt(cp.x, cp.z) * (E.daylight > 0.3f ? 1.0f : 0.0f);
+        float want = 1.0f + 0.25f * can;
+        float rate = want > expo ? 0.35f : 1.0f;
+        expo += (want - expo) * std::min(1.0f, (float)dt * rate);
+        render::frame.taa[1] = expo;
+      }
       if (!skipWorld) { lastVP = vpPlain; lastWind = render::frame.season2[2]; haveLast = true; }
     }
     bool velOn = taa && scaled && !scene.samples && scene.vel;
@@ -1763,7 +1796,7 @@ void main(){
     }
     if (test) {
       for (auto& s : shots)
-        if (s.frame == frames + 1) s.setup();
+        if (s.frame == frames + 1) { s.setup(); if (const char* st = std::getenv("HW_SHOTTIME")) E.time = (float)std::atof(st); }
     }
 
     glEndQuery(GL_TIME_ELAPSED);
@@ -1841,7 +1874,7 @@ void main(){
         if (g_settings.eco) bms *= 0.5f;
         g_gpuLoad = fs.gpuMs > 0 ? gpuEff / bms : 0.0f; }   // v1.0.0: the triangle budget only bites when the GPU is really busy
       bool settled = playT > 15.0;
-      g_resAtFloor = !g_settings.adaptiveQuality || renderScale <= std::max(0.4f, 480.0f / std::max(1, platform::height())) + 0.01f;   // no tuning while shaders compile and impostors are captured after loading
+      g_resAtFloor = !g_settings.adaptiveQuality || renderScale <= detailFloorScale() + 0.01f;   // no tuning while shaders compile and impostors are captured after loading
       fs.cpuMs = (float)(cpuAcc / statFrames);
       fs.renderScale = g_settings.adaptiveQuality ? renderScale : baseScale();
       gpuAcc = cpuAcc = 0;
@@ -1890,7 +1923,7 @@ void main(){
         float budget = 1000.0f / (g_settings.fpsLimit > 0 ? std::min(g_settings.fpsLimit, platform::refreshRate()) : platform::refreshRate());
         if (g_settings.eco) budget *= 0.5f;
         float target = g_settings.fpsLimit > 0 ? std::min((float)g_settings.fpsLimit, (float)platform::refreshRate()) : (float)platform::refreshRate();
-        bool resLeft2 = g_settings.adaptiveQuality && renderScale > std::max(0.4f, 480.0f / std::max(1, platform::height())) + 0.01f;
+        bool resLeft2 = g_settings.adaptiveQuality && renderScale > detailFloorScale() + 0.01f;   // v1.1.12: detail shares the load once resolution is 20% down
         if (settled && !resLeft2 && gpuEff > budget * 0.85f) dSlow += (float)statT, dFast = 0;  // GPU busy (not a throttled CPU)
         else if (gpuEff < budget * 0.6f) dFast += (float)statT, dSlow = 0;
         else dSlow = dFast = 0;

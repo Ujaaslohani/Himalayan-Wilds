@@ -1,4 +1,5 @@
 // v1.1.0: footprints. The player and the animals leave prints in snow, in mud along the rivers and on wet ground
+#include <algorithm>
 // after rain. Prints are pressed shapes laid on the terrain; they fade (shrink) over two minutes.
 #include "tracks.h"
 #include "engine.h"
@@ -8,6 +9,7 @@
 #include "../render/render.h"
 #include "../render/sky.h"
 #include "../models/shape.h"
+#include "fx.h"
 #include <cmath>
 #include <vector>
 
@@ -61,6 +63,42 @@ void update(float dt) {
       g_left = !g_left;
       float side = g_left ? -0.13f : 0.13f;
       add(p.x + std::cos(yaw) * side, p.z - std::sin(yaw) * side, yaw, 0, s);
+    }
+  }
+  // v1.1.3: breath vapour on cold days: the player (every ~3 s, faster when running) and animals close by
+  {
+    float cold = std::max({season.snow * 1.4f, season.autumn * (1 - E.daylight) * 1.2f, season.spring * (1 - E.daylight) * 0.6f, sstep(p.y, 70.0f, 120.0f)});
+    static float bt = 0, at = 0;
+    bt -= dt; at -= dt;
+    if (cold > 0.35f && bt <= 0) {
+      bt = 3.2f;
+      Vec3 f(-std::sin(E.player.yaw), 0, -std::cos(E.player.yaw));
+      fx::breath(p + f * 0.32f + Vec3(0, -0.12f, 0), f);
+    }
+    if (cold > 0.35f && at <= 0) {
+      at = 0.9f;
+      float ap[3 * 8];
+      int an = wildlife::nearPositions(p.x, p.z, 25.0f, ap, 8);
+      for (int i = 0; i < an; i++) {
+        if (((int)(E.clock * 0.7f) + i) % 3) continue;   // each one breathes every few seconds, out of step
+        float y = world::getTerrainHeight(ap[i * 3], ap[i * 3 + 1]) + 1.05f;
+        fx::breath(Vec3(ap[i * 3], y, ap[i * 3 + 1]), Vec3(0, 0, 0));
+      }
+    }
+  }
+  {  // v1.1.10: after a cold night, mist lifts off the river in the early morning
+    static float mt = 0;
+    mt -= dt;
+    float morning = sstep(E.time, 5.0f, 6.0f) * (1 - sstep(E.time, 8.5f, 10.0f));
+    float coldN = std::max(season.autumn, std::max(season.spring * 0.7f, season.snow * 0.8f)) + 0.3f;
+    if (mt <= 0 && morning * coldN > 0.3f) {
+      mt = 0.5f;
+      for (int k = 0; k < 4; k++) {
+        float a = (float)E.clock * 7.13f + k * 1.9f, r = 6 + std::fmod((float)E.clock * 13.7f + k * 5.3f, 34.0f);
+        float x = p.x + std::cos(a) * r, z = p.z + std::sin(a) * r;
+        RiverHit rh = world::riverQuery(x, z);
+        if (rh.d < rh.hw * 0.9f) { fx::mist(Vec3(x, rh.wy + 0.2f, z)); break; }
+      }
     }
   }
   // animals near the player: a print pair whenever one has moved on from its last print

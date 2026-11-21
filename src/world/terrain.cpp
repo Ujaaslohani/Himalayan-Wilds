@@ -9,6 +9,7 @@
 namespace world {
 
 std::vector<Summit> SUMMITS;
+std::vector<Vec3> BACKDROP_PEAKS;   // v1.1.4: the highest snowy tops of the far range (spindrift plumes)
 std::vector<Road> ROADS;
 std::vector<Route> ROUTES;
 std::vector<Step> STEPS;
@@ -1572,7 +1573,7 @@ std::vector<std::vector<Vec3>> fenceLines() {
 }
 
 MeshData buildBackdrop() {
-  const int A = 720, Rn = 96;
+  const int A = 960, Rn = 128;   // v1.1.1: finer far mountains (was 720 x 96): the silhouettes stop reading as facets
   const float r0 = MAP_HALF - 2, r1 = 3600;
   static const Color forest = Color::hex("2f5a24"), rockDark = Color::hex("57534d"), rock = Color::hex("7f7b74"), rockWarm = Color::hex("8c7c6a"), snow = Color::hex("eef3f7");
   MeshData d;
@@ -1605,6 +1606,15 @@ MeshData buildBackdrop() {
       sn *= 0.75f + 0.25f * gul;  // snow lingers in the gullies, thinner on the ribs between
       Color c = forest.lerp(rockDark, sstep(y, 100, 150)).lerp(rk, sstep(y, 140, 200) * 0.7f).lerp(rockWarm, sstep(ridge, 0.3f, 0.7f) * 0.3f).lerp(snow, sn);
       col[k] = c.packSrgb();
+    }
+  }
+  {  // v1.1.4: pick the highest peak in each 30-degree sector of the far range
+    BACKDROP_PEAKS.clear();
+    for (int sct = 0; sct < 12; sct++) {
+      Vec3 best(0, -1e9f, 0);
+      for (int j = Rn / 5; j < Rn * 4 / 5; j++)
+        for (int i = sct * A / 12; i < (sct + 1) * A / 12; i++) { const Vec3& q = pos[(size_t)j * (A + 1) + i]; if (q.y > best.y) best = q; }
+      if (best.y > 300) BACKDROP_PEAKS.push_back(best);
     }
   }
   std::vector<Vec3> nrm(pos.size(), Vec3(0, 0, 0));

@@ -3,6 +3,7 @@
 #include "skills.h"
 #include "../render/water.h"
 #include "../render/envmap.h"
+#include "../render/sky.h"
 #include "extras.h"
 #include "../ui/screens.h"
 #include "events.h"
@@ -556,7 +557,13 @@ void update(float dt) {
         if (sf == envmap::SURF_STONE) audio::footstepStone();
         else if (sf == envmap::SURF_EARTH) { if (!P.crouching) audio::footstepStone(); }  // packed earth: firmer, duller step
         else if (onPath) audio::footstepStone();   // roads and trails: packed earth, never grass or leaves
-        else if (!P.crouching) audio::footstepGrass();
+        else if (!P.crouching) {   // v1.1.11: mud on the river bank and after rain, dry leaf litter in autumn woods
+          RiverHit rq = world::riverQuery(P.pos.x, P.pos.z);
+          bool mud = (rq.d < rq.hw + 4.0f) || sky::rainAmount() > 0.15f;
+          if (mud) audio::footstepMud();
+          else if (season.autumn > 0.5f && season.snow < 0.3f && envmap::canopyAt(P.pos.x, P.pos.z) > 0.3f) audio::footstepLeaves();
+          else audio::footstepGrass();
+        }
       }
       // brushing through undergrowth: with the step itself, only where plants actually crowd the ground
       if (!onFloor && !onPath && season.snow < 0.6f && forest::undergrowthNear(P.pos.x, P.pos.z, 0.9f))

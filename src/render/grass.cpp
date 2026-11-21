@@ -132,10 +132,10 @@ void main(){
   vec4 bk = textureLod(u_bake, g / (u_grid.z - 1.0), 0.0);
   vec3 gc = bk.rgb * bk.rgb;
   vec3 tip = gc * vec3(1.35, 1.3, 0.95) + vec3(0.02, 0.025, 0.0);
-  tip = mix(tip, vec3(0.62, 0.5, 0.22), 0.35 * u_dry + 0.25 * u_autumn);
+  tip = mix(tip, vec3(0.62, 0.5, 0.22), 0.35 * u_dry);   // v1.1.10: no autumn browning: only tree leaves turn
   tip = mix(tip, vec3(0.85, 0.88, 0.92), u_snow * 0.7);
   // v1.1.0: hoar frost on the blade tips in the cold low-sun hours of autumn and early winter
-  tip = mix(tip, vec3(0.78, 0.84, 0.9), (1.0 - smoothstep(0.22, 0.55, u_daylight)) * clamp(u_autumn * 0.6 + u_snow * 0.3, 0.0, 0.55) * (1.0 - u_rain));
+  tip = mix(tip, vec3(0.78, 0.84, 0.9), (1.0 - smoothstep(0.22, 0.55, u_daylight)) * clamp(u_autumn * 0.6 + u_snow * 0.3, 0.0, 0.55) * (1.0 - u_rain) * smoothstep(0.2, 0.6, u_sunDir.x));   // v1.1.1: mornings only (the sun is in the east)
   // per-clump hue and dry tips
   float clump = vnoise(p * 0.18);
   float patchN = vnoise(p * 0.045 + 3.7);   // broad drifts: sun-dried straw here, lush dark growth there
@@ -156,7 +156,16 @@ void main(){
   vec3 n = normalize(vec3(0.0, 1.0, 0.0) + (u_sunDir.xyz * vec3(1.0, 0.0, 1.0)) * 0.35);
   float sh = u_blade.w > 1.5 ? envLight(vec3(p.x, base, p.y)) : shadowAt(t > 0.5 ? wpos : vec3(p.x, base + 0.3, p.y), vec3(0.0, 1.0, 0.0));  // outer rings skip the shadow map
   sh *= canopyDapple(vec3(p.x, base, p.y), g_envVis);   // v0.9.89: grass under a closed canopy is shaded too
-  vec3 c = outColor(lambert(alb, n, sh) * (0.7 + 0.3 * t));
+  vec3 litG = lambert(alb, n, sh) * (0.7 + 0.3 * t);
+  {  // v1.1.10: morning dew: drops on the blade tips glint when you look towards the low sun
+    float dew = smoothstep(0.15, 0.55, u_sunDir.x) * (1.0 - smoothstep(0.25, 0.55, u_sunDir.y)) * (1.0 - u_snow) * (1.0 - u_rain) * (1.0 - smoothstep(5.0, 12.0, -vp.z));
+    if (dew > 0.01) {
+      vec3 Vg = normalize(u_camPos - wpos);
+      float back = pow(max(dot(-Vg, u_sunDir.xyz), 0.0), 6.0) + 0.3 * pow(max(dot(reflect(-u_sunDir.xyz, n), Vg), 0.0), 8.0);
+      litG += u_sunCol.rgb * step(0.86, fract(h.x * 91.7 + h.y * 37.3)) * smoothstep(0.7, 1.0, t) * back * dew * 1.6 * sh;
+    }
+  }
+  vec3 c = outColor(litG);
   v_col = c;
   if (u_tuft > 1.5) v_col = vec3(1.0, 0.0, 0.0);
   v_fog = vec4(fogTint(wpos), fogGround(wpos, -vp.z));

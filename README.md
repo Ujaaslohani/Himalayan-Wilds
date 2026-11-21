@@ -92,6 +92,9 @@ The game autosaves to `%APPDATA%\HimalayanWilds\save.json` on Windows and `~/.lo
 
 ## Credits
 
+- "wolf animated" (https://skfb.ly/o9ySP) by Paleo Modelist, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/) -> assets/animals/wolf.anim (changes: see assets/animals/LICENSE-Sketchfab.txt)
+- "Leopard Animation Run" (https://skfb.ly/onD6r) by GremorySaiyan, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/) -> assets/animals/leopard.anim (changes: see assets/animals/LICENSE-Sketchfab.txt)
+
 - "Medieval Market Stall Asset 4/4" (https://skfb.ly/oHnC8) by Uğur Yakışık, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/) -> assets/buildings/market_stall.hwb (changes: assets/buildings/LICENSE-Sketchfab.txt)
 - "Jalapeno Plant" (https://skfb.ly/69PBy) by zvanstone, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/) -> assets/models/Jalapeno.glb
 - Animal models: see assets/animals/LICENSE-Sketchfab.txt

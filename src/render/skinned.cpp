@@ -9,6 +9,7 @@
 #include <algorithm>
 
 namespace skinned {
+#include "../assets/assets.h"
 namespace {
 const char* SKIN_VS = R"(
 layout(location = 0) in vec3 a_pos;
@@ -16,7 +17,9 @@ layout(location = 1) in vec3 a_nrm;
 layout(location = 2) in vec4 a_col;
 layout(location = 3) in uvec4 a_joints;
 layout(location = 4) in vec4 a_w;
+layout(location = 5) in vec2 a_uv;
 uniform mat4 u_bones[52];
+out vec2 v_uv;
 out vec3 v_wpos;
 out vec3 v_nrm;
 out vec3 v_col;
@@ -25,6 +28,7 @@ out vec3 v_bpos;
 out float v_depth;
 void main(){
   v_bpos = a_pos;
+  v_uv = a_uv;
   mat4 sk = u_bones[a_joints.x] * a_w.x + u_bones[a_joints.y] * a_w.y + u_bones[a_joints.z] * a_w.z + u_bones[a_joints.w] * a_w.w;
   vec4 wp = sk * vec4(a_pos, 1.0);
   v_wpos = wp.xyz;
@@ -48,7 +52,11 @@ in vec3 v_col;
 in float v_eye;
 in vec3 v_bpos;
 in float v_depth;
+in vec2 v_uv;
+uniform sampler2D u_tex;
+uniform float u_hasTex;
 uniform float u_white;
+uniform float u_animWet;   // v1.1.11: soaked after wading / swimming
 uniform float u_spots;  // >0: leopard rosettes, cells per model unit
 out vec4 fragColor;
 vec3 hash3(vec3 p) {
@@ -81,7 +89,8 @@ void main(){
   vec3 n = normalize(v_nrm);
   if (!gl_FrontFacing) n = -n;
   vec3 alb = srgbToLinear(v_col);
-  if (u_spots > 0.0) {
+  if (u_hasTex > 0.5) alb = srgbToLinear(texture(u_tex, vec2(v_uv.x, 1.0 - v_uv.y)).rgb);   // v1.1.8: the model's own painted coat
+  if (u_spots > 0.0 && u_hasTex < 0.5) {
     float sat = max(max(v_col.r, v_col.g), v_col.b) - min(min(v_col.r, v_col.g), v_col.b);
     float m = smoothstep(0.08, 0.2, sat);           // tan coat only: the white belly and muzzle stay clean
     m *= 1.0 - v_eye;
@@ -91,9 +100,17 @@ void main(){
   alb = mix(alb, vec3(0.80, 0.78, 0.72) * (0.75 + 0.25 * alb.r / max(max(alb.r, alb.g), 0.02)), u_white);
   // v0.9.90: fur: soft tonal variation in the coat (darker saddle streaks, lighter tufts) so the low-poly colour
   // patches don't read as flat facets
-  if (v_eye < 0.5) alb *= mix(0.84, 1.1, vnoise(v_bpos.xz * 9.0 + v_bpos.y * 6.0) * 0.6 + vnoise(v_bpos.zy * 23.0) * 0.4);
+  if (v_eye < 0.5 && u_hasTex < 0.5) alb *= mix(0.84, 1.1, vnoise(v_bpos.xz * 9.0 + v_bpos.y * 6.0) * 0.6 + vnoise(v_bpos.zy * 23.0) * 0.4);
+  // v1.1.3: weather on the coat: rain darkens and slicks the fur (a soft sheen along the back), falling snow
+  // settles on the back, head and shoulders (upward-facing fur) in clumps
+  float wetF = max(u_wet * (1.0 - u_snow), u_animWet) * (1.0 - v_eye);
+  alb *= 1.0 - 0.38 * wetF;
+  float snowF = u_snow * clamp(u_rain * 2.5, 0.0, 1.0) * smoothstep(0.35, 0.8, n.y) * smoothstep(0.35, 0.65, vnoise(v_bpos.xz * 14.0 + v_bpos.y * 9.0)) * (1.0 - v_eye);
+  alb = mix(alb, vec3(0.82, 0.85, 0.9), snowF * 0.85);
   float sh = shadowAt(v_wpos, n);
   vec3 lit = lambert(alb, n, sh);
+  { vec3 Vw = normalize(u_camPos - v_wpos); vec3 Rw = reflect(-u_sunDir.xyz, n);
+    lit += (u_sunCol.rgb * pow(max(dot(Rw, Vw), 0.0), 24.0) * 0.2 * sh + u_hemiSky.rgb * 0.06 * pow(1.0 - max(dot(n, Vw), 0.0), 2.0)) * wetF; }
   // soft fur rim, like the hand-built animals
   vec3 V = normalize(u_camPos - v_wpos);
   float rim = pow(1.0 - max(dot(n, V), 0.0), 3.0);
@@ -179,6 +196,18 @@ void evaluate(const Model& m, int clipA, float tA, int clipB, float tB, float b,
   }
 }
 
+void aimHead(const Model& m, Pose& p, int nk, float yaw, float pitch) {
+  if (nk < 0 || nk >= std::min(m.nJ, MAX_BONES) || (std::fabs(yaw) < 1e-3f && std::fabs(pitch) < 1e-3f)) return;
+  Vec3 pv{p.world[nk].m[12], p.world[nk].m[13], p.world[nk].m[14]};
+  Quat q = Quat::axisAngle({0, 1, 0}, yaw) * Quat::axisAngle({1, 0, 0}, -pitch);
+  Mat4 R = Mat4::translate(pv) * Mat4::compose({0, 0, 0}, q, {1, 1, 1}) * Mat4::translate({-pv.x, -pv.y, -pv.z});
+  int nJ = std::min(m.nJ, MAX_BONES);
+  std::vector<char> in(nJ, 0);
+  in[nk] = 1;
+  for (int j = nk + 1; j < nJ; j++) if (m.parent[j] >= 0 && in[m.parent[j]]) in[j] = 1;   // parents come first
+  for (int j = nk; j < nJ; j++) if (in[j]) { p.world[j] = R * p.world[j]; p.skin[j] = p.world[j] * m.ibm[j]; }
+}
+
 const Model* load(const std::string& path) {
   auto it = g_models.find(path);
   if (it != g_models.end()) return it->second->ok ? it->second.get() : nullptr;
@@ -232,6 +261,11 @@ const Model* load(const std::string& path) {
     res->clips.push_back(std::move(C));
   }
   if (res->clips.empty()) return nullptr;
+  std::vector<float> UVs;   // v1.1.8: optional UV trailer
+  if (o + 8 <= b.size() && std::memcmp(b.data() + o, "UVT1", 4) == 0 && o + 4 + (size_t)nv * 8 <= b.size()) {
+    UVs.resize((size_t)nv * 2);
+    std::memcpy(UVs.data(), b.data() + o + 4, (size_t)nv * 8);
+  }
   // height of the rest pose (first frame of the first clip) for scaling to real-world size
   {
     Pose P;
@@ -262,6 +296,18 @@ const Model* load(const std::string& path) {
   glEnableVertexAttribArray(2); glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(Vtx), (void*)offsetof(Vtx, c));
   glEnableVertexAttribArray(3); glVertexAttribIPointer(3, 4, GL_UNSIGNED_BYTE, sizeof(Vtx), (void*)offsetof(Vtx, j));
   glEnableVertexAttribArray(4); glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, sizeof(Vtx), (void*)offsetof(Vtx, w));
+  if (!UVs.empty()) {
+    std::string tp = path.substr(0, path.size() - 5) + "_tex.png";
+    int tw = 0, th = 0;
+    std::vector<uint8_t> px = assets::loadImageRGBA(tp, tw, th);
+    if (!px.empty()) {
+      glGenBuffers(1, &res->uvbo);
+      glBindBuffer(GL_ARRAY_BUFFER, res->uvbo);
+      glBufferData(GL_ARRAY_BUFFER, UVs.size() * 4, UVs.data(), GL_STATIC_DRAW);
+      glEnableVertexAttribArray(5); glVertexAttribPointer(5, 2, GL_FLOAT, GL_FALSE, 8, (void*)0);
+      res->tex = uploadTextureRGBA(px.data(), tw, th, true, false, false, true).id;
+    }
+  }
   glBindVertexArray(0);
   gfx::addBufferBytes((long long)(V.size() * sizeof(Vtx) + I.size() * 4));
   res->nIdx = (int)I.size();
@@ -270,8 +316,9 @@ const Model* load(const std::string& path) {
 }
 
 static Shader* g_cur = nullptr;
-static float g_white = 0;
+static float g_white = 0, g_awet = 0;
 void setWhite(float w) { g_white = w; }
+void setWet(float w) { g_awet = w; }
 void beginDraw(bool shadow) {
   g_cur = shadow ? &render::program("skin_shadow", SKIN_VS, SKIN_FS, "#define SHADOW_PASS\n") : &render::program("skin", SKIN_VS, SKIN_FS);
   g_cur->use();
@@ -285,6 +332,9 @@ void draw(const Model& m, const Pose& p, const Mat4& xf, bool) {
   glUniformMatrix4fv(g_cur->loc("u_bones"), n, GL_FALSE, bones[0].m);
   glUniform1f(g_cur->loc("u_spots"), m.spots);
   glUniform1f(g_cur->loc("u_white"), g_white);
+  glUniform1f(g_cur->loc("u_animWet"), g_awet);
+  glUniform1f(g_cur->loc("u_hasTex"), m.tex ? 1.0f : 0.0f);
+  if (m.tex) { glActiveTexture(GL_TEXTURE23); glBindTexture(GL_TEXTURE_2D, m.tex); glActiveTexture(GL_TEXTURE0); glUniform1i(g_cur->loc("u_tex"), 23); }
   glBindVertexArray(m.vao);
   glDrawElements(GL_TRIANGLES, m.nIdx, GL_UNSIGNED_INT, nullptr);
   gfx::drawCalls++;
